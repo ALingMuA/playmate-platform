@@ -1,0 +1,43 @@
+spring:
+  application:
+    name: game-companion
+  profiles:
+    active: local
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+
+server:
+  port: 8080
+
+# 数据库连接由 application-local.yml 提供（本地敏感配置不入库）
+# 部署/演示环境通过环境变量覆盖：
+#   DB_URL、DB_USERNAME、DB_PASSWORD
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+app:
+  jwt:
+    # 生产环境必须通过环境变量 JWT_SECRET 覆盖
+    secret: ${JWT_SECRET:game-companion-dev-secret-change-me-0123456789abcdef}
+    expire-hours: 24
+  upload:
+    dir: ./upload
+    max-size-mb: 10
+  ai:
+    # AI 模型服务不是启动强制依赖；未配置时自动使用知识库 + 人工转接
+    model:
+      enabled: false
+
+logging:
+  level:
+    com.gameplay: debug
