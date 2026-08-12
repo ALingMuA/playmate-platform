@@ -26,5 +26,12 @@ logs/
 .env.*
 !.env.example
 
+# 本地数据库配置（含明文密码，不入库）
+application-local.yml
+application-local.*.yml
+
+# 本地上传文件
+upload/
+
 # 测试与覆盖率报告
 coverage/
