@@ -1,20 +1,19 @@
 package com.gameplay.common.exception;
 
-import com.gameplay.common.enums.ErrorCode;
-import com.gameplay.common.result.Result;
+import com.gameplay.common.api.ApiResponse;
+import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
-import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /**
- * 全局异常处理器：将业务异常、参数校验异常、权限异常和未知异常统一转换为
- * 标准 {@link Result} 响应。
+ * 全局异常处理：统一捕获业务异常、参数校验异常与未知异常，
+ * 返回 {@code code/message/data} 结构，不暴露堆栈、SQL 或密钥信息。
  */
 @Slf4j
 @RestControllerAdvice
@@ -22,47 +21,54 @@ public class GlobalExceptionHandler {
 
     /** 业务异常 */
     @ExceptionHandler(BusinessException.class)
-    public ResponseEntity<Result<Void>> handleBusiness(BusinessException ex) {
-        ErrorCode code = ex.getErrorCode();
-        return ResponseEntity.status(code.httpStatus)
-            .body(Result.fail(code, ex.getMessage()));
+    public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException e) {
+        ErrorCode ec = e.getErrorCode();
+        return ResponseEntity.status(ec.getHttpStatus())
+                .body(ApiResponse.error(ec.getCode(), e.getMessage()));
     }
 
-    /** 参数校验异常（@RequestBody + @Valid） */
+    /** @RequestBody DTO 校验失败 */
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Result<Void>> handleMethodArgumentNotValid(MethodArgumentNotValidException ex) {
-        String message = firstFieldError(ex);
-        return ResponseEntity.status(ErrorCode.VALIDATION_FAILED.httpStatus)
-            .body(Result.fail(ErrorCode.VALIDATION_FAILED, message));
+    public ResponseEntity<ApiResponse<Void>> handleValid(MethodArgumentNotValidException e) {
+        String detail = e.getBindingResult().getFieldErrors().stream()
+                .findFirst()
+                .map(this::formatFieldError)
+                .orElse(ErrorCode.VALIDATION_FAILED.getMessage());
+        return ResponseEntity.status(ErrorCode.VALIDATION_FAILED.getHttpStatus())
+                .body(ApiResponse.error(ErrorCode.VALIDATION_FAILED.getCode(), detail));
     }
 
-    /** 参数绑定异常（表单 / query 参数） */
-    @ExceptionHandler(BindException.class)
-    public ResponseEntity<Result<Void>> handleBind(BindException ex) {
-        String message = firstFieldError(ex);
-        return ResponseEntity.status(ErrorCode.VALIDATION_FAILED.httpStatus)
-            .body(Result.fail(ErrorCode.VALIDATION_FAILED, message));
+    /** 请求参数（@RequestParam/@PathVariable）校验失败 */
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConstraint(ConstraintViolationException e) {
+        return ResponseEntity.status(ErrorCode.VALIDATION_FAILED.getHttpStatus())
+                .body(ApiResponse.error(ErrorCode.VALIDATION_FAILED.getCode(), e.getMessage()));
     }
 
-    /** Spring Security 授权失败 */
+    /** 请求体 JSON 解析失败 */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnreadable(HttpMessageNotReadableException e) {
+        return ResponseEntity.status(ErrorCode.VALIDATION_FAILED.getHttpStatus())
+                .body(ApiResponse.error(ErrorCode.VALIDATION_FAILED.getCode(), "请求体格式错误"));
+    }
+
+    /** 方法级权限不足（@PreAuthorize） */
     @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<Result<Void>> handleAccessDenied(AccessDeniedException ex) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN)
-            .body(Result.fail(ErrorCode.PERMISSION_DENIED));
+    public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException e) {
+        return ResponseEntity.status(ErrorCode.PERMISSION_DENIED.getHttpStatus())
+                .body(ApiResponse.error(ErrorCode.PERMISSION_DENIED.getCode(), ErrorCode.PERMISSION_DENIED.getMessage()));
     }
 
     /** 未知异常兜底 */
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Result<Void>> handleUnknown(Exception ex) {
-        log.error("系统内部错误", ex);
-        return ResponseEntity.status(ErrorCode.SYSTEM_ERROR.httpStatus)
-            .body(Result.fail(ErrorCode.SYSTEM_ERROR));
+    public ResponseEntity<ApiResponse<Void>> handleUnknown(Exception e) {
+        log.error("系统内部错误", e);
+        return ResponseEntity.status(ErrorCode.SYSTEM_ERROR.getHttpStatus())
+                .body(ApiResponse.error(ErrorCode.SYSTEM_ERROR.getCode(), ErrorCode.SYSTEM_ERROR.getMessage()));
     }
 
-    private String firstFieldError(BindException ex) {
-        FieldError fieldError = ex.getBindingResult().getFieldError();
-        return fieldError == null
-            ? ErrorCode.VALIDATION_FAILED.message
-            : fieldError.getField() + " " + fieldError.getDefaultMessage();
+    private String formatFieldError(FieldError fe) {
+        return fe.getDefaultMessage() != null ? fe.getDefaultMessage()
+                : fe.getField() + " 校验失败";
     }
 }
