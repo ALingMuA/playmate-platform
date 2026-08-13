@@ -1,0 +1,6 @@
+# 集成测试专用配置（可提交）。
+# 敏感信息（数据库密码、JWT 密钥）通过 optional import 从本机 application-local.yml 读取；
+# 该文件不存在时测试会因缺少 DB 密码/JWT 密钥而失败，属预期行为（本机开发需先配置 application-local.yml）。
+spring:
+  config:
+    import: optional:classpath:application-local.yml

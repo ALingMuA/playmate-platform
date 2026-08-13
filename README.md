@@ -58,6 +58,14 @@ mvn spring-boot:run
 cd frontend && npm install && npm run dev
 ```
 
+### 4. 测试
+
+```bash
+cd backend && mvn test
+# 集成测试（AuthFlowTest 等）依赖本机 MySQL 与 application-local.yml；
+# 测试数据在事务中回滚，不污染数据库。
+```
+
 ## 初始账号（演示环境）
 
 | 账号 | 密码 | 角色 |
