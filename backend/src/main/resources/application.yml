@@ -1,42 +1,39 @@
+# 通用配置（可提交）。本机敏感配置见 application-local.yml（已 gitignore）
 spring:
   application:
-    name: game-companion
+    name: gameplay-backend
   profiles:
     active: local
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/game_companion_app?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
-    time-zone: Asia/Shanghai
+    time-zone: GMT+8
 
 server:
   port: 8080
 
-# 数据库连接由 application-local.yml 提供（本地敏感配置不入库）
-# 部署/演示环境通过环境变量覆盖：
-#   DB_URL、DB_USERNAME、DB_PASSWORD
-
+# MyBatis-Plus 配置
 mybatis-plus:
-  mapper-locations: classpath*:mapper/**/*.xml
   configuration:
     map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
   global-config:
     banner: false
     db-config:
+      # 逻辑删除统一字段（user 等表 deleted：0 否，1 是）
       logic-delete-field: deleted
       logic-delete-value: 1
       logic-not-delete-value: 0
 
-app:
-  jwt:
-    # 生产环境必须通过环境变量 JWT_SECRET 覆盖
-    secret: ${JWT_SECRET:game-companion-dev-secret-change-me-0123456789abcdef}
-    expire-hours: 24
-  upload:
-    dir: ./upload
-    max-size-mb: 10
-  ai:
-    # AI 模型服务不是启动强制依赖；未配置时自动使用知识库 + 人工转接
-    model:
-      enabled: false
+# JWT 配置（secret 必须至少 256 bit，仅本机文件提供，见 application-local.example.yml）
+jwt:
+  secret: ${JWT_SECRET:}
+  # 令牌有效期（秒），默认 24 小时
+  expire-seconds: 86400
 
 logging:
   level:

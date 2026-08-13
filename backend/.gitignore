@@ -1,0 +1,14 @@
+# Maven
+target/
+
+# 本机敏感配置
+application-local.yml
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# 日志与临时文件
+logs/
+*.log

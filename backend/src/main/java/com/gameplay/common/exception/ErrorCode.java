@@ -1,11 +1,17 @@
-package com.gameplay.common.enums;
+package com.gameplay.common.exception;
+
+import lombok.Getter;
 
 /**
- * 全局业务错误码（与《详细设计说明书》6.1 节保持一致）。
+ * 全局错误码枚举。
+ *
+ * <p>主体来自《详细设计说明书》6.1 全局错误码枚举；
+ * 末尾补充 auth 登录/注册流程必需的业务错误码（设计文档未列出）。</p>
  */
+@Getter
 public enum ErrorCode {
 
-    // ===== 认证 =====
+    // ===== 认证与令牌 =====
     AUTH_TOKEN_MISSING(401, "AUTH_TOKEN_MISSING", "未提供认证令牌"),
     AUTH_TOKEN_INVALID(401, "AUTH_TOKEN_INVALID", "认证令牌无效或过期"),
     AUTH_TOKEN_VERSION_MISMATCH(401, "AUTH_TOKEN_VERSION_MISMATCH", "账号登录状态已失效"),
@@ -17,7 +23,7 @@ public enum ErrorCode {
     PERMISSION_DATA_SCOPE_DENIED(403, "PERMISSION_DATA_SCOPE_DENIED", "无数据访问权限"),
     PERMISSION_AI_WRITE_FORBIDDEN(403, "PERMISSION_AI_WRITE_FORBIDDEN", "AI不具备业务写权限"),
 
-    // ===== 订单 =====
+    // ===== 订单与档期 =====
     ORDER_NOT_FOUND(404, "ORDER_NOT_FOUND", "订单不存在"),
     ORDER_STATUS_INVALID(409, "ORDER_STATUS_INVALID", "订单当前状态不允许该操作"),
     ORDER_ALREADY_PAID(409, "ORDER_ALREADY_PAID", "订单已支付"),
@@ -27,7 +33,7 @@ public enum ErrorCode {
     SLOT_CONFLICT(409, "SLOT_CONFLICT", "预约时段冲突"),
     SERVICE_NOT_AVAILABLE(422, "SERVICE_NOT_AVAILABLE", "服务当前不可预约"),
 
-    // ===== 钱包 =====
+    // ===== 钱包与幂等 =====
     WALLET_BALANCE_INSUFFICIENT(422, "WALLET_BALANCE_INSUFFICIENT", "虚拟余额不足"),
     WALLET_LEDGER_DUPLICATE(409, "WALLET_LEDGER_DUPLICATE", "资金流水重复"),
     WALLET_CONCURRENT_MODIFICATION(409, "WALLET_CONCURRENT_MODIFICATION", "钱包并发更新，请重试"),
@@ -48,11 +54,19 @@ public enum ErrorCode {
 
     // ===== 通用 =====
     VALIDATION_FAILED(400, "VALIDATION_FAILED", "请求参数校验失败"),
-    SYSTEM_ERROR(500, "SYSTEM_ERROR", "系统内部错误");
+    SYSTEM_ERROR(500, "SYSTEM_ERROR", "系统内部错误"),
 
-    public final int httpStatus;
-    public final String code;
-    public final String message;
+    // ===== 以下为 auth 业务补充（详细设计 6.1 未列出，登录/注册流程必需） =====
+    AUTH_CREDENTIAL_INVALID(401, "AUTH_CREDENTIAL_INVALID", "账号或密码错误"),
+    ACCOUNT_NOT_FOUND(404, "ACCOUNT_NOT_FOUND", "账号不存在"),
+    ACCOUNT_USERNAME_EXISTS(409, "ACCOUNT_USERNAME_EXISTS", "用户名已被占用"),
+    ACCOUNT_MOBILE_EXISTS(409, "ACCOUNT_MOBILE_EXISTS", "手机号已被占用"),
+    ACCOUNT_EMAIL_EXISTS(409, "ACCOUNT_EMAIL_EXISTS", "邮箱已被占用"),
+    AUTH_PASSWORD_INCORRECT(401, "AUTH_PASSWORD_INCORRECT", "原密码不正确");
+
+    private final int httpStatus;
+    private final String code;
+    private final String message;
 
     ErrorCode(int httpStatus, String code, String message) {
         this.httpStatus = httpStatus;
