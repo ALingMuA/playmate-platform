@@ -31,9 +31,9 @@
 └── frontend/                   Vue 3 前端（按路由分区）
     └── src/
         ├── router              用户端 / /companion / /support / /cs / /admin
-        ├── stores              Pinia（user 等）
-        ├── api                 axios 封装
-        └── views               各分区页面
+        ├── stores              Pinia（user：登录态 + 角色）
+        ├── api                 axios 封装（auth/catalog/companion/order）
+        └── views               各分区页面（陪玩师端五页 + 用户端订单页已实现）
 ```
 
 ## 快速启动
@@ -54,7 +54,7 @@ cd backend
 mvn spring-boot:run
 ```
 
-### 3. 前端（规划）
+### 3. 前端
 
 ```bash
 cd frontend && npm install && npm run dev
@@ -73,6 +73,8 @@ cd backend && mvn test
 | 账号 | 密码 | 角色 |
 |---|---|---|
 | `admin` | `Admin@123456` | 管理员（sql/data.sql 预置） |
+
+> 演示陪玩师流程：注册普通用户 → 陪玩师端提交入驻申请 → 管理员在后台审核通过（自动授予 COMPANION 角色）→ 重新登录后即可管理服务、档期与接单。
 
 ## 后端接口（已实现）
 

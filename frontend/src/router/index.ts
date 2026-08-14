@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { useUserStore } from '@/stores/user'
 
 /**
  * 前端路由分区（与《概要设计说明书》3.3 节一致）：
@@ -35,13 +36,13 @@ const routes: RouteRecordRaw[] = [
     path: '/orders',
     name: 'user-orders',
     component: () => import('@/views/user/OrdersView.vue'),
-    meta: { title: '我的订单' },
+    meta: { title: '我的订单', requiresAuth: true },
   },
   {
     path: '/profile',
     name: 'user-profile',
     component: () => import('@/views/user/ProfileView.vue'),
-    meta: { title: '个人中心' },
+    meta: { title: '个人中心', requiresAuth: true },
   },
 
   // ===== 陪玩师端 =====
@@ -51,7 +52,6 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, roles: ['COMPANION'] },
     children: [
       { path: '', redirect: '/companion/schedule' },
-      // 后续页面：入驻申请、服务管理、档期管理、接单履约、收益
       { path: 'application', name: 'companion-application', component: () => import('@/views/companion/ApplicationView.vue'), meta: { title: '入驻申请' } },
       { path: 'services', name: 'companion-services', component: () => import('@/views/companion/ServiceManageView.vue'), meta: { title: '服务管理' } },
       { path: 'schedule', name: 'companion-schedule', component: () => import('@/views/companion/ScheduleView.vue'), meta: { title: '档期管理' } },
@@ -88,8 +88,7 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: '', redirect: '/admin/dashboard' },
       { path: 'dashboard', name: 'admin-dashboard', component: () => import('@/views/admin/DashboardView.vue'), meta: { title: '数据概览' } },
-      // 后续页面：审核、用户、订单、投诉、客服账号、知识库、配置与日志
-      { path: 'audit', name: 'admin-audit', component: () => import('@/views/admin/AuditView.vue'), meta: { title: '审核' } },
+      { path: 'audit', name: 'admin-audit', component: () => import('@/views/admin/AuditView.vue'), meta: { title: '审核管理' } },
       { path: 'users', name: 'admin-users', component: () => import('@/views/admin/UsersView.vue'), meta: { title: '用户管理' } },
     ],
   },
@@ -114,11 +113,26 @@ const router = createRouter({
   routes,
 })
 
-// 路由守卫：未登录跳转登录页（骨架阶段仅占位，登录态判断后续接入 Pinia + JWT）
-router.beforeEach((to) => {
+// 路由守卫：登录态 + 角色校验（真实权限由后端执行）
+router.beforeEach(async (to) => {
   document.title = to.meta.title ? `${to.meta.title as string} - 游戏陪玩系统` : '游戏陪玩系统'
-  if (to.meta.requiresAuth) {
-    // TODO: 接入登录态与角色校验（stores/user.ts）
+  const userStore = useUserStore()
+  const requiresAuth = to.matched.some((r) => r.meta.requiresAuth)
+  const requiredRoles = to.matched.flatMap((r) => (r.meta.roles as string[] | undefined) ?? [])
+
+  if (requiresAuth && !userStore.token) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  if (requiresAuth && !userStore.user) {
+    // 刷新后恢复登录态
+    try {
+      await userStore.refreshUser()
+    } catch {
+      return { path: '/login', query: { redirect: to.fullPath } }
+    }
+  }
+  if (requiredRoles.length > 0 && !requiredRoles.some((role) => userStore.hasRole(role))) {
+    return { path: '/' }
   }
   return true
 })
