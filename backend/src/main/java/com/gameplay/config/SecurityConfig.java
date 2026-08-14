@@ -48,8 +48,9 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/register", "/api/auth/login", "/error").permitAll()
-                        // 目录公开接口：游戏、服务类型、标签（游客可浏览，概要设计 8.x 分组）
-                        .requestMatchers("/api/games/**", "/api/service-types/**", "/api/tags/**").permitAll()
+                        // 目录与公开浏览接口：游戏、服务类型、标签、可预约服务（游客可浏览，概要设计 8.x 分组）
+                        .requestMatchers("/api/games/**", "/api/service-types/**", "/api/tags/**",
+                                "/api/companion-services/**").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e
