@@ -20,6 +20,10 @@ const menus = [
       { path: '/admin/users', label: '用户管理' },
       { path: '/admin/reviews', label: '评价管理' },
       { path: '/admin/complaints', label: '投诉管理' },
+      { path: '/admin/announcements', label: '公告管理' },
+      { path: '/admin/ai-knowledge', label: 'AI 知识库' },
+      { path: '/admin/cs-accounts', label: '客服账号' },
+      { path: '/admin/operation-logs', label: '操作日志' },
     ]
 </script>
 

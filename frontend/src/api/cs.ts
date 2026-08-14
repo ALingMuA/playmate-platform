@@ -203,7 +203,8 @@ export interface CsAccountCreatePayload {
   csAccount: string
   csName: string
   contactMobile?: string
-  password: string
+  /** 初始密码（客服首次登录须修改，FR-C04） */
+  initialPassword: string
 }
 
 export function adminCsAccounts(
