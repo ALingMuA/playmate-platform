@@ -24,6 +24,8 @@ public class QueueItemView {
     private String sourceType;
     private Long relatedOrderId;
     private String transferReason;
+    /** 乐观锁版本号（领取时提交） */
+    private Integer version;
     /** 排队时长（秒） */
     private Long queueSeconds;
 
