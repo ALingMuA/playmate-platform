@@ -1,11 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 
 const activeMenu = computed(() => route.path)
+
+function handleLogout() {
+  userStore.logout()
+  router.push('/login')
+}
 
 const menus = [
       { path: '/admin/dashboard', label: '数据概览' },
@@ -27,7 +34,10 @@ const menus = [
     <el-container>
       <el-header class="header">
         <span>管理后台</span>
-        <el-button text @click="router.push('/')">返回用户端</el-button>
+        <div>
+          <el-button text @click="router.push('/')">返回用户端</el-button>
+          <el-button text type="danger" @click="handleLogout">退出登录</el-button>
+        </div>
       </el-header>
       <el-main>
         <router-view />
