@@ -2,22 +2,23 @@
 /**
  * 首页（FR-A08 公告查看）。
  *
- * <p>展示平台公告（仅已发布）与各端功能入口；游客可访问。</p>
+ * <p>Hero 欢迎区 + 平台公告（仅已发布）+ 功能入口；游客可访问。</p>
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { publicAnnouncements, type AnnouncementView } from '@/api/admin'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
+
+const user = computed(() => userStore.user)
 
 const entries = [
-  { path: '/games', label: '游戏列表', desc: '浏览平台游戏' },
-  { path: '/companions', label: '陪玩师列表', desc: '查找陪玩师与服务' },
-  { path: '/orders', label: '我的订单', desc: '预约、支付与确认' },
-  { path: '/support', label: '在线客服', desc: 'AI 客服与人工客服' },
-  { path: '/companion', label: '陪玩师端', desc: '入驻、档期、接单、收益' },
-  { path: '/cs', label: '客服工作台', desc: '会话队列与处理' },
-  { path: '/admin', label: '管理后台', desc: '审核、用户、配置' },
+  { path: '/games', label: '游戏列表', desc: '浏览平台游戏，挑选心仪项目', icon: '🎮' },
+  { path: '/companions', label: '查找陪玩师', desc: '按游戏筛选服务与档期', icon: '🤝' },
+  { path: '/orders', label: '我的订单', desc: '预约、支付、评价与投诉', icon: '📋' },
+  { path: '/support', label: '在线客服', desc: 'AI 客服即时答疑，可转人工', icon: '💬' },
 ]
 
 /** 平台公告（仅已发布，FR-A08） */
@@ -42,15 +43,25 @@ onMounted(async () => {
 
 <template>
   <div class="home">
-    <h1>游戏陪玩系统</h1>
-    <p class="sub">用户端 / 陪玩师端 / 客服工作台 / 管理后台</p>
+    <!-- Hero 欢迎区 -->
+    <div class="hero">
+      <h1 class="hero-title">游戏陪玩系统</h1>
+      <p class="hero-sub">
+        <template v-if="userStore.isLoggedIn">欢迎回来，{{ user?.nickname ?? user?.username }}！</template>
+        <template v-else>找陪玩、约大神、随时开黑 —— 注册登录即可预约服务</template>
+      </p>
+      <div class="hero-actions">
+        <el-button v-if="!userStore.isLoggedIn" type="primary" size="large" @click="router.push('/login')">
+          立即登录
+        </el-button>
+        <el-button type="success" size="large" @click="router.push('/games')">浏览游戏</el-button>
+      </div>
+    </div>
 
     <!-- 平台公告（FR-A08） -->
     <el-card v-if="announcements.length" class="announce-card" shadow="hover">
       <template #header>
-        <div class="announce-head">
-          <span>📢 平台公告</span>
-        </div>
+        <div class="announce-head">📢 平台公告</div>
       </template>
       <div v-for="a in announcements" :key="a.id" class="announce-item">
         <div class="announce-title-row" @click="expanded[a.id] = !expanded[a.id]">
@@ -61,9 +72,11 @@ onMounted(async () => {
       </div>
     </el-card>
 
+    <!-- 功能入口 -->
     <el-row :gutter="16">
-      <el-col v-for="e in entries" :key="e.path" :span="6">
+      <el-col v-for="e in entries" :key="e.path" :xs="24" :sm="12" :md="6">
         <el-card class="entry" shadow="hover" @click="router.push(e.path)">
+          <div class="entry-icon">{{ e.icon }}</div>
           <h3>{{ e.label }}</h3>
           <p>{{ e.desc }}</p>
         </el-card>
@@ -75,12 +88,30 @@ onMounted(async () => {
 <style scoped>
 .home {
   max-width: 960px;
-  margin: 40px auto;
-  padding: 0 16px;
+  margin: 0 auto;
+  padding: 32px 16px 48px;
 }
-.sub {
-  color: #909399;
+.hero {
+  text-align: center;
+  padding: 40px 16px 32px;
+  background: linear-gradient(135deg, #1f2d3d 0%, #3a5a80 100%);
+  border-radius: 12px;
   margin-bottom: 24px;
+}
+.hero-title {
+  color: #fff;
+  font-size: 32px;
+  margin: 0 0 12px;
+}
+.hero-sub {
+  color: #c0ccda;
+  font-size: 15px;
+  margin: 0 0 24px;
+}
+.hero-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
 }
 .announce-card {
   margin-bottom: 24px;
@@ -127,9 +158,18 @@ onMounted(async () => {
 .entry {
   cursor: pointer;
   margin-bottom: 16px;
+  border-radius: 8px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.entry:hover {
+  transform: translateY(-2px);
+}
+.entry-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
 }
 .entry h3 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
 }
 .entry p {
   color: #909399;
