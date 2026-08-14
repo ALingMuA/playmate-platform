@@ -67,8 +67,9 @@ public class AuthService {
         user.setUsername(req.getUsername());
         user.setPasswordHash(passwordEncoder.encode(req.getPassword()));
         user.setNickname(req.getNickname());
-        user.setMobile(req.getMobile() == null ? "" : req.getMobile());
-        user.setEmail(req.getEmail() == null ? "" : req.getEmail());
+        // 联系方式可选：空值存 NULL，避免 '' 与唯一索引冲突（uk_user_mobile/uk_user_email）
+        user.setMobile(StringUtils.hasText(req.getMobile()) ? req.getMobile() : null);
+        user.setEmail(StringUtils.hasText(req.getEmail()) ? req.getEmail() : null);
         user.setAvatarUrl("");
         user.setGender(0);
         user.setIntroduction("");
