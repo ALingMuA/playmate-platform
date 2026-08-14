@@ -26,8 +26,20 @@
 │       ├── auth                注册、登录、JWT、令牌版本、修改密码  ✅ 已完成
 │       ├── user                个人资料、账号安全            ✅ 已完成
 │       ├── catalog             游戏、服务类型、标签           ✅ 已完成
+│       ├── companion           入驻申请、主页、服务、档期、收益 ✅ 已完成
+│       ├── order               订单、模拟支付、取消、确认完成   ✅ 已完成
+│       ├── wallet              虚拟钱包与流水               ✅ 已完成
+│       ├── review              评价、投诉与仲裁              ✅ 已完成
+│       ├── file                本地文件上传与读取            ✅ 已完成
+│       ├── customer_service    客服账号、会话、消息、队列      ✅ 已完成
+│       ├── ai                  知识库、AI应答、转人工判断      ✅ 已完成
+│       ├── announcement        平台公告                     ✅ 已完成
+│       ├── notification        站内通知                     ✅ 已完成
+│       ├── favorite            陪玩师收藏                   ✅ 已完成
+│       ├── audit               操作审计日志                  ✅ 已完成
+│       ├── admin               审核、用户管理、数据概览        ✅ 已完成
 │       └── companion / order / review / customer_service /
-│           ai / admin / file / infrastructure               规划中
+│           infrastructure/websocket 客服实时消息（/ws/cs）    ✅ 已完成
 └── frontend/                   Vue 3 前端（按路由分区）
     └── src/
         ├── router              用户端 / /companion / /support / /cs / /admin
