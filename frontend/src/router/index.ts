@@ -92,6 +92,10 @@ const routes: RouteRecordRaw[] = [
       { path: 'users', name: 'admin-users', component: () => import('@/views/admin/UsersView.vue'), meta: { title: '用户管理' } },
       { path: 'reviews', name: 'admin-reviews', component: () => import('@/views/admin/ReviewsManageView.vue'), meta: { title: '评价管理' } },
       { path: 'complaints', name: 'admin-complaints', component: () => import('@/views/admin/ComplaintsManageView.vue'), meta: { title: '投诉管理' } },
+      { path: 'announcements', name: 'admin-announcements', component: () => import('@/views/admin/AnnouncementsManageView.vue'), meta: { title: '公告管理' } },
+      { path: 'ai-knowledge', name: 'admin-ai-knowledge', component: () => import('@/views/admin/AiKnowledgeManageView.vue'), meta: { title: 'AI 知识库' } },
+      { path: 'cs-accounts', name: 'admin-cs-accounts', component: () => import('@/views/admin/CsAccountsManageView.vue'), meta: { title: '客服账号' } },
+      { path: 'operation-logs', name: 'admin-operation-logs', component: () => import('@/views/admin/OperationLogsView.vue'), meta: { title: '操作日志' } },
     ],
   },
 
