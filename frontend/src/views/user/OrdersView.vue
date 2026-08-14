@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import { listGames, type Game } from '@/api/catalog'
@@ -18,6 +18,7 @@ import { uploadFile } from '@/api/file'
 import { createComplaint, reviewByOrder, submitReview } from '@/api/review'
 
 const route = useRoute()
+const router = useRouter()
 
 const activeTab = ref('ALL')
 const list = ref<Order[]>([])
@@ -55,12 +56,19 @@ async function load() {
   }
 }
 
+const VALID_TABS = ['ALL', 'PENDING_PAYMENT', 'WAITING_SERVICE', 'IN_SERVICE', 'WAITING_CONFIRMATION', 'COMPLETED', 'AFTER_SALES', 'CLOSED']
+
 function onTabChange() {
   page.value = 1
+  // Tab 状态同步到地址栏：刷新后保持当前筛选
+  router.replace({ query: { ...route.query, tab: activeTab.value === 'ALL' ? undefined : activeTab.value } })
   load()
 }
 
 onMounted(() => {
+  // 从地址栏恢复 Tab 状态
+  const qTab = route.query.tab as string
+  if (qTab && VALID_TABS.includes(qTab)) activeTab.value = qTab
   load()
   listGames().then((g) => {
     games.value = g
@@ -131,6 +139,8 @@ async function handleCreate() {
     })
     ElMessage.success('订单已创建，请尽快支付')
     createVisible.value = false
+    // 下单完成：清除地址栏中的预约参数，避免刷新后重复弹出下单框
+    router.replace({ query: { tab: activeTab.value === 'ALL' ? undefined : activeTab.value } })
     await load()
   } finally {
     creating.value = false
@@ -303,7 +313,12 @@ function fmtTime(t?: string): string {
 </script>
 
 <template>
-  <div class="orders-view">
+  <div class="page-container">
+    <div class="page-header">
+      <h1>我的订单</h1>
+      <p class="sub">预约、支付、评价与售后一站式管理</p>
+    </div>
+
     <div class="toolbar">
       <el-button type="primary" @click="openCreate">预约陪玩</el-button>
       <el-tabs v-model="activeTab" class="tabs" @tab-change="onTabChange">
@@ -318,8 +333,9 @@ function fmtTime(t?: string): string {
       </el-tabs>
     </div>
 
-    <el-card v-for="row in list" :key="row.id" class="order-card" shadow="hover" v-loading="loading">
-      <div class="order-head">
+    <div v-loading="loading" class="order-list">
+      <el-card v-for="row in list" :key="row.id" class="order-card" shadow="hover">
+        <div class="order-head">
         <el-tag :type="(statusMap[row.orderStatus]?.type as any) ?? 'info'" size="small">
           {{ statusMap[row.orderStatus]?.label ?? row.orderStatus }}
         </el-tag>
@@ -363,8 +379,9 @@ function fmtTime(t?: string): string {
           投诉
         </el-button>
       </div>
-    </el-card>
-    <el-empty v-if="!loading && list.length === 0" description="暂无订单" />
+      </el-card>
+      <el-empty v-if="!loading && list.length === 0" description="暂无订单，去挑选一位陪玩师吧" />
+    </div>
 
     <el-pagination
       class="pager"
@@ -476,9 +493,14 @@ function fmtTime(t?: string): string {
   align-items: center;
   gap: 12px;
   margin-bottom: 8px;
+  flex-wrap: wrap;
 }
 .tabs {
   flex: 1;
+  min-width: 280px;
+}
+.order-list {
+  min-height: 200px;
 }
 .order-card {
   margin-bottom: 12px;

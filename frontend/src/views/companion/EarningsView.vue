@@ -29,26 +29,26 @@ const ledgerTypeMap: Record<string, { label: string; type: 'success' | 'danger' 
 <template>
   <div class="earnings-view">
     <el-row :gutter="16" class="stat-row" v-if="overview">
-      <el-col :span="6">
-        <el-card shadow="hover">
+      <el-col :xs="12" :sm="12" :md="6">
+        <el-card shadow="hover" class="stat-card">
           <div class="stat-label">可用余额（元）</div>
           <div class="stat-value">¥{{ (overview.balanceCents / 100).toFixed(2) }}</div>
         </el-card>
       </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover">
+      <el-col :xs="12" :sm="12" :md="6">
+        <el-card shadow="hover" class="stat-card">
           <div class="stat-label">冻结金额（元）</div>
           <div class="stat-value">¥{{ (overview.frozenCents / 100).toFixed(2) }}</div>
         </el-card>
       </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover">
+      <el-col :xs="12" :sm="12" :md="6">
+        <el-card shadow="hover" class="stat-card">
           <div class="stat-label">累计已结算收益（元）</div>
           <div class="stat-value">¥{{ (overview.totalIncomeCents / 100).toFixed(2) }}</div>
         </el-card>
       </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover">
+      <el-col :xs="12" :sm="12" :md="6">
+        <el-card shadow="hover" class="stat-card">
           <div class="stat-label">完成订单 / 评分</div>
           <div class="stat-value">
             {{ overview.completedOrderCount }} 单
@@ -106,6 +106,9 @@ const ledgerTypeMap: Record<string, { label: string; type: 'success' | 'danger' 
 <style scoped>
 .stat-row {
   margin-bottom: 16px;
+}
+.stat-card {
+  margin-bottom: 12px;
 }
 .stat-label {
   color: #909399;

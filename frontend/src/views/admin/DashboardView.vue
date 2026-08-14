@@ -7,9 +7,12 @@
  */
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { adminStatsOverview, type StatsOverview } from '@/api/admin'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
 const stats = ref<StatsOverview | null>(null)
 const loading = ref(true)
 
@@ -40,6 +43,15 @@ function metricValue(key: (typeof metricCards)[number]['key']): string {
   const raw = stats.value[key]
   if (card && 'money' in card) return fmtMoney(raw)
   return String(raw ?? 0)
+}
+
+/** 待办跳转：客服队列需 CUSTOMER_SERVICE 角色，避免被路由守卫弹回首页 */
+function goTodo(path: string) {
+  if (path.startsWith('/cs') && !userStore.hasRole('CUSTOMER_SERVICE')) {
+    ElMessage.info('会话队列需在客服工作台处理，请使用客服账号登录')
+    return
+  }
+  router.push(path)
 }
 
 onMounted(async () => {
@@ -73,7 +85,7 @@ onMounted(async () => {
     <el-card class="todo-card" shadow="hover">
       <template #header>待办事项</template>
       <div class="todo-list">
-        <div v-for="item in todoItems" :key="item.key" class="todo-item" @click="router.push(item.path)">
+        <div v-for="item in todoItems" :key="item.key" class="todo-item" @click="goTodo(item.path)">
           <span class="todo-label">{{ item.label }}</span>
           <el-badge :value="stats?.[item.key] ?? 0" :max="999" :type="(stats?.[item.key] ?? 0) > 0 ? 'danger' : 'info'" />
           <el-button size="small" text type="primary">去处理 →</el-button>

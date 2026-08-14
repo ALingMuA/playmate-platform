@@ -122,9 +122,15 @@ onMounted(load)
       </div>
     </div>
 
-    <el-row :gutter="12" v-loading="loading">
-      <el-col v-for="day in weekDays" :key="day.format('YYYY-MM-DD')" :span="24 / 7" class="day-col">
-        <el-card shadow="hover" class="day-card" :class="{ today: day.isSame(dayjs(), 'day') }">
+    <div v-loading="loading" class="week-scroll">
+      <div class="week-grid">
+        <el-card
+          v-for="day in weekDays"
+          :key="day.format('YYYY-MM-DD')"
+          shadow="hover"
+          class="day-card"
+          :class="{ today: day.isSame(dayjs(), 'day') }"
+        >
           <template #header>
             <div class="day-header">
               <b>{{ ['日', '一', '二', '三', '四', '五', '六'][day.day()] }}</b>
@@ -143,8 +149,8 @@ onMounted(load)
             <el-empty v-if="itemsOf(day).length === 0" description="无档期" :image-size="40" />
           </div>
         </el-card>
-      </el-col>
-    </el-row>
+      </div>
+    </div>
 
     <el-dialog v-model="dialogVisible" :title="mode === 'AVAILABLE' ? '新增可约时段' : '设置临时不可约'" width="440px">
       <el-form :model="form" label-width="90px">
@@ -175,21 +181,32 @@ onMounted(load)
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 .week-nav {
   margin-left: auto;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
 }
 .week-range {
-  color: #909399;
+  color: var(--text-secondary);
   font-size: 13px;
 }
-.day-col {
-  min-width: 130px;
+/* 周视图：桌面 7 列等宽，小屏横向滚动（每列固定最小宽度保证可读） */
+.week-scroll {
+  overflow-x: auto;
+  min-height: 200px;
+  padding-bottom: 4px;
+}
+.week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(140px, 1fr));
+  gap: 12px;
 }
 .day-card.today {
-  border-color: #409eff;
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 1px var(--brand-primary);
 }
 .day-header {
   display: flex;

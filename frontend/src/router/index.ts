@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { startRouteProgress, stopRouteProgress } from '@/utils/progress'
 
 /**
  * 前端路由分区（与《概要设计说明书》3.3 节一致）：
@@ -48,6 +49,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/user/ProfileView.vue'),
         meta: { title: '个人中心', requiresAuth: true },
       },
+      {
+        path: 'support',
+        name: 'support',
+        component: () => import('@/views/support/SupportView.vue'),
+        meta: { title: '在线客服', requiresAuth: true },
+      },
     ],
   },
 
@@ -64,14 +71,6 @@ const routes: RouteRecordRaw[] = [
       { path: 'orders', name: 'companion-orders', component: () => import('@/views/companion/OrderFulfillView.vue'), meta: { title: '接单履约' } },
       { path: 'earnings', name: 'companion-earnings', component: () => import('@/views/companion/EarningsView.vue'), meta: { title: '收益' } },
     ],
-  },
-
-  // ===== 在线客服（用户侧） =====
-  {
-    path: '/support',
-    name: 'support',
-    component: () => import('@/views/support/SupportView.vue'),
-    meta: { title: '在线客服', requiresAuth: true },
   },
 
   // ===== 客服工作台 =====
@@ -123,10 +122,16 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+  // 滚动行为：前进/后退保持滚动位置，普通跳转回到顶部（锚点除外）
+  scrollBehavior(_to, _from, savedPosition) {
+    if (savedPosition) return savedPosition
+    return { top: 0 }
+  },
 })
 
 // 路由守卫：登录态 + 角色校验（真实权限由后端执行）
 router.beforeEach(async (to) => {
+  startRouteProgress()
   document.title = to.meta.title ? `${to.meta.title as string} - 游戏陪玩系统` : '游戏陪玩系统'
   const userStore = useUserStore()
   const requiresAuth = to.matched.some((r) => r.meta.requiresAuth)
@@ -147,6 +152,14 @@ router.beforeEach(async (to) => {
     return { path: '/' }
   }
   return true
+})
+
+router.afterEach(() => {
+  stopRouteProgress()
+})
+
+router.onError(() => {
+  stopRouteProgress()
 })
 
 export default router

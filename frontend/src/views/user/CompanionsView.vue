@@ -42,6 +42,8 @@ async function load() {
 
 function onGameChange() {
   page.value = 1
+  // 筛选条件同步到地址栏：刷新/分享链接后状态不丢失
+  router.replace({ query: gameId.value ? { gameId: String(gameId.value) } : {} })
   load()
 }
 
@@ -77,8 +79,9 @@ watch(
   () => route.query.gameId,
   (val) => {
     const qGameId = Number(val)
-    if (qGameId && qGameId !== gameId.value) {
-      gameId.value = qGameId
+    const next = qGameId && games.value.some((g) => g.id === qGameId) ? qGameId : undefined
+    if (next !== gameId.value) {
+      gameId.value = next
       page.value = 1
       load()
     }
@@ -87,7 +90,7 @@ watch(
 </script>
 
 <template>
-  <div class="companions-page">
+  <div class="page-container">
     <!-- 页头 -->
     <div class="page-header">
       <h1>陪玩师列表</h1>
@@ -96,14 +99,21 @@ watch(
 
     <!-- 筛选栏 -->
     <div class="filter-bar">
-      <el-select v-model="gameId" placeholder="全部游戏" clearable style="width: 220px" @change="onGameChange">
+      <el-select v-model="gameId" placeholder="全部游戏" clearable class="game-select" @change="onGameChange">
         <el-option v-for="g in games" :key="g.id" :label="g.gameName" :value="g.id" />
       </el-select>
       <el-button @click="onGameChange">查询</el-button>
     </div>
 
+    <!-- 加载骨架屏 -->
+    <div v-if="loading && services.length === 0" class="card-grid">
+      <el-card v-for="i in 6" :key="i" class="service-card">
+        <el-skeleton :rows="3" animated />
+      </el-card>
+    </div>
+
     <!-- 服务卡片网格 -->
-    <div v-loading="loading" class="card-grid">
+    <div v-else v-loading="loading" class="card-grid">
       <el-card v-for="s in services" :key="s.id" class="service-card" shadow="hover">
         <div class="card-head">
           <h3 class="title" :title="s.title">{{ s.title }}</h3>
@@ -141,22 +151,15 @@ watch(
 </template>
 
 <style scoped>
-.companions-page {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 24px 16px 48px;
-}
-.page-header h1 {
-  margin: 0 0 8px;
-}
-.sub {
-  color: #909399;
-  margin: 0 0 20px;
-}
 .filter-bar {
   display: flex;
   gap: 12px;
   margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.game-select {
+  width: 220px;
+  max-width: 100%;
 }
 .card-grid {
   display: grid;
