@@ -167,9 +167,68 @@ body {
   .el-message-box {
     width: 92vw;
   }
+  .page-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
   .page-header h1 {
     font-size: 20px;
   }
+  .toolbar > .el-input,
+  .toolbar > .el-select,
+  .filter-bar > .el-input,
+  .filter-bar > .el-select {
+    width: 100% !important;
+  }
+  .el-table {
+    font-size: 13px;
+  }
+}
+
+/* ==================== 页面与数据工作区 ==================== */
+
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.page-header h1 {
+  margin: 0;
+}
+.page-header .sub {
+  margin: 6px 0 0;
+}
+.toolbar,
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.query-card,
+.toolbar-card,
+.filter-bar {
+  margin-bottom: 16px;
+}
+.table-card,
+.el-table {
+  overflow: hidden;
+}
+.el-table {
+  --el-table-header-bg-color: #f8fafc;
+  --el-table-row-hover-bg-color: var(--brand-primary-lighter);
+}
+.el-table th.el-table__cell {
+  color: var(--text-regular);
+  font-weight: 600;
+}
+.el-form--inline .el-form-item {
+  margin-right: 12px;
+  margin-bottom: 10px;
 }
 
 /* ==================== 路由过渡动画 ==================== */

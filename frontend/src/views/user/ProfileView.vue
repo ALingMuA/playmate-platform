@@ -319,7 +319,7 @@ onMounted(load)
   margin-bottom: 16px;
 }
 .avatar {
-  background: linear-gradient(135deg, #409eff, #79bbff);
+  background: var(--brand-primary);
   color: #fff;
   font-size: 28px;
 }

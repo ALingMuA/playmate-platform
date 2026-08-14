@@ -5,6 +5,7 @@
  * <p>Hero 欢迎区 + 平台公告（仅已发布）+ 功能入口；游客可访问。</p>
  */
 import { computed, onMounted, ref } from 'vue'
+import { Bell, Document, Grid, Service, UserFilled } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { publicAnnouncements, type AnnouncementView } from '@/api/admin'
 import { useUserStore } from '@/stores/user'
@@ -15,10 +16,10 @@ const userStore = useUserStore()
 const user = computed(() => userStore.user)
 
 const entries = [
-  { path: '/games', label: '游戏列表', desc: '浏览平台游戏，挑选心仪项目', icon: '🎮' },
-  { path: '/companions', label: '查找陪玩师', desc: '按游戏筛选服务与档期', icon: '🤝' },
-  { path: '/orders', label: '我的订单', desc: '预约、支付、评价与投诉', icon: '📋' },
-  { path: '/support', label: '在线客服', desc: 'AI 客服即时答疑，可转人工', icon: '💬' },
+  { path: '/games', label: '浏览游戏', desc: '按游戏快速定位可预约服务', icon: Grid },
+  { path: '/companions', label: '查找陪玩师', desc: '按游戏筛选服务与档期', icon: UserFilled },
+  { path: '/orders', label: '我的订单', desc: '预约、支付、评价与投诉', icon: Document },
+  { path: '/support', label: '在线客服', desc: 'AI 客服即时答疑，可转人工', icon: Service },
 ]
 
 /** 平台公告（仅已发布，FR-A08） */
@@ -61,7 +62,7 @@ onMounted(async () => {
     <!-- 平台公告（FR-A08） -->
     <el-card v-if="announcements.length" class="announce-card" shadow="hover">
       <template #header>
-        <div class="announce-head">📢 平台公告</div>
+        <div class="announce-head"><el-icon><Bell /></el-icon><span>平台公告</span></div>
       </template>
       <div v-for="a in announcements" :key="a.id" class="announce-item">
         <div class="announce-title-row" @click="expanded[a.id] = !expanded[a.id]">
@@ -76,7 +77,7 @@ onMounted(async () => {
     <el-row :gutter="16">
       <el-col v-for="e in entries" :key="e.path" :xs="24" :sm="12" :md="6">
         <el-card class="entry" shadow="hover" @click="router.push(e.path)">
-          <div class="entry-icon">{{ e.icon }}</div>
+          <div class="entry-icon"><el-icon><component :is="e.icon" /></el-icon></div>
           <h3>{{ e.label }}</h3>
           <p>{{ e.desc }}</p>
         </el-card>
@@ -94,7 +95,7 @@ onMounted(async () => {
 .hero {
   text-align: center;
   padding: 40px 16px 32px;
-  background: linear-gradient(135deg, #1f2d3d 0%, #3a5a80 100%);
+  background: #1f2d3d;
   border-radius: 12px;
   margin-bottom: 24px;
 }
@@ -117,7 +118,13 @@ onMounted(async () => {
   margin-bottom: 24px;
 }
 .announce-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 600;
+}
+.announce-head .el-icon {
+  color: var(--brand-primary);
 }
 .announce-item {
   padding: 6px 0;
@@ -165,8 +172,15 @@ onMounted(async () => {
   transform: translateY(-2px);
 }
 .entry-icon {
-  font-size: 28px;
-  margin-bottom: 8px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 12px;
+  color: var(--brand-primary);
+  background: var(--brand-primary-lighter);
+  border-radius: var(--radius-small);
+  font-size: 20px;
+  place-items: center;
 }
 .entry h3 {
   margin: 0 0 6px;

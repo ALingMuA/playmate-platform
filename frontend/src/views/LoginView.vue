@@ -138,10 +138,7 @@ async function handleRegister() {
 .login-bg {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(ellipse 60% 50% at 20% 10%, rgba(121, 187, 255, 0.35), transparent),
-    radial-gradient(ellipse 50% 40% at 85% 85%, rgba(64, 158, 255, 0.3), transparent),
-    linear-gradient(135deg, #1f2d3d 0%, #3a5a80 100%);
+  background: #1f2d3d;
 }
 .login-card {
   position: relative;
