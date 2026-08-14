@@ -103,6 +103,15 @@ export function myOrders(status?: string, page = 1, size = 10): Promise<PageResu
   })
 }
 
+/** 取消订单（FR-U12）：未支付直接关闭，已支付（待接单/待服务）全额退款 */
+export function cancelOrder(id: number, reason?: string): Promise<Order> {
+  return request<Order>({
+    url: `/play-orders/${id}/cancel`,
+    method: 'post',
+    data: { reason: reason ?? '' },
+  })
+}
+
 /** 确认完成（FR-U13） */
 export function confirmOrder(id: number): Promise<Order> {
   return request<Order>({ url: `/play-orders/${id}/confirm`, method: 'post' })
