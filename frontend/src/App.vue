@@ -1,7 +1,9 @@
 <script setup lang="ts">
-// 根组件：仅承载路由出口，各业务分区布局由路由组件自行组织
+// 根组件：路由出口 + 全局路由加载进度条
+import { routeProgress } from '@/utils/progress'
 </script>
 
 <template>
+  <div class="route-progress" :class="{ active: routeProgress.active }" />
   <router-view />
 </template>

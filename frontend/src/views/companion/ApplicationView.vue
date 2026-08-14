@@ -16,6 +16,7 @@ const tags = ref<TagView[]>([])
 const applications = ref<Application[]>([])
 const profile = ref<CompanionProfile | null>(null)
 const submitting = ref(false)
+const loading = ref(true)
 
 const form = reactive({
   realName: '',
@@ -26,14 +27,19 @@ const form = reactive({
 })
 
 async function load() {
-  games.value = await listGames()
-  // 是否已是陪玩师
+  loading.value = true
   try {
-    profile.value = await myProfile()
-  } catch {
-    profile.value = null
+    games.value = await listGames()
+    // 是否已是陪玩师
+    try {
+      profile.value = await myProfile()
+    } catch {
+      profile.value = null
+    }
+    applications.value = await myApplications()
+  } finally {
+    loading.value = false
   }
-  applications.value = await myApplications()
 }
 
 onMounted(load)
@@ -105,7 +111,7 @@ const statusMap: Record<string, { label: string; type: 'info' | 'success' | 'dan
 </script>
 
 <template>
-  <div class="application-view">
+  <div class="application-view" v-loading="loading">
     <!-- 已通过：展示陪玩主页信息 -->
     <el-card v-if="profile" class="block">
       <template #header>我的陪玩主页</template>
@@ -202,6 +208,9 @@ const statusMap: Record<string, { label: string; type: 'info' | 'success' | 'dan
 </template>
 
 <style scoped>
+.application-view {
+  min-height: 240px;
+}
 .block {
   margin-bottom: 16px;
 }

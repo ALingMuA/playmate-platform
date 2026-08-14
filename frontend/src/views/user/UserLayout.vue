@@ -37,10 +37,15 @@ const workbenches = computed(() => {
   return items
 })
 
-function handleLogout() {
-  userStore.logout()
-  ElMessage.success('已退出登录')
-  router.push('/')
+/** 用户菜单命令：路径则跳转，logout 则退出 */
+function onUserCommand(cmd: string) {
+  if (cmd === 'logout') {
+    userStore.logout()
+    ElMessage.success('已退出登录')
+    router.push('/')
+    return
+  }
+  router.push(cmd)
 }
 
 function goLogin() {
@@ -73,7 +78,7 @@ function goLogin() {
           </template>
           <!-- 已登录：用户菜单 -->
           <template v-else>
-            <el-dropdown trigger="click" @command="(cmd: string) => router.push(cmd)">
+            <el-dropdown trigger="click" @command="onUserCommand">
               <div class="user-trigger">
                 <el-avatar :size="28" :src="user?.avatarUrl || undefined" class="user-avatar">
                   {{ user?.nickname?.charAt(0) ?? '游' }}
@@ -87,8 +92,8 @@ function goLogin() {
                   <el-dropdown-item v-for="w in workbenches" :key="w.path" :command="w.path" divided>
                     {{ w.label }}
                   </el-dropdown-item>
-                  <el-dropdown-item divided>
-                    <span class="logout-item" @click="handleLogout">退出登录</span>
+                  <el-dropdown-item command="logout" divided>
+                    <span class="logout-item">退出登录</span>
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -98,9 +103,13 @@ function goLogin() {
       </div>
     </header>
 
-    <!-- 页面内容 -->
+    <!-- 页面内容（路由过渡） -->
     <main class="content">
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <transition name="fade-slide" mode="out-in">
+          <component :is="Component" />
+        </transition>
+      </router-view>
     </main>
 
     <!-- 页脚 -->
@@ -115,21 +124,21 @@ function goLogin() {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f5f7fa;
+  background: var(--bg-page);
 }
 .header {
   position: sticky;
   top: 0;
   z-index: 100;
-  background: #fff;
-  border-bottom: 1px solid #e4e7ed;
-  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.06);
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  box-shadow: var(--shadow-card);
 }
 .header-inner {
   max-width: 1200px;
   margin: 0 auto;
   padding: 0 16px;
-  height: 56px;
+  height: var(--header-height);
   display: flex;
   align-items: center;
   gap: 24px;
@@ -140,6 +149,10 @@ function goLogin() {
   gap: 8px;
   cursor: pointer;
   flex-shrink: 0;
+  transition: opacity 0.2s;
+}
+.logo:hover {
+  opacity: 0.85;
 }
 .logo-icon {
   font-size: 22px;
@@ -147,7 +160,7 @@ function goLogin() {
 .logo-text {
   font-size: 17px;
   font-weight: 700;
-  color: #303133;
+  color: var(--text-primary);
   white-space: nowrap;
 }
 .nav {
@@ -156,24 +169,28 @@ function goLogin() {
   gap: 4px;
   flex: 1;
   overflow-x: auto;
+  scrollbar-width: none;
+}
+.nav::-webkit-scrollbar {
+  display: none;
 }
 .nav-item {
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: var(--radius-small);
   font-size: 14px;
-  color: #606266;
+  color: var(--text-regular);
   text-decoration: none;
   white-space: nowrap;
   transition: all 0.2s;
 }
 .nav-item:hover {
-  color: #409eff;
-  background: #ecf5ff;
+  color: var(--brand-primary);
+  background: var(--brand-primary-lighter);
 }
 .nav-item.active {
-  color: #409eff;
+  color: var(--brand-primary);
   font-weight: 600;
-  background: #ecf5ff;
+  background: var(--brand-primary-lighter);
 }
 .user-area {
   flex-shrink: 0;
@@ -184,27 +201,27 @@ function goLogin() {
   gap: 8px;
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-small);
   transition: background 0.2s;
 }
 .user-trigger:hover {
-  background: #f0f2f5;
+  background: var(--bg-hover);
 }
 .user-name {
   font-size: 14px;
-  color: #303133;
+  color: var(--text-primary);
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .user-avatar {
-  background: linear-gradient(135deg, #409eff, #79bbff);
+  background: linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light));
   color: #fff;
   flex-shrink: 0;
 }
 .logout-item {
-  color: #f56c6c;
+  color: var(--brand-danger);
 }
 .content {
   flex: 1;
@@ -214,8 +231,26 @@ function goLogin() {
   text-align: center;
   padding: 16px;
   font-size: 12px;
-  color: #c0c4cc;
-  background: #fff;
-  border-top: 1px solid #f0f2f5;
+  color: var(--text-placeholder);
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-lighter);
+}
+
+/* 移动端：压缩间距，隐藏用户名（保留头像），收窄导航项 */
+@media (max-width: 768px) {
+  .header-inner {
+    gap: 10px;
+    padding: 0 12px;
+  }
+  .logo-text {
+    display: none;
+  }
+  .nav-item {
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  .user-name {
+    display: none;
+  }
 }
 </style>

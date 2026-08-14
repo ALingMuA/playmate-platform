@@ -20,6 +20,12 @@ const form = reactive({
   email: '',
 })
 
+/** 登录成功后的回跳目标（仅允许站内路径，防开放重定向） */
+function safeRedirect(): string {
+  const redirect = route.query.redirect as string
+  return redirect && redirect.startsWith('/') ? redirect : '/'
+}
+
 async function handleLogin() {
   if (!form.account || !form.password) {
     ElMessage.warning('请输入账号和密码')
@@ -29,8 +35,7 @@ async function handleLogin() {
   try {
     await userStore.login(form.account, form.password)
     ElMessage.success('登录成功')
-    const redirect = (route.query.redirect as string) || '/'
-    router.push(redirect)
+    router.push(safeRedirect())
   } finally {
     loading.value = false
   }
@@ -57,18 +62,28 @@ async function handleRegister() {
     loading.value = false
   }
 }
-
 </script>
 
 <template>
   <div class="login-page">
+    <div class="login-bg" />
     <el-card class="login-card">
       <template #header>
-        <h2>游戏陪玩系统</h2>
-        <el-segmented v-model="mode" :options="[
-          { label: '登录', value: 'login' },
-          { label: '注册', value: 'register' },
-        ]" style="margin-top: 12px" @change="(v: string | number | boolean) => (mode = v as 'login' | 'register')" />
+        <div class="card-head">
+          <div class="brand-row">
+            <span class="brand-icon">🎮</span>
+            <h2 class="brand-name">游戏陪玩系统</h2>
+          </div>
+          <p class="brand-sub">找陪玩、约大神、随时开黑</p>
+          <el-segmented
+            v-model="mode"
+            :options="[
+              { label: '登录', value: 'login' },
+              { label: '注册', value: 'register' },
+            ]"
+            class="mode-switch"
+          />
+        </div>
       </template>
 
       <el-form v-if="mode === 'login'" :model="form" label-width="0" @submit.prevent="handleLogin">
@@ -81,6 +96,9 @@ async function handleRegister() {
         <el-button type="primary" size="large" class="action-btn" :loading="loading" @click="handleLogin">
           登录
         </el-button>
+        <div class="back-row">
+          <el-button text type="primary" @click="router.push('/')">返回首页</el-button>
+        </div>
       </el-form>
 
       <el-form v-else :model="form" label-width="80px" @submit.prevent="handleRegister">
@@ -109,16 +127,57 @@ async function handleRegister() {
 
 <style scoped>
 .login-page {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100vh;
-  background: #f0f2f5;
+  min-height: 100vh;
+  padding: 24px 12px;
+  overflow: hidden;
+}
+.login-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 20% 10%, rgba(121, 187, 255, 0.35), transparent),
+    radial-gradient(ellipse 50% 40% at 85% 85%, rgba(64, 158, 255, 0.3), transparent),
+    linear-gradient(135deg, #1f2d3d 0%, #3a5a80 100%);
 }
 .login-card {
-  width: 420px;
+  position: relative;
+  width: min(420px, 100%);
+  border-radius: var(--radius-large);
+  box-shadow: 0 12px 40px rgba(0, 21, 41, 0.25);
+}
+.card-head {
+  text-align: center;
+}
+.brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.brand-icon {
+  font-size: 26px;
+}
+.brand-name {
+  margin: 0;
+  font-size: 22px;
+}
+.brand-sub {
+  margin: 6px 0 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.mode-switch {
+  width: 100%;
 }
 .action-btn {
   width: 100%;
+}
+.back-row {
+  margin-top: 8px;
+  text-align: center;
 }
 </style>
