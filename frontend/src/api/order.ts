@@ -27,6 +27,7 @@ export interface Order {
     | 'IN_SERVICE'
     | 'WAITING_CONFIRMATION'
     | 'COMPLETED'
+    | 'AFTER_SALES'
     | 'CLOSED'
   payExpireAt?: string
   acceptExpireAt?: string

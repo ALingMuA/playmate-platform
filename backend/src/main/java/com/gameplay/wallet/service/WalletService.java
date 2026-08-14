@@ -140,6 +140,57 @@ public class WalletService {
                 operatorId);
     }
 
+    /**
+     * 部分退款（FR-M18 PARTIAL_REFUND）：退还指定金额给用户，业务号 REFUND:订单号:PARTIAL 幂等。
+     */
+    @Transactional
+    public void refundAmount(PlayOrder order, long amountCents, String reason, Long operatorId) {
+        if (amountCents <= 0 || amountCents > order.getTotalAmountCents()) {
+            throw new BusinessException(ErrorCode.COMPLAINT_REFUND_AMOUNT_INVALID);
+        }
+        String businessNo = "REFUND:" + order.getOrderNo() + ":PARTIAL";
+        if (walletLedgerMapper.selectByBusinessNo(businessNo) != null) {
+            return; // 幂等
+        }
+        WalletAccount wallet = ensureWalletForUpdate(order.getUserId());
+        int rows = walletAccountMapper.increaseBalanceWithVersion(
+                wallet.getId(), wallet.getVersion(), amountCents);
+        if (rows != 1) {
+            throw new BusinessException(ErrorCode.WALLET_CONCURRENT_MODIFICATION);
+        }
+        insertLedger(businessNo, order.getUserId(), order.getId(), LedgerType.REFUND, LedgerDirection.IN,
+                amountCents, wallet, "投诉部分退款：" + reason, operatorId);
+    }
+
+    /**
+     * 扣回已结算收益（FR-M18 FULL_REFUND，订单已结算时）：从陪玩师钱包扣回订单金额。
+     * <p>业务号 SETTLE_BACK:订单号 幂等；余额不足时按可用余额扣回并如实记录流水备注。</p>
+     */
+    @Transactional
+    public void deductSettledIncome(PlayOrder order, String reason, Long operatorId) {
+        String businessNo = "SETTLE_BACK:" + order.getOrderNo();
+        if (walletLedgerMapper.selectByBusinessNo(businessNo) != null) {
+            return; // 幂等
+        }
+        WalletAccount wallet = ensureWalletForUpdate(order.getCompanionUserId());
+        long actual = Math.min(order.getTotalAmountCents(), wallet.getBalanceCents());
+        if (actual <= 0) {
+            return; // 陪玩师无可扣余额，演示环境允许
+        }
+        int rows = walletAccountMapper.decreaseBalanceWithVersion(
+                wallet.getId(), wallet.getVersion(), actual);
+        if (rows != 1) {
+            throw new BusinessException(ErrorCode.WALLET_CONCURRENT_MODIFICATION);
+        }
+        insertLedger(businessNo, order.getCompanionUserId(), order.getId(), LedgerType.SETTLEMENT, LedgerDirection.OUT,
+                actual, wallet, "投诉全额退款扣回收益：" + reason, operatorId);
+    }
+
+    /** 订单是否已完成收益结算（存在 SETTLE 流水） */
+    public boolean isSettled(PlayOrder order) {
+        return walletLedgerMapper.selectByBusinessNo("SETTLE:" + order.getOrderNo()) != null;
+    }
+
     /** 我的钱包概览 */
     public WalletView view(Long userId) {
         WalletAccount wallet = getOrCreate(userId);

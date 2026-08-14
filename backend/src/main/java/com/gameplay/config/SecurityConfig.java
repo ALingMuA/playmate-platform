@@ -51,6 +51,9 @@ public class SecurityConfig {
                         // 目录与公开浏览接口：游戏、服务类型、标签、可预约服务（游客可浏览，概要设计 8.x 分组）
                         .requestMatchers("/api/games/**", "/api/service-types/**", "/api/tags/**",
                                 "/api/companion-services/**").permitAll()
+                        // 评价展示与文件读取公开（URL 含 UUID 不可枚举；上传仍需登录）
+                        .requestMatchers("/api/reviews/companion/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/files/**").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e

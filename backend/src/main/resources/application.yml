@@ -35,6 +35,16 @@ jwt:
   # 令牌有效期（秒），默认 24 小时
   expire-seconds: 86400
 
+# 文件存储（概要设计 4.7：本地磁盘实现，可替换为对象存储）
+file:
+  storage:
+    # 存储根目录（相对后端工作目录）
+    dir: ${FILE_STORAGE_DIR:./uploads}
+    # 单文件大小上限（MB）
+    max-size-mb: 5
+    # 允许的扩展名（上传校验白名单）
+    allowed-extensions: jpg,jpeg,png,gif,webp
+
 logging:
   level:
     com.gameplay: debug
