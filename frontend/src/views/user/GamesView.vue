@@ -137,7 +137,7 @@ onMounted(loadData)
 }
 .game-cover {
   height: 140px;
-  background: linear-gradient(135deg, #1f2d3d, #3a5a80);
+  background: #1f2d3d;
   display: flex;
   align-items: center;
   justify-content: center;

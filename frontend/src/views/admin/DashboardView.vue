@@ -6,6 +6,7 @@
  * 以及待审核申请、待处理投诉、等待人工会话等待办事项，可点击跳转处理。</p>
  */
 import { onMounted, ref } from 'vue'
+import { Collection, Document, Money, Trophy, UserFilled, User } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { adminStatsOverview, type StatsOverview } from '@/api/admin'
@@ -22,12 +23,12 @@ function fmtMoney(cents: number): string {
 
 /** 核心指标卡片 */
 const metricCards = [
-  { key: 'userCount', label: '用户总数', icon: '👤' },
-  { key: 'companionCount', label: '陪玩师数', icon: '🎮' },
-  { key: 'serviceCount', label: '服务项目', icon: '📦' },
-  { key: 'orderCount', label: '订单总数', icon: '📋' },
-  { key: 'todayOrderCount', label: '今日订单', icon: '🔥' },
-  { key: 'totalAmountCents', label: '模拟交易额', icon: '💰', money: true },
+  { key: 'userCount', label: '用户总数', icon: UserFilled },
+  { key: 'companionCount', label: '陪玩师数', icon: User },
+  { key: 'serviceCount', label: '服务项目', icon: Collection },
+  { key: 'orderCount', label: '订单总数', icon: Document },
+  { key: 'todayOrderCount', label: '今日订单', icon: Trophy },
+  { key: 'totalAmountCents', label: '模拟交易额', icon: Money, money: true },
 ] as const
 
 /** 待办事项 */
@@ -74,7 +75,7 @@ onMounted(async () => {
     <el-row :gutter="16">
       <el-col v-for="card in metricCards" :key="card.key" :xs="12" :sm="8" :md="4">
         <el-card class="metric-card" shadow="hover">
-          <div class="metric-icon">{{ card.icon }}</div>
+          <div class="metric-icon"><el-icon><component :is="card.icon" /></el-icon></div>
           <div class="metric-value">{{ metricValue(card.key) }}</div>
           <div class="metric-label">{{ card.label }}</div>
         </el-card>
@@ -109,8 +110,15 @@ onMounted(async () => {
   border-radius: 8px;
 }
 .metric-icon {
-  font-size: 28px;
-  margin-bottom: 8px;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 10px;
+  color: var(--brand-primary);
+  background: var(--brand-primary-lighter);
+  border-radius: var(--radius-small);
+  font-size: 20px;
+  place-items: center;
 }
 .metric-value {
   font-size: 22px;

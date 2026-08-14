@@ -6,9 +6,10 @@
  * 右侧按登录态展示登录按钮或用户菜单（个人中心、角色工作台入口、退出）。
  * 工作台入口按角色显示：陪玩师端（COMPANION）、客服工作台（CUSTOMER_SERVICE）、管理后台（ADMIN）。</p>
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Document, Grid, HomeFilled, Menu, Service, Trophy, UserFilled } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
@@ -27,6 +28,20 @@ const activeMenu = computed(() => {
 
 const isLoggedIn = computed(() => userStore.isLoggedIn)
 const user = computed(() => userStore.user)
+const mobileNavVisible = ref(false)
+
+const navItems = [
+  { path: '/', label: '首页', icon: HomeFilled },
+  { path: '/games', label: '游戏', icon: Grid },
+  { path: '/companions', label: '陪玩师', icon: UserFilled },
+  { path: '/orders', label: '我的订单', icon: Document },
+  { path: '/support', label: '在线客服', icon: Service },
+]
+
+function navigate(path: string) {
+  mobileNavVisible.value = false
+  router.push(path)
+}
 
 /** 按角色展示的工作台入口 */
 const workbenches = computed(() => {
@@ -59,17 +74,22 @@ function goLogin() {
     <header class="header">
       <div class="header-inner">
         <div class="logo" @click="router.push('/')">
-          <span class="logo-icon">🎮</span>
+          <el-icon class="logo-icon"><Trophy /></el-icon>
           <span class="logo-text">游戏陪玩系统</span>
         </div>
 
-        <nav class="nav">
-          <router-link to="/" class="nav-item" :class="{ active: activeMenu === '/' }">首页</router-link>
-          <router-link to="/games" class="nav-item" :class="{ active: activeMenu === '/games' }">游戏</router-link>
-          <router-link to="/companions" class="nav-item" :class="{ active: activeMenu === '/companions' }">陪玩师</router-link>
-          <router-link to="/orders" class="nav-item" :class="{ active: activeMenu === '/orders' }">我的订单</router-link>
-          <router-link to="/support" class="nav-item" :class="{ active: activeMenu === '/support' }">在线客服</router-link>
+        <nav class="nav" aria-label="主导航">
+          <router-link v-for="item in navItems" :key="item.path" :to="item.path" class="nav-item"
+            :class="{ active: activeMenu === item.path }">
+            <el-icon><component :is="item.icon" /></el-icon>
+            <span>{{ item.label }}</span>
+          </router-link>
         </nav>
+        <el-tooltip content="打开导航" placement="bottom">
+          <el-button text circle class="mobile-menu-btn" @click="mobileNavVisible = true">
+            <el-icon><Menu /></el-icon>
+          </el-button>
+        </el-tooltip>
 
         <div class="user-area">
           <!-- 未登录：登录按钮 -->
@@ -102,6 +122,17 @@ function goLogin() {
         </div>
       </div>
     </header>
+
+    <el-drawer v-model="mobileNavVisible" direction="ltr" size="260px" :with-header="false" class="mobile-nav-drawer">
+      <div class="drawer-brand"><el-icon><Trophy /></el-icon><span>游戏陪玩系统</span></div>
+      <nav class="drawer-nav" aria-label="移动端主导航">
+        <button v-for="item in navItems" :key="item.path" class="drawer-nav-item"
+          :class="{ active: activeMenu === item.path }" type="button" @click="navigate(item.path)">
+          <el-icon><component :is="item.icon" /></el-icon>
+          <span>{{ item.label }}</span>
+        </button>
+      </nav>
+    </el-drawer>
 
     <!-- 页面内容（路由过渡） -->
     <main class="content">
@@ -156,6 +187,7 @@ function goLogin() {
 }
 .logo-icon {
   font-size: 22px;
+  color: var(--brand-primary);
 }
 .logo-text {
   font-size: 17px;
@@ -216,12 +248,54 @@ function goLogin() {
   white-space: nowrap;
 }
 .user-avatar {
-  background: linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light));
+  background: var(--brand-primary);
   color: #fff;
   flex-shrink: 0;
 }
 .logout-item {
   color: var(--brand-danger);
+}
+.mobile-menu-btn {
+  display: none;
+}
+.drawer-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--header-height);
+  padding: 0 20px;
+  color: var(--text-primary);
+  font-weight: 700;
+  border-bottom: 1px solid var(--border-color);
+}
+.drawer-brand .el-icon {
+  color: var(--brand-primary);
+  font-size: 20px;
+}
+.drawer-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 12px;
+}
+.drawer-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  color: var(--text-regular);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-small);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.drawer-nav-item:hover,
+.drawer-nav-item.active {
+  color: var(--brand-primary);
+  background: var(--brand-primary-lighter);
 }
 .content {
   flex: 1;
@@ -245,9 +319,11 @@ function goLogin() {
   .logo-text {
     display: none;
   }
-  .nav-item {
-    padding: 6px 10px;
-    font-size: 13px;
+  .nav {
+    display: none;
+  }
+  .mobile-menu-btn {
+    display: inline-flex;
   }
   .user-name {
     display: none;
