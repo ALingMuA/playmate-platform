@@ -13,36 +13,42 @@ import { useUserStore } from '@/stores/user'
  * 路由守卫仅改善体验；真实权限判断由后端 Spring Security 与数据范围校验执行。
  */
 const routes: RouteRecordRaw[] = [
-  // ===== 用户端 =====
+  // ===== 用户端（统一顶部导航布局） =====
   {
     path: '/',
-    name: 'user-home',
-    component: () => import('@/views/user/HomeView.vue'),
-    meta: { title: '首页' },
-  },
-  {
-    path: '/games',
-    name: 'user-games',
-    component: () => import('@/views/user/GamesView.vue'),
-    meta: { title: '游戏' },
-  },
-  {
-    path: '/companions',
-    name: 'user-companions',
-    component: () => import('@/views/user/CompanionsView.vue'),
-    meta: { title: '陪玩师' },
-  },
-  {
-    path: '/orders',
-    name: 'user-orders',
-    component: () => import('@/views/user/OrdersView.vue'),
-    meta: { title: '我的订单', requiresAuth: true },
-  },
-  {
-    path: '/profile',
-    name: 'user-profile',
-    component: () => import('@/views/user/ProfileView.vue'),
-    meta: { title: '个人中心', requiresAuth: true },
+    component: () => import('@/views/user/UserLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'user-home',
+        component: () => import('@/views/user/HomeView.vue'),
+        meta: { title: '首页' },
+      },
+      {
+        path: 'games',
+        name: 'user-games',
+        component: () => import('@/views/user/GamesView.vue'),
+        meta: { title: '游戏' },
+      },
+      {
+        path: 'companions',
+        name: 'user-companions',
+        component: () => import('@/views/user/CompanionsView.vue'),
+        meta: { title: '陪玩师' },
+      },
+      {
+        path: 'orders',
+        name: 'user-orders',
+        component: () => import('@/views/user/OrdersView.vue'),
+        meta: { title: '我的订单', requiresAuth: true },
+      },
+      {
+        path: 'profile',
+        name: 'user-profile',
+        component: () => import('@/views/user/ProfileView.vue'),
+        meta: { title: '个人中心', requiresAuth: true },
+      },
+    ],
   },
 
   // ===== 陪玩师端 =====

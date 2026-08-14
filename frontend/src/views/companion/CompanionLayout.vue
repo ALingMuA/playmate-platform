@@ -1,4 +1,7 @@
 <script setup lang="ts">
+/**
+ * 陪玩师端布局。
+ */
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
@@ -25,7 +28,7 @@ const menus = [
 
 <template>
   <el-container class="layout">
-    <el-aside width="220px" class="aside">
+    <el-aside width="200px" class="aside">
       <div class="brand">陪玩师端</div>
       <el-menu :default-active="activeMenu" router class="menu">
         <el-menu-item v-for="m in menus" :key="m.path" :index="m.path">
@@ -35,13 +38,18 @@ const menus = [
     </el-aside>
     <el-container>
       <el-header class="header">
-        <span>陪玩师端</span>
+        <div class="header-left">
+          <span class="header-title">陪玩师端</span>
+          <el-tag size="small" effect="plain" v-if="userStore.user">
+            {{ userStore.user.nickname }}
+          </el-tag>
+        </div>
         <div>
           <el-button text @click="router.push('/')">返回用户端</el-button>
           <el-button text type="danger" @click="handleLogout">退出登录</el-button>
         </div>
       </el-header>
-      <el-main>
+      <el-main class="main">
         <router-view />
       </el-main>
     </el-container>
@@ -53,5 +61,8 @@ const menus = [
 .aside { background: #001529; }
 .brand { color: #fff; font-size: 16px; font-weight: 600; text-align: center; padding: 16px 0; }
 .menu { border-right: none; }
-.header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e4e7ed; }
+.header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e4e7ed; background: #fff; }
+.header-left { display: flex; align-items: center; gap: 12px; }
+.header-title { font-weight: 600; }
+.main { background: #f5f7fa; }
 </style>
