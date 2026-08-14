@@ -199,6 +199,8 @@ public class OrderService {
         }
         walletService.refund(order, reason, companionUserId);
         transition(order, OrderStatus.CLOSED, companionUserId, "COMPANION", "REJECT", reason);
+        order.setClosedReason(reason);
+        orderMapper.updateById(order);
         releaseSlot(order.getId());
         return detailView(order);
     }
@@ -261,6 +263,72 @@ public class OrderService {
         return detailView(order);
     }
 
+    /** 用户取消订单（FR-U12，详细设计 4.1） */
+    @Transactional
+    public OrderView cancel(Long userId, Long orderId, String reason) {
+        PlayOrder order = orderMapper.selectByIdForUpdate(orderId);
+        if (order == null) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_FOUND);
+        }
+        if (!order.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.PERMISSION_DATA_SCOPE_DENIED);
+        }
+        boolean paid = switch (order.status()) {
+            case PENDING_PAYMENT -> false; // 未支付：直接关闭，无需退款
+            case WAITING_ACCEPTANCE, WAITING_SERVICE -> true; // 已支付：全额退款
+            default -> throw new BusinessException(ErrorCode.ORDER_STATUS_INVALID,
+                    "当前状态不可取消，如有疑问请联系客服");
+        };
+        String reasonText = reason == null || reason.isBlank() ? "用户取消订单" : reason;
+        if (paid) {
+            walletService.refund(order, reasonText, userId);
+        }
+        transition(order, OrderStatus.CLOSED, userId, "USER", "CANCEL", reasonText);
+        order.setClosedReason(reasonText);
+        orderMapper.updateById(order);
+        releaseSlot(order.getId());
+        return detailView(order);
+    }
+
+    // ==================== 售后仲裁（review 模块调用，FR-U17/FR-M18） ====================
+
+    /** 订单进入售后（发起投诉，FR-U17）：仅 WAITING_CONFIRMATION 或 COMPLETED 可转入 AFTER_SALES */
+    @Transactional
+    public void enterAfterSales(Long userId, Long orderId, String reason) {
+        PlayOrder order = orderMapper.selectByIdForUpdate(orderId);
+        if (order == null) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_FOUND);
+        }
+        if (!order.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.PERMISSION_DATA_SCOPE_DENIED);
+        }
+        OrderStatus current = order.status();
+        if (current != OrderStatus.WAITING_CONFIRMATION && current != OrderStatus.COMPLETED) {
+            throw new BusinessException(ErrorCode.ORDER_STATUS_INVALID, "当前订单状态不支持发起投诉");
+        }
+        transition(order, OrderStatus.AFTER_SALES, userId, "USER", "COMPLAINT", reason);
+    }
+
+    /** 售后仲裁结束（FR-M18）：AFTER_SALES 流转到 COMPLETED（维持/部分退款）或 CLOSED（全额退款） */
+    @Transactional
+    public void resolveAfterSales(Long orderId, OrderStatus target, String reason, Long adminId) {
+        if (target != OrderStatus.COMPLETED && target != OrderStatus.CLOSED) {
+            throw new BusinessException(ErrorCode.ORDER_STATUS_INVALID, "售后仲裁仅可结束为已完成或已关闭");
+        }
+        PlayOrder order = orderMapper.selectByIdForUpdate(orderId);
+        if (order == null) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_FOUND);
+        }
+        if (order.status() != OrderStatus.AFTER_SALES) {
+            throw new BusinessException(ErrorCode.ORDER_STATUS_INVALID, "订单不在售后中，无法仲裁");
+        }
+        transition(order, target, adminId, "ADMIN", "ARBITRATE", reason);
+        if (target == OrderStatus.CLOSED) {
+            order.setClosedReason(reason);
+            orderMapper.updateById(order);
+        }
+    }
+
     // ==================== 定时任务（详细设计 7.2） ====================
 
     /** 支付超时自动关闭 */
@@ -271,6 +339,8 @@ public class OrderService {
             return;
         }
         transition(order, OrderStatus.CLOSED, 0L, "SYSTEM", "CLOSE_EXPIRED_PAYMENT", "支付超时自动关闭");
+        order.setClosedReason("支付超时自动关闭");
+        orderMapper.updateById(order);
         releaseSlot(order.getId());
     }
 
@@ -283,6 +353,8 @@ public class OrderService {
         }
         walletService.refund(order, "接单超时自动退款", 0L);
         transition(order, OrderStatus.CLOSED, 0L, "SYSTEM", "CLOSE_EXPIRED_ACCEPTANCE", "接单超时自动关闭");
+        order.setClosedReason("接单超时自动关闭并退款");
+        orderMapper.updateById(order);
         releaseSlot(order.getId());
     }
 

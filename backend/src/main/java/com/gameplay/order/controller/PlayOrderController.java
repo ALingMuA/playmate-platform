@@ -5,6 +5,7 @@ import com.gameplay.auth.security.JwtPrincipal;
 import com.gameplay.common.api.ApiResponse;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
+import com.gameplay.order.dto.CancelOrderRequest;
 import com.gameplay.order.dto.CreateOrderRequest;
 import com.gameplay.order.dto.OrderView;
 import com.gameplay.order.service.OrderService;
@@ -58,6 +59,14 @@ public class PlayOrderController {
     public ApiResponse<OrderView> detail(@PathVariable Long id, Authentication authentication) {
         Long userId = currentUserId(authentication);
         return ApiResponse.ok(orderService.detail(userId, roles(authentication), id));
+    }
+
+    /** 取消订单（FR-U12）：未支付直接关闭，已支付（待接单/待服务）全额退款 */
+    @PostMapping("/{id}/cancel")
+    public ApiResponse<OrderView> cancel(@PathVariable Long id,
+                                         @Valid @RequestBody CancelOrderRequest request,
+                                         Authentication authentication) {
+        return ApiResponse.ok(orderService.cancel(currentUserId(authentication), id, request.getReason()));
     }
 
     /** 确认完成（FR-U13） */

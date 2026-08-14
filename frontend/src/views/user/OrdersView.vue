@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import { listGames, type Game } from '@/api/catalog'
 import {
+  cancelOrder,
   confirmOrder,
   createOrder,
   listBookableServices,
@@ -125,6 +126,28 @@ async function handlePay(row: Order) {
   await load()
 }
 
+async function handleCancel(row: Order) {
+  let reason = ''
+  try {
+    const result = await ElMessageBox.prompt(
+      row.orderStatus === 'PENDING_PAYMENT' ? '订单未支付，取消后将直接关闭。' : '订单已支付，取消后将全额退回虚拟余额。',
+      `取消订单 ${row.orderNo}`,
+      {
+        confirmButtonText: '确认取消',
+        cancelButtonText: '再想想',
+        inputPlaceholder: '请填写取消原因（选填，不超过500字）',
+        inputValidator: (v: string) => (v ?? '').length <= 500 || '原因不能超过500字',
+      },
+    )
+    reason = result.value
+  } catch {
+    return // 用户放弃取消
+  }
+  await cancelOrder(row.id, reason)
+  ElMessage.success(row.orderStatus === 'PENDING_PAYMENT' ? '订单已取消' : '订单已取消，款项已退回')
+  await load()
+}
+
 async function handleConfirm(row: Order) {
   await ElMessageBox.confirm('确认服务已完成？确认后陪玩师将收到收益。', '确认完成', { type: 'info' })
   await confirmOrder(row.id)
@@ -184,6 +207,13 @@ function fmtTime(t?: string): string {
       <div class="order-actions">
         <el-button v-if="row.orderStatus === 'PENDING_PAYMENT'" size="small" type="primary" @click="handlePay(row)">
           去支付
+        </el-button>
+        <el-button
+          v-if="['PENDING_PAYMENT', 'WAITING_ACCEPTANCE', 'WAITING_SERVICE'].includes(row.orderStatus)"
+          size="small"
+          @click="handleCancel(row)"
+        >
+          取消订单
         </el-button>
         <el-button v-if="row.orderStatus === 'WAITING_CONFIRMATION'" size="small" type="success" @click="handleConfirm(row)">
           确认完成
