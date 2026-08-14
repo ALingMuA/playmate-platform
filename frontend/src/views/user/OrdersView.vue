@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import { listGames, type Game } from '@/api/catalog'
@@ -15,6 +16,8 @@ import {
 } from '@/api/order'
 import { uploadFile } from '@/api/file'
 import { createComplaint, reviewByOrder, submitReview } from '@/api/review'
+
+const route = useRoute()
 
 const activeTab = ref('ALL')
 const list = ref<Order[]>([])
@@ -59,7 +62,19 @@ function onTabChange() {
 
 onMounted(() => {
   load()
-  listGames().then((g) => (games.value = g))
+  listGames().then((g) => {
+    games.value = g
+    // 从陪玩师列表页跳转（/orders?serviceId=x&gameId=y）：预选服务并打开下单对话框
+    const qServiceId = Number(route.query.serviceId)
+    const qGameId = Number(route.query.gameId)
+    if (qServiceId) {
+      openCreate()
+      if (qGameId) form.gameId = qGameId
+      loadServices().then(() => {
+        form.serviceId = qServiceId
+      })
+    }
+  })
 })
 
 async function loadServices() {
