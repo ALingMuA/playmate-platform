@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.gameplay.auth.entity.Role;
 import com.gameplay.auth.entity.User;
 import com.gameplay.auth.entity.UserRole;
+import com.gameplay.auth.event.PasswordChangedEvent;
 import com.gameplay.auth.mapper.RoleMapper;
 import com.gameplay.auth.mapper.UserMapper;
 import com.gameplay.auth.mapper.UserRoleMapper;
@@ -23,6 +24,7 @@ import com.gameplay.customer_service.mapper.CustomerServiceAccountMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -149,6 +151,20 @@ public class CsAccountService {
         return toView(account);
     }
 
+    /**
+     * 监听密码变更事件（FR-C04）：客服完成改密后清除"强制改密"标志。
+     * <p>auth 模块不依赖客服模块，通过事件解耦；非客服用户无对应账号记录，静默忽略。</p>
+     */
+    @EventListener
+    @Transactional
+    public void onPasswordChanged(PasswordChangedEvent event) {
+        CustomerServiceAccount account = getByUserId(event.userId());
+        if (account != null) {
+            account.setForceChangePassword(0);
+            csAccountMapper.updateById(account);
+        }
+    }
+
     /** 客服设置工作状态（FR-C06）：仅启用且非强制改密的客服可上线 */
     @Transactional
     public CsAccountView setWorkStatus(Long csUserId, CsWorkStatusUpdateRequest req) {
@@ -160,7 +176,7 @@ public class CsAccountService {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "工作状态不合法");
         }
         if (target == CsWorkStatus.ONLINE) {
-            assertCsAvailable(account, "客服未启用或未完成首次改密，不能上线");
+            assertCsEnabled(account, "客服未启用或未完成首次改密，不能上线");
         }
         account.setWorkStatus(target.name());
         csAccountMapper.updateById(account);
@@ -181,8 +197,23 @@ public class CsAccountService {
     /** 校验客服可接待：账号启用、已改密、在线（FR-C06/CS_AGENT_NOT_ONLINE） */
     public CustomerServiceAccount assertAvailable(Long csUserId) {
         CustomerServiceAccount account = requireAccountByUserId(csUserId);
-        assertCsAvailable(account, null);
+        assertCsEnabled(account, null);
+        if (!CsWorkStatus.ONLINE.name().equals(account.getWorkStatus())) {
+            throw new BusinessException(ErrorCode.CS_AGENT_NOT_ONLINE, "客服当前不在线");
+        }
         return account;
+    }
+
+    /** 校验账号可用（不含在线状态）：启用且已完成强制改密 */
+    private void assertCsEnabled(CustomerServiceAccount account, String message) {
+        if (!CsAccountStatus.ENABLED.name().equals(account.getAccountStatus())) {
+            throw new BusinessException(ErrorCode.CS_AGENT_NOT_ONLINE,
+                    message != null ? message : "客服账号已被禁用");
+        }
+        if (account.getForceChangePassword() != null && account.getForceChangePassword() == 1) {
+            throw new BusinessException(ErrorCode.AUTH_PASSWORD_CHANGE_REQUIRED,
+                    message != null ? message : "首次登录或重置后必须修改密码");
+        }
     }
 
     /** 校验客服是会话当前处理人 */
@@ -194,20 +225,7 @@ public class CsAccountService {
         return account;
     }
 
-    private void assertCsAvailable(CustomerServiceAccount account, String message) {
-        if (!CsAccountStatus.ENABLED.name().equals(account.getAccountStatus())) {
-            throw new BusinessException(ErrorCode.CS_AGENT_NOT_ONLINE,
-                    message != null ? message : "客服账号已被禁用");
-        }
-        if (account.getForceChangePassword() != null && account.getForceChangePassword() == 1) {
-            throw new BusinessException(ErrorCode.AUTH_PASSWORD_CHANGE_REQUIRED,
-                    message != null ? message : "首次登录或重置后必须修改密码");
-        }
-        if (!CsWorkStatus.ONLINE.name().equals(account.getWorkStatus())) {
-            throw new BusinessException(ErrorCode.CS_AGENT_NOT_ONLINE,
-                    message != null ? message : "客服当前不在线");
-        }
-    }
+
 
     /** 当前处理中会话数（容量校验用） */
     public long countActiveConversations(Long csAccountId) {

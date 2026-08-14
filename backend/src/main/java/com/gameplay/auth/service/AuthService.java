@@ -10,6 +10,7 @@ import com.gameplay.auth.dto.UserProfileView;
 import com.gameplay.auth.entity.Role;
 import com.gameplay.auth.entity.User;
 import com.gameplay.auth.entity.UserRole;
+import com.gameplay.auth.event.PasswordChangedEvent;
 import com.gameplay.auth.mapper.RoleMapper;
 import com.gameplay.auth.mapper.UserMapper;
 import com.gameplay.auth.mapper.UserRoleMapper;
@@ -17,6 +18,7 @@ import com.gameplay.auth.security.JwtTokenService;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,6 +40,7 @@ public class AuthService {
     private final AccountAuthService accountAuthService;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenService jwtTokenService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * 用户注册：创建账号并绑定默认 USER 角色。
@@ -137,6 +140,8 @@ public class AuthService {
                 .eq(User::getId, userId));
 
         List<String> roles = loadRoles(userId);
+        // 发布密码变更事件（客服账号据此清除"强制改密"标志，FR-C04）
+        eventPublisher.publishEvent(new PasswordChangedEvent(userId));
         String token = jwtTokenService.createToken(userId, user.getUsername(), roles, newVersion);
         return new AuthResponse(token, "Bearer", jwtTokenService.getExpireSeconds(), toProfile(user, roles));
     }

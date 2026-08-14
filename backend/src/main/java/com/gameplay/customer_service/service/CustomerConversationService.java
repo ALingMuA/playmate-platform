@@ -106,6 +106,17 @@ public class CustomerConversationService {
         MessageView userMessage = messageService.saveMessage(conversationId, req.getClientMsgId(),
                 SenderType.USER, userId, req.getContent(), false);
 
+        // 人工接待中（WAITING_HUMAN/HUMAN_PROCESSING/ESCALATED_ADMIN）：仅保存并推送用户消息，不再触发 AI
+        if (!ConversationStatus.AI_PROCESSING.name().equals(conversation.getConversationStatus())) {
+            notifyMessage(conversation, userMessage);
+            return AiResponseView.builder()
+                    .conversationId(conversationId)
+                    .conversationStatus(conversation.getConversationStatus())
+                    .decision(AiDecision.CONTINUE_AI.name())
+                    .userMessageId(userMessage.getMessageId())
+                    .build();
+        }
+
         AiRequest aiRequest = new AiRequest(
                 req.getContent(),
                 "来源:" + conversation.getSourceType(),
@@ -458,6 +469,7 @@ public class CustomerConversationService {
                 .sourceType(c.getSourceType())
                 .relatedOrderId(c.getRelatedOrderId())
                 .transferReason(c.getTransferReason())
+                .version(c.getVersion())
                 .queueSeconds(Duration.between(c.getCreatedAt(), now).getSeconds())
                 .createdAt(c.getCreatedAt())
                 .build();
