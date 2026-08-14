@@ -62,7 +62,16 @@ public enum ErrorCode {
     ACCOUNT_USERNAME_EXISTS(409, "ACCOUNT_USERNAME_EXISTS", "用户名已被占用"),
     ACCOUNT_MOBILE_EXISTS(409, "ACCOUNT_MOBILE_EXISTS", "手机号已被占用"),
     ACCOUNT_EMAIL_EXISTS(409, "ACCOUNT_EMAIL_EXISTS", "邮箱已被占用"),
-    AUTH_PASSWORD_INCORRECT(401, "AUTH_PASSWORD_INCORRECT", "原密码不正确");
+    AUTH_PASSWORD_INCORRECT(401, "AUTH_PASSWORD_INCORRECT", "原密码不正确"),
+
+    // ===== 目录基础数据（游戏/服务类型/标签，FR-M10~M12） =====
+    GAME_NOT_FOUND(404, "GAME_NOT_FOUND", "游戏不存在"),
+    GAME_NAME_EXISTS(409, "GAME_NAME_EXISTS", "游戏名称已存在"),
+    SERVICE_TYPE_NOT_FOUND(404, "SERVICE_TYPE_NOT_FOUND", "服务类型不存在"),
+    SERVICE_TYPE_NAME_EXISTS(409, "SERVICE_TYPE_NAME_EXISTS", "服务类型名称已存在"),
+    SERVICE_TYPE_CODE_EXISTS(409, "SERVICE_TYPE_CODE_EXISTS", "服务类型编码已存在"),
+    TAG_NOT_FOUND(404, "TAG_NOT_FOUND", "标签不存在"),
+    TAG_EXISTS(409, "TAG_EXISTS", "同一游戏同一分类下标签名称已存在");
 
     private final int httpStatus;
     private final String code;

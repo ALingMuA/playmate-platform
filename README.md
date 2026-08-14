@@ -24,8 +24,10 @@
 │   └── src/main/java/com/gameplay/
 │       ├── common              统一响应、错误码、状态机、全局异常处理
 │       ├── auth                注册、登录、JWT、令牌版本、修改密码  ✅ 已完成
-│       └── user / companion / catalog / order / review /
-│           customer_service / ai / admin / file / infrastructure  规划中
+│       ├── user                个人资料、账号安全            ✅ 已完成
+│       ├── catalog             游戏、服务类型、标签           ✅ 已完成
+│       └── companion / order / review / customer_service /
+│           ai / admin / file / infrastructure               规划中
 └── frontend/                   Vue 3 前端（按路由分区）
     └── src/
         ├── router              用户端 / /companion / /support / /cs / /admin
@@ -85,6 +87,27 @@ cd backend && mvn test
 | GET | `/api/auth/me` | 当前用户信息与角色 |
 
 统一响应：`{"code":"SUCCESS","message":"操作成功","data":{}}`；错误码见《详细设计说明书》6.1 与 `common.exception.ErrorCode`。
+
+### 目录基础数据（catalog 模块）
+
+公开接口（游客可访问，SecurityConfig 已放行）：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/games` | 已启用游戏列表（FR-U01） |
+| GET | `/api/games/{id}` | 已启用游戏详情（FR-U01） |
+| GET | `/api/service-types` | 已启用服务类型列表（FR-M11 展示） |
+| GET | `/api/tags?gameId=` | 标签列表，指定游戏时含通用标签（FR-M12 选择） |
+
+管理接口（仅 ADMIN，`@PreAuthorize` 控制）：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET/POST | `/api/admin/games`、`/api/admin/games/{id}`（PUT/DELETE） | 游戏增删改查（FR-M10） |
+| GET/POST | `/api/admin/service-types`、`/api/admin/service-types/{id}`（PUT/DELETE） | 服务类型增删改查（FR-M11） |
+| GET/POST | `/api/admin/tags`、`/api/admin/tags/{id}`（PUT/DELETE） | 标签增删改查（FR-M12） |
+
+种子数据：`sql/data.sql` 追加王者荣耀/英雄联盟/和平精英、3 个服务类型与 26 个标签（幂等）。
 
 ## 开发约定
 
