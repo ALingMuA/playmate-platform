@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * 个人中心（FR-A05 个人资料 / FR-A06 账号安全 / FR-A02 退出）。
+ * 个人中心（对齐 frontend-prototype profile.html：个人卡 + 钱包网格 + 账号安全）。
  *
- * <p>展示并维护头像、昵称、性别、简介等资料，支持修改密码、注销全部会话与退出登录；
- * 同时展示虚拟钱包概览（FR-U09 余额）。数据来自 auth 模块与 wallet 模块接口。</p>
+ * <p>展示并维护头像、昵称、性别、简介等资料（FR-A05），展示虚拟钱包概览（FR-U09），
+ * 支持修改密码（FR-A04）、注销全部会话（FR-A06）与退出登录。</p>
  */
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -16,13 +16,10 @@ import { uploadFile } from '@/api/file'
 const router = useRouter()
 const userStore = useUserStore()
 
-/** 用户资料（来自 store，refreshUser 保持最新） */
 const user = ref<LoginUser | null>(null)
-/** 钱包概览 */
 const wallet = ref<{ balanceCents: number; frozenCents: number; totalIncomeCents: number } | null>(null)
 const loading = ref(false)
 
-/** 角色映射 */
 const roleMap: Record<string, string> = {
   USER: '普通用户',
   COMPANION: '陪玩师',
@@ -30,7 +27,6 @@ const roleMap: Record<string, string> = {
   ADMIN: '管理员',
 }
 
-/** 性别映射：0未知，1男，2女 */
 const genderMap: Record<number, string> = { 0: '未知', 1: '男', 2: '女' }
 
 async function load() {
@@ -40,7 +36,7 @@ async function load() {
     try {
       wallet.value = await walletMe()
     } catch {
-      wallet.value = null // 钱包接口失败不影响资料展示
+      wallet.value = null
     }
   } finally {
     loading.value = false
@@ -60,12 +56,7 @@ function fmtTime(t?: string): string {
 
 const editVisible = ref(false)
 const saving = ref(false)
-const editForm = reactive({
-  nickname: '',
-  avatarUrl: '',
-  gender: 0,
-  introduction: '',
-})
+const editForm = reactive({ nickname: '', avatarUrl: '', gender: 0, introduction: '' })
 
 function openEdit() {
   const u = user.value
@@ -77,16 +68,15 @@ function openEdit() {
   editVisible.value = true
 }
 
-/** 头像上传（file 模块，category=avatar） */
 async function handleAvatarUpload(file: File) {
   try {
     const result = await uploadFile(file, 'avatar')
     editForm.avatarUrl = result.url
     ElMessage.success('头像上传成功')
   } catch {
-    // 上传失败已由 http 拦截器提示
+    // 拦截器已提示
   }
-  return false // 阻止 el-upload 默认上传
+  return false
 }
 
 async function handleSaveProfile() {
@@ -113,18 +103,7 @@ async function handleSaveProfile() {
 
 const pwdVisible = ref(false)
 const changingPwd = ref(false)
-const pwdForm = reactive({
-  oldPassword: '',
-  newPassword: '',
-  confirmPassword: '',
-})
-
-function openPwd() {
-  pwdForm.oldPassword = ''
-  pwdForm.newPassword = ''
-  pwdForm.confirmPassword = ''
-  pwdVisible.value = true
-}
+const pwdForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
 
 async function handleChangePassword() {
   if (!pwdForm.oldPassword || !pwdForm.newPassword) {
@@ -138,19 +117,17 @@ async function handleChangePassword() {
   changingPwd.value = true
   try {
     const result = await changePassword(pwdForm.oldPassword, pwdForm.newPassword)
-    // 改密后旧令牌失效，服务端返回新令牌：更新本地登录态
     userStore.setToken(result.token)
     user.value = result.user
-    ElMessage.success('密码修改成功，请牢记新密码')
+    ElMessage.success('密码修改成功')
     pwdVisible.value = false
   } finally {
     changingPwd.value = false
   }
 }
 
-// ==================== 账号安全与退出（FR-A06 / FR-A02） ====================
+// ==================== 账号安全（FR-A06） ====================
 
-/** 注销全部会话：本地退出并跳转登录页 */
 async function handleLogoutAll() {
   try {
     await ElMessageBox.confirm(
@@ -159,7 +136,7 @@ async function handleLogoutAll() {
       { type: 'warning', confirmButtonText: '确定注销', cancelButtonText: '再想想' },
     )
   } catch {
-    return // 用户取消
+    return
   }
   await logoutAll()
   userStore.logout()
@@ -167,7 +144,6 @@ async function handleLogoutAll() {
   router.push('/login')
 }
 
-/** 退出登录（FR-A02）：无状态 JWT，客户端丢弃令牌即可 */
 function handleLogout() {
   userStore.logout()
   ElMessage.success('已退出登录')
@@ -178,68 +154,86 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="profile-page">
-    <div class="page-header">
-      <h1>个人中心</h1>
-      <p class="sub">维护个人资料与账号安全</p>
-    </div>
+  <div class="page">
+    <div class="container" v-loading="loading">
+      <!-- 页头 -->
+      <div class="page-header">
+        <h1 class="page-title">个人中心</h1>
+        <p class="page-subtitle">管理你的账号信息与资产</p>
+      </div>
 
-    <div v-loading="loading" class="profile-body">
-      <!-- 左侧：用户信息卡 -->
-      <el-card class="info-card" shadow="hover">
-        <div class="avatar-row">
-          <el-avatar :size="72" :src="user?.avatarUrl || undefined" class="avatar">
-            {{ user?.nickname?.charAt(0) ?? '游' }}
-          </el-avatar>
-          <div class="info-main">
-            <h2 class="nickname">{{ user?.nickname ?? '-' }}</h2>
-            <p class="username">@{{ user?.username ?? '-' }}</p>
-            <div class="role-tags">
-              <el-tag v-for="r in user?.roles ?? []" :key="r" size="small" type="primary" effect="plain">
-                {{ roleMap[r] ?? r }}
-              </el-tag>
+      <template v-if="user">
+        <!-- 个人卡（原型 profile-card） -->
+        <div class="card mb-2">
+          <div class="card-body profile-card">
+            <div class="profile-avatar">
+              <el-avatar :size="96" :src="user.avatarUrl || undefined" style="width: 100%; height: 100%">
+                {{ user.nickname?.charAt(0) ?? '游' }}
+              </el-avatar>
+            </div>
+            <div class="profile-info">
+              <h2>{{ user.nickname }}
+                <span class="badge badge-secondary" style="vertical-align: middle">{{ roleMap[user.roles?.[0]] ?? user.roles?.[0] ?? '普通用户' }}</span>
+              </h2>
+              <div class="profile-meta">
+                <span class="badge" :class="user.accountStatus === 'ENABLED' ? 'badge-success' : 'badge-warning'">
+                  {{ user.accountStatus === 'ENABLED' ? '账号正常' : user.accountStatus }}
+                </span>
+                <span class="badge badge-outline">{{ genderMap[user.gender ?? 0] }}</span>
+                <span class="badge badge-outline">最近登录 {{ fmtTime(user.lastLoginAt) }}</span>
+              </div>
+              <p class="mt-2 text-muted" style="font-size: 0.875rem">
+                手机号：{{ user.mobile || '未绑定' }} · 邮箱：{{ user.email || '未绑定' }}
+              </p>
+              <p v-if="user.introduction" class="text-muted" style="font-size: 0.875rem">
+                {{ user.introduction }}
+              </p>
+            </div>
+            <div style="margin-left: auto">
+              <button class="btn btn-primary btn-sm" @click="openEdit">编辑资料</button>
             </div>
           </div>
         </div>
-        <el-descriptions :column="1" class="detail" border>
-          <el-descriptions-item label="手机号">{{ user?.mobile || '未绑定' }}</el-descriptions-item>
-          <el-descriptions-item label="邮箱">{{ user?.email || '未绑定' }}</el-descriptions-item>
-          <el-descriptions-item label="性别">{{ genderMap[user?.gender ?? 0] }}</el-descriptions-item>
-          <el-descriptions-item label="账号状态">{{ user?.accountStatus ?? '-' }}</el-descriptions-item>
-          <el-descriptions-item label="最近登录">{{ fmtTime(user?.lastLoginAt) }}</el-descriptions-item>
-        </el-descriptions>
-        <div class="actions">
-          <el-button type="primary" @click="openEdit">编辑资料</el-button>
-          <el-button @click="openPwd">修改密码</el-button>
+
+        <!-- 钱包（原型 wallet-grid，FR-U09） -->
+        <div class="wallet-grid">
+          <div class="wallet-card">
+            <div class="wallet-value">{{ wallet ? fmtMoney(wallet.balanceCents) : '-' }}</div>
+            <div class="wallet-label">可用余额</div>
+          </div>
+          <div class="wallet-card">
+            <div class="wallet-value" style="color: var(--muted-foreground)">
+              {{ wallet ? fmtMoney(wallet.frozenCents) : '-' }}
+            </div>
+            <div class="wallet-label">冻结金额</div>
+          </div>
+          <div class="wallet-card">
+            <div class="wallet-value" style="color: var(--success, #16a34a)">
+              {{ wallet ? fmtMoney(wallet.totalIncomeCents) : '-' }}
+            </div>
+            <div class="wallet-label">累计收入</div>
+          </div>
         </div>
-      </el-card>
 
-      <!-- 右侧：钱包与账号安全 -->
-      <div class="side">
-        <el-card class="wallet-card" shadow="hover">
-          <template #header>虚拟钱包（模拟支付余额）</template>
-          <div class="wallet-main">{{ wallet ? fmtMoney(wallet.balanceCents) : '-' }}</div>
-          <div class="wallet-meta">
-            <span>冻结：{{ wallet ? fmtMoney(wallet.frozenCents) : '-' }}</span>
-            <span>累计收入：{{ wallet ? fmtMoney(wallet.totalIncomeCents) : '-' }}</span>
+        <!-- 账号安全 -->
+        <div class="card mt-2">
+          <div class="card-body">
+            <h3 class="card-title mb-2">账号安全</h3>
+            <div class="flex gap-1 flex-wrap">
+              <button class="btn btn-outline btn-sm" @click="pwdVisible = true">修改密码</button>
+              <button class="btn btn-outline btn-sm" @click="handleLogoutAll">注销全部会话</button>
+              <button class="btn btn-destructive btn-sm" @click="handleLogout">退出登录</button>
+            </div>
           </div>
-        </el-card>
-
-        <el-card class="security-card" shadow="hover">
-          <template #header>账号安全</template>
-          <div class="security-actions">
-            <el-button plain @click="handleLogoutAll">注销全部会话</el-button>
-            <el-button plain type="danger" @click="handleLogout">退出登录</el-button>
-          </div>
-        </el-card>
-      </div>
+        </div>
+      </template>
     </div>
 
     <!-- 编辑资料对话框 -->
     <el-dialog v-model="editVisible" title="编辑资料" width="520px">
-      <el-form :model="editForm" label-width="80px">
+      <el-form label-width="80px">
         <el-form-item label="头像">
-          <div class="avatar-edit">
+          <div class="flex gap-1 items-center">
             <el-avatar :size="56" :src="editForm.avatarUrl || undefined">
               {{ editForm.nickname?.charAt(0) || '游' }}
             </el-avatar>
@@ -249,7 +243,7 @@ onMounted(load)
           </div>
         </el-form-item>
         <el-form-item label="昵称" required>
-          <el-input v-model="editForm.nickname" maxlength="32" show-word-limit placeholder="1~32 字符" />
+          <el-input v-model="editForm.nickname" maxlength="32" show-word-limit />
         </el-form-item>
         <el-form-item label="性别">
           <el-radio-group v-model="editForm.gender">
@@ -259,8 +253,7 @@ onMounted(load)
           </el-radio-group>
         </el-form-item>
         <el-form-item label="个人简介">
-          <el-input v-model="editForm.introduction" type="textarea" :rows="3" maxlength="500" show-word-limit
-            placeholder="介绍一下自己（选填）" />
+          <el-input v-model="editForm.introduction" type="textarea" :rows="3" maxlength="500" show-word-limit />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -271,16 +264,16 @@ onMounted(load)
 
     <!-- 修改密码对话框 -->
     <el-dialog v-model="pwdVisible" title="修改密码" width="480px">
-      <el-form :model="pwdForm" label-width="90px">
+      <el-form label-width="90px">
         <el-form-item label="原密码" required>
-          <el-input v-model="pwdForm.oldPassword" type="password" show-password placeholder="输入当前密码" />
+          <el-input v-model="pwdForm.oldPassword" type="password" show-password />
         </el-form-item>
         <el-form-item label="新密码" required>
           <el-input v-model="pwdForm.newPassword" type="password" show-password
             placeholder="8~32 位，须同时包含字母和数字" />
         </el-form-item>
         <el-form-item label="确认新密码" required>
-          <el-input v-model="pwdForm.confirmPassword" type="password" show-password placeholder="再次输入新密码" />
+          <el-input v-model="pwdForm.confirmPassword" type="password" show-password />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -290,93 +283,3 @@ onMounted(load)
     </el-dialog>
   </div>
 </template>
-
-<style scoped>
-.profile-page {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 24px 16px 48px;
-}
-.page-header h1 {
-  margin: 0 0 8px;
-}
-.sub {
-  color: #909399;
-  margin: 0 0 20px;
-}
-.profile-body {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-}
-.info-card {
-  flex: 1;
-}
-.avatar-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-.avatar {
-  background: var(--brand-primary);
-  color: #fff;
-  font-size: 28px;
-}
-.nickname {
-  margin: 0 0 4px;
-}
-.username {
-  margin: 0 0 8px;
-  color: #909399;
-  font-size: 13px;
-}
-.role-tags {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.detail {
-  margin-bottom: 16px;
-}
-.actions {
-  display: flex;
-  gap: 8px;
-}
-.side {
-  width: 320px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.wallet-main {
-  font-size: 28px;
-  font-weight: 700;
-  color: #f56c6c;
-  margin-bottom: 8px;
-}
-.wallet-meta {
-  display: flex;
-  justify-content: space-between;
-  font-size: 13px;
-  color: #909399;
-}
-.security-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.avatar-edit {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-@media (max-width: 768px) {
-  .profile-body {
-    flex-direction: column;
-  }
-  .side {
-    width: 100%;
-  }
-}
-</style>

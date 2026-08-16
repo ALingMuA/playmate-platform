@@ -1,10 +1,9 @@
 <script setup lang="ts">
 /**
- * 陪玩师列表（FR-U02/U03：查找可预约陪玩服务）。
+ * 找陪玩（对齐 frontend-prototype companions.html：筛选栏 + 陪玩师卡片 + 分页）。
  *
  * <p>展示审核通过且已上架的可预约服务，支持按游戏筛选与分页；
- * 从游戏列表页（GamesView）携带 gameId 进入时自动预选对应游戏。
- * 点击卡片可跳转订单页发起预约（FR-U07 创建预约订单）。</p>
+ * 从游戏列表页携带 gameId 进入时自动预选。点击卡片跳转订单页预约。</p>
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -14,21 +13,18 @@ import { listBookableServices, type BookableService } from '@/api/order'
 const route = useRoute()
 const router = useRouter()
 
-/** 游戏下拉选项（全部游戏 + 各游戏） */
 const games = ref<Game[]>([])
-/** 当前筛选的游戏 ID（undefined 表示全部） */
 const gameId = ref<number | undefined>(undefined)
-/** 服务列表 */
 const services = ref<BookableService[]>([])
 const total = ref(0)
 const page = ref(1)
-const pageSize = 10
+const pageSize = 8
 const loading = ref(false)
 
-/** 当前筛选的游戏名（页头展示） */
 const currentGameName = computed(() => games.value.find((g) => g.id === gameId.value)?.gameName ?? '全部游戏')
 
-/** 拉取服务列表（按游戏过滤 + 分页） */
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+
 async function load() {
   loading.value = true
   try {
@@ -42,16 +38,13 @@ async function load() {
 
 function onGameChange() {
   page.value = 1
-  // 筛选条件同步到地址栏：刷新/分享链接后状态不丢失
-  router.replace({ query: gameId.value ? { gameId: String(gameId.value) } : {} })
   load()
 }
 
-/** 跳转订单页并发起预约（携带服务与游戏参数，OrdersView 预选） */
 function goBook(service: BookableService) {
   router.push({
-    path: '/orders',
-    query: { serviceId: String(service.id), gameId: String(service.gameId) },
+    path: '/booking',
+    query: { companionUserId: String(service.companionUserId), serviceId: String(service.id) },
   })
 }
 
@@ -60,13 +53,11 @@ function fmtPrice(cents: number): string {
 }
 
 onMounted(async () => {
-  // 拉取游戏列表（筛选下拉）
   try {
     games.value = await listGames()
   } catch {
     games.value = []
   }
-  // 从游戏列表页跳转进入时预选游戏
   const qGameId = Number(route.query.gameId)
   if (qGameId && games.value.some((g) => g.id === qGameId)) {
     gameId.value = qGameId
@@ -74,14 +65,12 @@ onMounted(async () => {
   await load()
 })
 
-// 地址栏 gameId 变化（如从 GamesView 再次跳转）时同步筛选
 watch(
   () => route.query.gameId,
   (val) => {
     const qGameId = Number(val)
-    const next = qGameId && games.value.some((g) => g.id === qGameId) ? qGameId : undefined
-    if (next !== gameId.value) {
-      gameId.value = next
+    if (qGameId && qGameId !== gameId.value) {
+      gameId.value = qGameId
       page.value = 1
       load()
     }
@@ -90,146 +79,77 @@ watch(
 </script>
 
 <template>
-  <div class="page-container">
-    <!-- 页头 -->
-    <div class="page-header">
-      <h1>陪玩师列表</h1>
-      <p class="sub">当前浏览：{{ currentGameName }}，共 {{ total }} 个可预约服务</p>
-    </div>
+  <div class="page">
+    <div class="container">
+      <!-- 页头 -->
+      <div class="page-header">
+        <h1 class="page-title">找陪玩师</h1>
+        <p class="page-subtitle">筛选心仪的陪玩伙伴 · 当前：{{ currentGameName }}（共 {{ total }} 个服务）</p>
+      </div>
 
-    <!-- 筛选栏 -->
-    <div class="filter-bar">
-      <el-select v-model="gameId" placeholder="全部游戏" clearable class="game-select" @change="onGameChange">
-        <el-option v-for="g in games" :key="g.id" :label="g.gameName" :value="g.id" />
-      </el-select>
-      <el-button @click="onGameChange">查询</el-button>
-    </div>
-
-    <!-- 加载骨架屏 -->
-    <div v-if="loading && services.length === 0" class="card-grid">
-      <el-card v-for="i in 6" :key="i" class="service-card">
-        <el-skeleton :rows="3" animated />
-      </el-card>
-    </div>
-
-    <!-- 服务卡片网格 -->
-    <div v-else v-loading="loading" class="card-grid">
-      <el-card v-for="s in services" :key="s.id" class="service-card" shadow="hover">
-        <div class="card-head">
-          <h3 class="title" :title="s.title">{{ s.title }}</h3>
-          <el-tag size="small" type="primary" effect="plain">{{ s.gameName }}</el-tag>
-          <el-tag size="small" type="info" effect="plain">{{ s.serviceTypeName }}</el-tag>
-        </div>
-        <p class="desc" v-if="s.description">{{ s.description }}</p>
-        <p class="desc empty" v-else>该服务暂无介绍</p>
-        <div class="tags" v-if="s.tagNames?.length">
-          <el-tag v-for="t in s.tagNames" :key="t" size="small" type="success" effect="plain">{{ t }}</el-tag>
-        </div>
-        <div class="card-foot">
-          <div class="price">
-            <span class="price-num">{{ fmtPrice(s.priceCents) }}</span>
-            <span class="price-unit">/小时</span>
+      <!-- 筛选栏（原型 filter-bar） -->
+      <div class="filter-bar">
+        <div class="filter-row">
+          <div class="filter-item">
+            <label>游戏</label>
+            <select v-model="gameId" class="form-control" @change="onGameChange">
+              <option :value="undefined">全部游戏</option>
+              <option v-for="g in games" :key="g.id" :value="g.id">{{ g.gameName }}</option>
+            </select>
           </div>
-          <span class="duration">最短 {{ s.minDurationMinutes }} 分钟</span>
-          <el-button type="primary" size="small" @click="goBook(s)">立即预约</el-button>
+          <div class="filter-item">
+            <label>&nbsp;</label>
+            <button class="btn btn-secondary" @click="onGameChange">查询</button>
+          </div>
         </div>
-      </el-card>
-    </div>
+      </div>
 
-    <!-- 空态与分页 -->
-    <el-empty v-if="!loading && services.length === 0" description="暂无符合条件的陪玩服务，换个游戏看看吧" />
-    <el-pagination
-      v-if="total > pageSize"
-      class="pager"
-      layout="total, prev, pager, next"
-      :total="total"
-      :page-size="pageSize"
-      :current-page="page"
-      @current-change="(p: number) => { page = p; load() }"
-    />
+      <!-- 加载中 -->
+      <div v-if="loading" class="empty-state">加载中…</div>
+
+      <!-- 陪玩师卡片网格（原型 companion-grid） -->
+      <div v-else-if="services.length" class="companion-grid">
+        <div v-for="s in services" :key="s.id" class="companion-card"
+          @click="router.push(`/companions/${s.companionUserId}`)">
+          <div class="companion-header">
+            <div class="companion-avatar">🎮</div>
+            <div class="companion-meta">
+              <div class="companion-name">{{ s.title }}</div>
+              <div class="companion-level">{{ s.gameName }} · {{ s.serviceTypeName }}</div>
+              <div class="companion-rating">
+                <span style="color: #f59e0b">★</span>
+                <span>{{ fmtPrice(s.priceCents) }}/小时</span>
+                <span class="text-muted">· 最短 {{ s.minDurationMinutes }} 分钟</span>
+              </div>
+            </div>
+          </div>
+          <div class="companion-tags" v-if="s.tagNames?.length">
+            <span v-for="t in s.tagNames" :key="t" class="tag">{{ t }}</span>
+          </div>
+          <p v-else-if="s.description" class="text-muted" style="font-size: 0.8125rem; margin-bottom: 12px">
+            {{ s.description }}
+          </p>
+          <div class="companion-footer">
+            <div class="companion-price">{{ fmtPrice(s.priceCents) }}<span>/小时</span></div>
+            <button class="btn btn-primary btn-sm" @click.stop="goBook(s)">立即预约</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 空态 -->
+      <div v-else class="empty-state">
+        <div class="empty-icon">🔍</div>
+        <p>暂无符合条件的陪玩服务，换个游戏看看吧</p>
+      </div>
+
+      <!-- 分页（原型 pagination） -->
+      <div v-if="totalPages > 1" class="pagination">
+        <button class="page-link" :disabled="page <= 1" @click="page > 1 && ((page -= 1), load())">‹</button>
+        <button v-for="p in totalPages" :key="p" class="page-link" :class="{ active: p === page }" @click="page = p; load()">
+          {{ p }}
+        </button>
+        <button class="page-link" :disabled="page >= totalPages" @click="page < totalPages && ((page += 1), load())">›</button>
+      </div>
+    </div>
   </div>
 </template>
-
-<style scoped>
-.filter-bar {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-}
-.game-select {
-  width: 220px;
-  max-width: 100%;
-}
-.card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
-  min-height: 200px;
-}
-.service-card {
-  border-radius: 8px;
-  overflow: hidden;
-}
-.card-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.title {
-  margin: 0 8px 0 0;
-  font-size: 16px;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.desc {
-  margin: 10px 0 0;
-  color: #606266;
-  font-size: 13px;
-  min-height: 20px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.desc.empty {
-  color: #c0c4cc;
-}
-.tags {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-}
-.card-foot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #f0f2f5;
-}
-.price {
-  color: #f56c6c;
-}
-.price-num {
-  font-size: 20px;
-  font-weight: 700;
-}
-.price-unit {
-  font-size: 12px;
-  color: #909399;
-}
-.duration {
-  flex: 1;
-  font-size: 12px;
-  color: #909399;
-}
-.pager {
-  margin-top: 16px;
-  justify-content: flex-end;
-}
-</style>

@@ -55,6 +55,42 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/support/SupportView.vue'),
         meta: { title: '在线客服', requiresAuth: true },
       },
+      {
+        path: 'companions/:userId',
+        name: 'companion-detail',
+        component: () => import('@/views/user/CompanionDetailView.vue'),
+        meta: { title: '陪玩师详情' },
+      },
+      {
+        path: 'booking',
+        name: 'booking',
+        component: () => import('@/views/user/BookingView.vue'),
+        meta: { title: '创建预约', requiresAuth: true },
+      },
+      {
+        path: 'payment/:id',
+        name: 'payment',
+        component: () => import('@/views/user/PaymentView.vue'),
+        meta: { title: '订单支付', requiresAuth: true },
+      },
+      {
+        path: 'orders/:id',
+        name: 'order-detail',
+        component: () => import('@/views/user/OrderDetailView.vue'),
+        meta: { title: '订单详情', requiresAuth: true },
+      },
+      {
+        path: 'review/:orderId',
+        name: 'review',
+        component: () => import('@/views/user/ReviewView.vue'),
+        meta: { title: '评价订单', requiresAuth: true },
+      },
+      {
+        path: 'complaint/:orderId',
+        name: 'complaint',
+        component: () => import('@/views/user/ComplaintView.vue'),
+        meta: { title: '发起投诉', requiresAuth: true },
+      },
     ],
   },
 
