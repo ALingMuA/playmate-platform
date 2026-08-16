@@ -1,4 +1,10 @@
 <script setup lang="ts">
+/**
+ * 登录 / 注册（对齐 frontend-prototype login.html：左右分栏）。
+ *
+ * <p>左侧品牌视觉区，右侧登录/注册表单（auth-tabs 切换）；
+ * 登录成功后跳转 redirect 回跳地址。</p>
+ */
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -20,12 +26,6 @@ const form = reactive({
   email: '',
 })
 
-/** 登录成功后的回跳目标（仅允许站内路径，防开放重定向） */
-function safeRedirect(): string {
-  const redirect = route.query.redirect as string
-  return redirect && redirect.startsWith('/') ? redirect : '/'
-}
-
 async function handleLogin() {
   if (!form.account || !form.password) {
     ElMessage.warning('请输入账号和密码')
@@ -35,7 +35,8 @@ async function handleLogin() {
   try {
     await userStore.login(form.account, form.password)
     ElMessage.success('登录成功')
-    router.push(safeRedirect())
+    const redirect = (route.query.redirect as string) || '/'
+    router.push(redirect)
   } finally {
     loading.value = false
   }
@@ -65,116 +66,74 @@ async function handleRegister() {
 </script>
 
 <template>
-  <div class="login-page">
-    <div class="login-bg" />
-    <el-card class="login-card">
-      <template #header>
-        <div class="card-head">
-          <div class="brand-row">
-            <span class="brand-icon">🎮</span>
-            <h2 class="brand-name">游戏陪玩系统</h2>
-          </div>
-          <p class="brand-sub">找陪玩、约大神、随时开黑</p>
-          <el-segmented
-            v-model="mode"
-            :options="[
-              { label: '登录', value: 'login' },
-              { label: '注册', value: 'register' },
-            ]"
-            class="mode-switch"
-          />
-        </div>
-      </template>
+  <div class="auth-page">
+    <!-- 左侧品牌视觉 -->
+    <div class="auth-visual">
+      <h1>欢迎来到<br />游戏陪玩系统</h1>
+      <p>专业陪玩、开黑上分、游戏教学，发现更多游戏乐趣。注册即可开启你的专属陪玩之旅。</p>
+    </div>
 
-      <el-form v-if="mode === 'login'" :model="form" label-width="0" @submit.prevent="handleLogin">
-        <el-form-item>
-          <el-input v-model="form.account" placeholder="用户名 / 手机号 / 邮箱" size="large" />
-        </el-form-item>
-        <el-form-item>
-          <el-input v-model="form.password" type="password" placeholder="密码" size="large" show-password @keyup.enter="handleLogin" />
-        </el-form-item>
-        <el-button type="primary" size="large" class="action-btn" :loading="loading" @click="handleLogin">
-          登录
-        </el-button>
-        <div class="back-row">
-          <el-button text type="primary" @click="router.push('/')">返回首页</el-button>
-        </div>
-      </el-form>
+    <!-- 右侧表单 -->
+    <div class="auth-form-wrap">
+      <div class="auth-tabs">
+        <button class="auth-tab" :class="{ active: mode === 'login' }" @click="mode = 'login'">登录</button>
+        <button class="auth-tab" :class="{ active: mode === 'register' }" @click="mode = 'register'">注册</button>
+      </div>
 
-      <el-form v-else :model="form" label-width="80px" @submit.prevent="handleRegister">
-        <el-form-item label="用户名">
-          <el-input v-model="form.username" placeholder="登录账号" />
-        </el-form-item>
-        <el-form-item label="昵称">
-          <el-input v-model="form.nickname" placeholder="展示昵称" />
-        </el-form-item>
-        <el-form-item label="密码">
-          <el-input v-model="form.password" type="password" placeholder="至少8位，含字母和数字" show-password />
-        </el-form-item>
-        <el-form-item label="手机号">
-          <el-input v-model="form.mobile" placeholder="手机号与邮箱至少填一项" />
-        </el-form-item>
-        <el-form-item label="邮箱">
-          <el-input v-model="form.email" placeholder="选填" />
-        </el-form-item>
-        <el-button type="primary" size="large" class="action-btn" :loading="loading" @click="handleRegister">
-          注册
-        </el-button>
-      </el-form>
-    </el-card>
+      <!-- 登录表单 -->
+      <form v-if="mode === 'login'" class="auth-panel active" @submit.prevent="handleLogin">
+        <div class="form-group">
+          <label class="form-label">用户名 / 手机号</label>
+          <input v-model="form.account" class="form-control" placeholder="请输入账号" autocomplete="username" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">密码</label>
+          <input v-model="form.password" type="password" class="form-control" placeholder="请输入密码"
+            autocomplete="current-password" @keyup.enter="handleLogin" />
+        </div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg" :disabled="loading">
+          {{ loading ? '登录中…' : '登 录' }}
+        </button>
+        <p class="mt-2 text-muted" style="font-size: 0.8125rem; text-align: center">
+          演示账号 admin / Admin@123456
+        </p>
+      </form>
+
+      <!-- 注册表单 -->
+      <form v-else class="auth-panel active" @submit.prevent="handleRegister">
+        <div class="form-group">
+          <label class="form-label">用户名</label>
+          <input v-model="form.username" class="form-control" placeholder="设置登录账号" autocomplete="username" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">昵称</label>
+          <input v-model="form.nickname" class="form-control" placeholder="展示昵称" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">手机号</label>
+          <input v-model="form.mobile" class="form-control" placeholder="选填，手机号与邮箱至少一项" autocomplete="tel" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">邮箱</label>
+          <input v-model="form.email" class="form-control" placeholder="选填" autocomplete="email" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">密码</label>
+          <input v-model="form.password" type="password" class="form-control"
+            placeholder="至少8位，含字母和数字" autocomplete="new-password" />
+        </div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg" :disabled="loading">
+          {{ loading ? '注册中…' : '注 册' }}
+        </button>
+      </form>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.login-page {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  padding: 24px 12px;
-  overflow: hidden;
-}
-.login-bg {
-  position: absolute;
-  inset: 0;
-  background: #1f2d3d;
-}
-.login-card {
-  position: relative;
-  width: min(420px, 100%);
-  border-radius: var(--radius-large);
-  box-shadow: 0 12px 40px rgba(0, 21, 41, 0.25);
-}
-.card-head {
-  text-align: center;
-}
-.brand-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-.brand-icon {
-  font-size: 26px;
-}
-.brand-name {
-  margin: 0;
-  font-size: 22px;
-}
-.brand-sub {
-  margin: 6px 0 14px;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-.mode-switch {
-  width: 100%;
-}
-.action-btn {
-  width: 100%;
-}
-.back-row {
-  margin-top: 8px;
-  text-align: center;
+@media (max-width: 768px) {
+  .auth-page {
+    display: block;
+  }
 }
 </style>
