@@ -33,6 +33,18 @@
   --side-bg-start: #1f2d3d;
   --side-bg-end: #001529;
 
+  /* 工作台兼容别名：把早期页面使用的命名映射到原型设计令牌。 */
+  --brand-primary: var(--primary);
+  --brand-primary-lighter: var(--secondary);
+  --bg-page: #f7f9fc;
+  --bg-card: var(--card);
+  --text-primary: var(--foreground);
+  --text-secondary: var(--muted-foreground);
+  --border-color: var(--border);
+  --radius-small: var(--radius);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-hover: 0 8px 24px rgba(15, 23, 42, 0.08);
+
   /* ===== Element Plus 主题覆盖 ===== */
   --el-color-primary: var(--primary);
   --el-color-primary-light-3: color-mix(in srgb, var(--primary) 70%, #fff);
@@ -1428,16 +1440,31 @@ textarea.form-control {
   height: 100vh;
 }
 .layout .aside {
+  width: 232px !important;
   background: linear-gradient(180deg, var(--side-bg-start), var(--side-bg-end));
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
 }
 .layout .brand {
   color: #fff;
-  font-size: 16px;
-  font-weight: 600;
-  text-align: center;
-  padding: 16px 0;
-  justify-content: center;
+  min-height: 76px;
+  padding: 20px 22px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   cursor: default;
+}
+.layout .brand-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--primary);
+  font-size: 17px;
+  flex: 0 0 auto;
 }
 .layout .el-menu {
   border-right: none;
@@ -1450,24 +1477,272 @@ textarea.form-control {
 .layout .el-menu-item.is-active {
   background: var(--primary);
   color: #fff;
+  box-shadow: 0 6px 16px rgba(66, 133, 244, 0.26);
+}
+.layout .el-menu-item {
+  height: 44px;
+  line-height: 44px;
+  margin: 4px 12px;
+  padding: 0 14px !important;
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.72);
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.layout .el-menu-item:hover {
+  color: #fff;
+  transform: translateX(2px);
+}
+.layout .el-menu-item .el-icon {
+  margin-right: 10px;
+  font-size: 17px;
 }
 .layout .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: 64px;
+  padding: 0 24px;
   border-bottom: 1px solid var(--border);
   background: #fff;
+  box-shadow: var(--shadow-card);
 }
 .layout .header-left {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 .layout .header-title {
   font-weight: 600;
 }
+.layout .page-context {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.layout .page-title {
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.layout .header-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.layout .user-tag {
+  border-color: var(--secondary);
+  color: var(--primary);
+  background: var(--secondary);
+}
 .layout .main {
-  background: #f5f7fa;
+  padding: 28px;
+  background: var(--bg-page);
+  overflow-y: auto;
+}
+
+/* ==================== 工作台页面统一视觉 ==================== */
+
+.layout .main > * {
+  max-width: 1440px;
+  margin: 0 auto;
+}
+.layout .page-header,
+.layout .dashboard-page > .page-header,
+.layout .knowledge-page > .page-header,
+.layout .announcements-page > .page-header,
+.layout .cs-accounts-page > .page-header,
+.layout .logs-page > .page-header {
+  margin-bottom: 24px;
+}
+.layout .page-header h1,
+.layout .page-header .page-title,
+.layout .dashboard-page .page-header h1 {
+  color: var(--foreground);
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.layout .page-header .sub,
+.layout .page-header p.sub {
+  margin: 5px 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+.layout .toolbar,
+.layout .query-card,
+.layout .toolbar-card,
+.layout .top-card,
+.layout .info-bar {
+  border-radius: 12px;
+}
+.layout .toolbar,
+.layout .query-card,
+.layout .toolbar-card {
+  padding: 16px 18px;
+  margin-bottom: 18px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+}
+.layout .toolbar .el-form-item,
+.layout .query-card .el-form-item {
+  margin-bottom: 0;
+}
+.layout .table-card,
+.layout .todo-card,
+.layout .stat-card,
+.layout .block,
+.layout .order-card,
+.layout .queue-item,
+.layout .top-card,
+.layout .chat-card,
+.layout .info-bar {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+}
+.layout .el-card {
+  --el-card-padding: 20px;
+  background: var(--card);
+}
+.layout .el-card__header {
+  padding: 16px 20px;
+  color: var(--foreground);
+  font-weight: 700;
+  border-bottom-color: var(--border);
+}
+.layout .el-table {
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 13px;
+}
+.layout .el-table th.el-table__cell {
+  height: 46px;
+  background: #f8fafc;
+  color: var(--muted-foreground);
+  font-weight: 600;
+}
+.layout .el-table td.el-table__cell {
+  padding: 12px 0;
+}
+.layout .el-table--border::after,
+.layout .el-table--group::after,
+.layout .el-table::before {
+  background-color: var(--border);
+}
+.layout .el-table tr:hover > td.el-table__cell {
+  background: #f4f8ff !important;
+}
+.layout .el-pagination {
+  padding: 16px 0 0;
+}
+.layout .el-pagination button,
+.layout .el-pagination .el-pager li {
+  border-radius: 7px;
+}
+.layout .el-pagination .el-pager li.is-active {
+  background: var(--primary);
+  color: #fff;
+}
+.layout .el-input__wrapper,
+.layout .el-select__wrapper,
+.layout .el-textarea__inner,
+.layout .el-input-number {
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--input) inset;
+}
+.layout .el-input__wrapper.is-focus,
+.layout .el-select__wrapper.is-focused,
+.layout .el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px var(--primary) inset, 0 0 0 3px rgba(66, 133, 244, 0.12);
+}
+.layout .el-button {
+  border-radius: 8px;
+  font-weight: 600;
+}
+.layout .el-tag {
+  border-radius: 999px;
+}
+.layout .metric-card {
+  min-height: 150px;
+  text-align: left;
+}
+.layout .metric-card .el-card__body {
+  padding: 20px;
+}
+.layout .metric-icon {
+  width: 42px;
+  height: 42px;
+  margin: 0 0 16px;
+  border-radius: 12px;
+  color: var(--primary);
+  background: var(--secondary);
+}
+.layout .metric-value {
+  color: var(--foreground);
+  font-size: 1.6rem;
+  line-height: 1.1;
+}
+.layout .metric-label,
+.layout .stat-label {
+  color: var(--muted-foreground);
+}
+.layout .todo-card {
+  margin-top: 8px;
+}
+.layout .todo-item {
+  padding: 13px 14px;
+  border-color: var(--border);
+  border-radius: 9px;
+  background: #fff;
+}
+.layout .todo-item:hover {
+  border-color: var(--primary);
+  background: #f7faff;
+}
+.layout .stat-card {
+  min-height: 122px;
+}
+.layout .stat-value {
+  color: var(--foreground);
+}
+.layout .queue-item,
+.layout .order-card {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.layout .queue-item:hover,
+.layout .order-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-1px);
+}
+.layout .day-card,
+.layout .slot-item,
+.layout .cap-item,
+.layout .cap-row {
+  border-color: var(--border) !important;
+  border-radius: 10px !important;
+}
+.layout .day-card.today {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.1);
+}
+.layout .chat-card {
+  overflow: hidden;
+}
+.layout .msg-list {
+  background: var(--muted) !important;
+}
+.layout .msg-row.mine .bubble {
+  background: var(--primary) !important;
+}
+.layout .el-dialog {
+  border-radius: 14px;
 }
 
 /* ==================== Element Plus 全局微调 ==================== */
@@ -1512,6 +1787,29 @@ textarea.form-control {
 
 /* 移动端适配 */
 @media (max-width: 768px) {
+  .layout .main {
+    padding: 16px;
+  }
+  .layout .header {
+    padding: 0 14px;
+  }
+  .layout .header-title {
+    display: none;
+  }
+  .layout .page-context {
+    gap: 0;
+  }
+  .layout .page-title {
+    font-size: 14px;
+  }
+  .layout .user-tag {
+    display: none;
+  }
+  .layout .toolbar,
+  .layout .query-card,
+  .layout .toolbar-card {
+    padding: 14px;
+  }
   .el-dialog {
     width: 94% !important;
     margin-top: 8vh !important;

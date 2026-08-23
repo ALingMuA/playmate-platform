@@ -100,7 +100,16 @@ function handleLogout() {
   <el-container class="layout">
     <!-- 桌面端侧边栏 -->
     <el-aside v-if="!isMobile" width="208px" class="aside">
-      <div class="brand">{{ brand }}</div>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 11h4M8 9v4" />
+            <path d="M15 12h.01M18 10h.01" />
+            <path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.013.104-.022.156V14a4 4 0 0 0 3.98 4h10.64a4 4 0 0 0 3.98-4V8.746a4 4 0 0 0-.022-.156A4 4 0 0 0 17.32 5Z" />
+          </svg>
+        </span>
+        <span>{{ brand }}</span>
+      </div>
       <el-menu :default-active="activeMenu" router class="menu">
         <el-menu-item v-for="m in menus" :key="m.path" :index="m.path">
           <el-icon><component :is="menuIcon(m.label)" /></el-icon>
@@ -117,7 +126,16 @@ function handleLogout() {
       :with-header="false"
       class="menu-drawer"
     >
-      <div class="brand">{{ brand }}</div>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 11h4M8 9v4" />
+            <path d="M15 12h.01M18 10h.01" />
+            <path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.013.104-.022.156V14a4 4 0 0 0 3.98 4h10.64a4 4 0 0 0 3.98-4V8.746a4 4 0 0 0-.022-.156A4 4 0 0 0 17.32 5Z" />
+          </svg>
+        </span>
+        <span>{{ brand }}</span>
+      </div>
       <el-menu :default-active="activeMenu" router class="menu" @select="onMenuSelect">
         <el-menu-item v-for="m in menus" :key="m.path" :index="m.path">
           <el-icon><component :is="menuIcon(m.label)" /></el-icon>
@@ -178,11 +196,28 @@ function handleLogout() {
 }
 .brand {
   color: #fff;
-  font-size: 16px;
-  font-weight: 600;
-  text-align: center;
-  padding: 16px 0;
-  letter-spacing: 1px;
+  min-height: 76px;
+  padding: 20px 22px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--primary);
+  font-size: 17px;
+  flex: 0 0 auto;
+}
+.brand-mark svg {
+  width: 19px;
+  height: 19px;
 }
 .menu {
   border-right: none;
@@ -193,8 +228,8 @@ function handleLogout() {
 }
 .menu :deep(.el-menu-item.is-active) {
   background: var(--brand-primary);
-  border-radius: 0 var(--radius-small) var(--radius-small) 0;
-  margin-right: 8px;
+  border-radius: 10px;
+  margin-right: 12px;
 }
 .menu-drawer :deep(.el-drawer__body) {
   padding: 0;
@@ -208,6 +243,7 @@ function handleLogout() {
   background: var(--bg-card);
   box-shadow: var(--shadow-card);
   z-index: 10;
+  padding: 0 24px;
 }
 .header-left {
   display: flex;
