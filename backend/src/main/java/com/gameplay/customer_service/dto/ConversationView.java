@@ -1,6 +1,7 @@
 package com.gameplay.customer_service.dto;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.gameplay.ai.task.dto.AiTaskView;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -27,6 +28,7 @@ public class ConversationView {
     private Long currentCsAccountId;
     private String transferReason;
     private Integer unresolvedCount;
+    private AiTaskView aiTask;
     /** 乐观锁版本号（领取时提交） */
     private Integer version;
 

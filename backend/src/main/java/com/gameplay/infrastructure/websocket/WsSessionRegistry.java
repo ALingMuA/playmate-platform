@@ -51,13 +51,20 @@ public class WsSessionRegistry {
         TextMessage message = new TextMessage(payload);
         for (WebSocketSession session : userSessions) {
             try {
-                if (session.isOpen()) {
-                    session.sendMessage(message);
-                }
+                sendToSession(session, message);
             } catch (IOException e) {
                 log.warn("WebSocket 推送失败，移除会话: userId={}, session={}，原因: {}",
                         userId, session.getId(), e.getMessage());
                 userSessions.remove(session);
+            }
+        }
+    }
+
+    /** 后台 AI 和用户请求可能同时推送，同一连接的写入必须串行。 */
+    public void sendToSession(WebSocketSession session, TextMessage message) throws IOException {
+        synchronized (session) {
+            if (session.isOpen()) {
+                session.sendMessage(message);
             }
         }
     }

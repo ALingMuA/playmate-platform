@@ -10,6 +10,8 @@ public enum WsMessageType {
     MESSAGE_NEW,
     /** 服务端 → 客户端：AI 应答结果 */
     AI_RESPONSE,
+    /** 服务端 → 客户端：后台生成任务状态 */
+    AI_STATUS,
     /** 服务端 → 客户端：会话状态变更 */
     CONVERSATION_CHANGED,
     /** 服务端 → 客户端：错误提示 */

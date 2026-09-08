@@ -1,5 +1,7 @@
 package com.gameplay.customer_service.service;
 
+import com.gameplay.ai.task.dto.AiTaskView;
+
 import com.gameplay.customer_service.dto.ConversationView;
 import com.gameplay.customer_service.dto.MessageView;
 
@@ -15,4 +17,6 @@ public interface CsMessageNotifier {
 
     /** 向会话相关方推送会话状态变更 */
     void notifyConversationChanged(ConversationView conversation, Long initiatorUserId, Long currentCsAccountUserId);
+
+    void notifyAiStatus(AiTaskView task, Long initiatorUserId);
 }

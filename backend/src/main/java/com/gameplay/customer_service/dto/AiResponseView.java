@@ -1,5 +1,7 @@
 package com.gameplay.customer_service.dto;
 
+import com.gameplay.ai.task.dto.AiTaskView;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -21,4 +23,5 @@ public class AiResponseView {
     private Long userMessageId;
     private MessageView aiMessage;
     private String transferReason;
+    private AiTaskView task;
 }

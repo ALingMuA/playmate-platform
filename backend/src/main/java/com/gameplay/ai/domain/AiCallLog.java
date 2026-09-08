@@ -46,6 +46,14 @@ public class AiCallLog {
     /** 调用耗时毫秒 */
     private Integer elapsedMs;
 
+    private String modelName;
+
+    private Integer inputTokens;
+
+    private Integer outputTokens;
+
+    private String errorCode;
+
     /** 创建时间 */
     private LocalDateTime createdAt;
 }

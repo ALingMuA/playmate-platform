@@ -1,5 +1,7 @@
 package com.gameplay.ai.strategy;
 
+import java.util.List;
+
 /**
  * AI 应答请求（详细设计 3.3）。
  *
@@ -19,7 +21,20 @@ public record AiRequest(
         Long conversationId,
         String relatedOrderSummary,
         int unresolvedCount,
-        boolean requestHuman) {
+        boolean requestHuman,
+        List<ContextMessage> history) {
+
+    public AiRequest {
+        history = history == null ? List.of() : List.copyOf(history);
+    }
+
+    public AiRequest(String content, String intentHints, Long conversationId,
+                     String relatedOrderSummary, int unresolvedCount, boolean requestHuman) {
+        this(content, intentHints, conversationId, relatedOrderSummary, unresolvedCount, requestHuman, List.of());
+    }
+
+    public record ContextMessage(String role, String content) {
+    }
 
     /** 当前用户消息内容（脱敏后长度上限） */
     public static final int MAX_CONTENT_LENGTH = 4000;

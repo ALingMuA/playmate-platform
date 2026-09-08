@@ -3,6 +3,7 @@ package com.gameplay.customer_service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.gameplay.ai.task.service.AiReplyTaskWorker;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,6 +50,9 @@ class CustomerServiceFlowTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private AiReplyTaskWorker taskWorker;
 
     // ==================== 辅助方法 ====================
 
@@ -171,10 +175,43 @@ class CustomerServiceFlowTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andReturn();
-        return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+        JsonNode accepted = objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+        assertThat(accepted.path("task").path("status").asText()).isEqualTo("PENDING");
+        assertThat(accepted.path("aiMessage").isNull()).isTrue();
+        taskWorker.process(accepted.path("task").path("id").asLong());
+        MvcResult detail = mockMvc.perform(get("/api/customer-service/conversations/" + conversationId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andReturn();
+        ObjectNode data = (ObjectNode) objectMapper.readTree(detail.getResponse().getContentAsString()).path("data");
+        MvcResult messages = mockMvc.perform(get("/api/customer-service/conversations/" + conversationId + "/messages")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andReturn();
+        for (JsonNode message : objectMapper.readTree(messages.getResponse().getContentAsString()).path("data")) {
+            if ("AI".equals(message.path("senderType").asText())) {
+                data.set("aiMessage", message);
+            }
+        }
+        return data;
     }
 
     // ==================== 测试用例 ====================
+
+    @Test
+    @DisplayName("外部消息不能占用 AI 系统幂等键")
+    void rejects_internal_message_key_over_http() throws Exception {
+        ObjectNode user = registerAndLogin();
+        String token = user.path("token").asText();
+        long conversationId = createConversation(token, "HELP_CENTER", null);
+        mockMvc.perform(post("/api/customer-service/conversations/" + conversationId + "/ai-responses")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("clientMsgId", "ai-task-123")
+                                .put("content", "抢占系统消息键")
+                                .put("requestHuman", true).toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
 
     @Test
     @DisplayName("知识库命中时 AI 正常应答（FR-C09/C16/C17/C21）")
@@ -182,11 +219,11 @@ class CustomerServiceFlowTest {
         createKnowledge("订单", "如何取消订单", "取消订单,取消预约",
                 "您可以在我的订单详情页点击取消订单按钮，系统将自动退还虚拟余额。");
         ObjectNode user = registerAndLogin();
-        long conversationId = createConversation(user.path("token").asText(), "HELP_CENTER", "你好");
+        long conversationId = createConversation(user.path("token").asText(), "HELP_CENTER", null);
 
         JsonNode data = aiRespond(user.path("token").asText(), conversationId, "请问怎么取消订单？");
 
-        assertThat(data.path("decision").asText()).isEqualTo("CONTINUE_AI");
+        assertThat(data.path("aiTask").path("status").asText()).isEqualTo("COMPLETED");
         assertThat(data.path("conversationStatus").asText()).isEqualTo("AI_PROCESSING");
         assertThat(data.path("aiMessage").path("content").asText())
                 .contains("【AI客服】")
@@ -202,7 +239,7 @@ class CustomerServiceFlowTest {
 
         JsonNode data = aiRespond(user.path("token").asText(), conversationId, "我要申请退款");
 
-        assertThat(data.path("decision").asText()).isEqualTo("TRANSFER_HUMAN");
+        assertThat(data.path("aiTask").path("status").asText()).isIn("COMPLETED", "FALLBACK");
         assertThat(data.path("conversationStatus").asText()).isEqualTo("WAITING_HUMAN");
         assertThat(data.path("transferReason").asText()).contains("退款");
     }
@@ -225,7 +262,7 @@ class CustomerServiceFlowTest {
         // 用户发起会话并触发转人工
         ObjectNode user = registerAndLogin();
         String userToken = user.path("token").asText();
-        long conversationId = createConversation(userToken, "HELP_CENTER", "你好，我想咨询问题");
+        long conversationId = createConversation(userToken, "HELP_CENTER", null);
         aiRespond(userToken, conversationId, "我要投诉");
 
         // 人工队列可见（含 version 与排队时长）
@@ -368,7 +405,7 @@ class CustomerServiceFlowTest {
 
         JsonNode data = aiRespond(user.path("token").asText(), conversationId, "今天天气怎么样？");
 
-        assertThat(data.path("decision").asText()).isEqualTo("TRANSFER_HUMAN");
+        assertThat(data.path("aiTask").path("status").asText()).isEqualTo("FALLBACK");
         assertThat(data.path("conversationStatus").asText()).isEqualTo("WAITING_HUMAN");
         assertThat(data.path("aiMessage").path("content").asText()).contains("人工客服");
     }

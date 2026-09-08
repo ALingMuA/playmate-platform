@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -110,30 +111,30 @@ public class AiKnowledgeBaseService {
      * @return 命中条目与置信度；无可靠命中返回 null
      */
     public MatchResult match(String content) {
+        return findRelevant(content, 1).stream().findFirst().orElse(null);
+    }
+
+    /** 仅返回启用且命中关键词的有限条目，供模型引用平台依据。 */
+    public List<MatchResult> findRelevant(String content, int limit) {
         if (!StringUtils.hasText(content)) {
-            return null;
+            return List.of();
         }
         List<AiKnowledgeBase> entries = knowledgeBaseMapper.selectList(
                 new LambdaQueryWrapper<AiKnowledgeBase>()
                         .eq(AiKnowledgeBase::getEnabled, 1)
                         .orderByDesc(AiKnowledgeBase::getPriority)
                         .orderByDesc(AiKnowledgeBase::getId));
-        MatchResult best = null;
-        for (AiKnowledgeBase entry : entries) {
-            double confidence = matchConfidence(entry, content);
-            if (confidence <= 0) {
-                continue;
-            }
-            if (best == null || confidence > best.confidence()) {
-                best = new MatchResult(entry, confidence);
-            }
-        }
-        return best;
+        return entries.stream()
+                .map(entry -> new MatchResult(entry, matchConfidence(entry, content)))
+                .filter(match -> match.confidence() > 0)
+                .sorted(Comparator.comparingDouble(MatchResult::confidence).reversed())
+                .limit(Math.max(0, Math.min(limit, 5)))
+                .toList();
     }
 
     /** 命中关键词比例折算置信度：0.55 + 0.40 × 命中比例，封顶 0.95 */
     private double matchConfidence(AiKnowledgeBase entry, String content) {
-        List<String> keywords = Arrays.stream(entry.getKeywords().split(","))
+        List<String> keywords = Arrays.stream((entry.getKeywords() == null ? "" : entry.getKeywords()).split(","))
                 .map(String::trim)
                 .filter(StringUtils::hasText)
                 .toList();

@@ -468,11 +468,31 @@ CREATE TABLE ai_call_log (
   decision VARCHAR(30) NOT NULL DEFAULT '' COMMENT '决策：CONTINUE_AI、TRANSFER_HUMAN、FALLBACK_FAQ',
   error_message VARCHAR(500) NOT NULL DEFAULT '' COMMENT '异常摘要',
   elapsed_ms INT NOT NULL DEFAULT 0 COMMENT '调用耗时毫秒',
+  model_name VARCHAR(128) NOT NULL DEFAULT '' COMMENT '实际调用模型',
+  input_tokens INT NULL COMMENT '输入用量，服务商未返回时为空',
+  output_tokens INT NULL COMMENT '输出用量，服务商未返回时为空',
+  error_code VARCHAR(64) NOT NULL DEFAULT '' COMMENT '脱敏错误分类',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   PRIMARY KEY (id),
   KEY idx_acl_conversation_created (conversation_id, created_at),
   KEY idx_acl_decision_created (decision, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI客服调用日志表';
+
+CREATE TABLE ai_reply_task (
+  id BIGINT NOT NULL AUTO_INCREMENT COMMENT '任务ID',
+  conversation_id BIGINT NOT NULL COMMENT '所属会话',
+  user_message_id BIGINT NOT NULL COMMENT '触发任务的用户消息',
+  related_order_id BIGINT NOT NULL DEFAULT 0 COMMENT '已校验归属的关联订单',
+  status VARCHAR(20) NOT NULL COMMENT 'PENDING/RUNNING/COMPLETED/FALLBACK/FAILED/CANCELLED',
+  error_code VARCHAR(64) NOT NULL DEFAULT '' COMMENT '脱敏错误分类',
+  started_at DATETIME NULL COMMENT '实际开始生成时间',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_art_user_message (user_message_id),
+  KEY idx_art_status_id (status, id),
+  KEY idx_art_conversation_id (conversation_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI客服回复任务';
 
 CREATE TABLE service_evaluation (
   id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',

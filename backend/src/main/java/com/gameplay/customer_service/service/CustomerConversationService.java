@@ -3,9 +3,11 @@ package com.gameplay.customer_service.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.gameplay.ai.enums.AiDecision;
-import com.gameplay.ai.service.AiResponseFacade;
 import com.gameplay.ai.strategy.AiProcessResult;
-import com.gameplay.ai.strategy.AiRequest;
+import com.gameplay.ai.task.domain.AiReplyTask;
+import com.gameplay.ai.task.dto.AiTaskView;
+import com.gameplay.ai.task.mapper.AiReplyTaskMapper;
+import com.gameplay.ai.task.service.AiReplyTaskService;
 import com.gameplay.common.enums.ConversationStatus;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
@@ -32,6 +34,7 @@ import com.gameplay.customer_service.mapper.CustomerServiceAccountMapper;
 import com.gameplay.customer_service.mapper.ServiceEvaluationMapper;
 import com.gameplay.order.domain.PlayOrder;
 import com.gameplay.order.mapper.PlayOrderMapper;
+import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -62,9 +65,11 @@ public class CustomerConversationService {
     private final CustomerServiceAccountMapper csAccountMapper;
     private final CustomerMessageService messageService;
     private final CsAccountService csAccountService;
-    private final AiResponseFacade aiResponseFacade;
+    private final AiReplyTaskService aiTaskService;
+    private final AiReplyTaskMapper aiTaskMapper;
     private final CsMessageNotifier messageNotifier;
     private final PlayOrderMapper orderMapper;
+    private final Validator validator;
 
     // ==================== 用户侧：会话生命周期 ====================
 
@@ -86,16 +91,19 @@ public class CustomerConversationService {
         conversationMapper.insert(conversation);
         // 首条消息
         if (StringUtils.hasText(req.getFirstContent())) {
-            messageService.saveMessage(conversation.getId(), "cs-" + java.util.UUID.randomUUID(),
+            MessageView firstMessage = messageService.saveMessage(conversation.getId(), java.util.UUID.randomUUID().toString(),
                     SenderType.USER, userId, req.getFirstContent(), false);
+            aiTaskService.enqueue(conversation, firstMessage.getMessageId(), conversation.getRelatedOrderId());
+            notifyMessage(conversation, firstMessage);
         }
         return toView(conversation);
     }
 
-    /** 触发 AI 应答（FR-C09/C16~C22）：保存用户消息并返回 AI 处理结果 */
+    /** 保存用户消息并排入持久任务队列，模型请求由独立工作线程执行。 */
     @Transactional
     public AiResponseView aiRespond(Long userId, Long conversationId, MessageSendRequest req) {
-        CustomerConversation conversation = requireConversation(conversationId);
+        validateMessageRequest(req);
+        CustomerConversation conversation = lockConversation(conversationId);
         assertInitiator(conversation, userId);
         assertNotClosed(conversation);
         // 关联订单仅限本人（FR-C13）
@@ -106,54 +114,66 @@ public class CustomerConversationService {
         MessageView userMessage = messageService.saveMessage(conversationId, req.getClientMsgId(),
                 SenderType.USER, userId, req.getContent(), false);
 
-        // 人工接待中（WAITING_HUMAN/HUMAN_PROCESSING/ESCALATED_ADMIN）：仅保存并推送用户消息，不再触发 AI
-        if (!ConversationStatus.AI_PROCESSING.name().equals(conversation.getConversationStatus())) {
-            notifyMessage(conversation, userMessage);
-            return AiResponseView.builder()
-                    .conversationId(conversationId)
-                    .conversationStatus(conversation.getConversationStatus())
-                    .decision(AiDecision.CONTINUE_AI.name())
-                    .userMessageId(userMessage.getMessageId())
-                    .build();
+        AiReplyTask task = aiTaskService.forMessage(userMessage.getMessageId());
+        if (Boolean.TRUE.equals(req.getRequestHuman())) {
+            transferToHuman(conversation, "用户主动要求转人工");
+        } else if (ConversationStatus.AI_PROCESSING.name().equals(conversation.getConversationStatus())) {
+            task = aiTaskService.enqueue(conversation, userMessage.getMessageId(), relatedOrderId);
         }
-
-        AiRequest aiRequest = new AiRequest(
-                req.getContent(),
-                "来源:" + conversation.getSourceType(),
-                conversationId,
-                orderSummary(relatedOrderId),
-                conversation.getUnresolvedCount(),
-                Boolean.TRUE.equals(req.getRequestHuman()));
-        AiProcessResult result = aiResponseFacade.process(aiRequest);
-        MessageView aiMessage = null;
-        if (StringUtils.hasText(result.response().content())) {
-            aiMessage = messageService.saveMessage(conversationId, "ai-" + java.util.UUID.randomUUID(),
-                    SenderType.AI, 0L, result.response().content(), true);
-        }
-        // 转人工处理
-        if (result.decision() == AiDecision.TRANSFER_HUMAN) {
-            transferToHuman(conversation, result.reason());
-        }
-        // 推送 AI 消息与会话状态变更（离线方由 REST 补拉兜底）
-        if (aiMessage != null) {
-            notifyMessage(conversation, aiMessage);
-        }
+        notifyMessage(conversation, userMessage);
         ConversationView view = toView(requireConversation(conversationId));
         notifyAll(conversation, view);
         return AiResponseView.builder()
                 .conversationId(conversationId)
                 .conversationStatus(view.getConversationStatus())
-                .decision(result.decision().name())
+                .decision(Boolean.TRUE.equals(req.getRequestHuman()) ? AiDecision.TRANSFER_HUMAN.name()
+                        : AiDecision.CONTINUE_AI.name())
                 .userMessageId(userMessage.getMessageId())
-                .aiMessage(aiMessage)
-                .transferReason(result.reason())
+                .task(AiTaskView.from(task == null ? null : aiTaskMapper.selectById(task.getId())))
+                .transferReason(view.getTransferReason())
                 .build();
+    }
+
+    /** 完成任务前重查会话状态，确保转人工后的迟到回答不会落库。 */
+    @Transactional
+    public void completeAiTask(Long taskId, AiProcessResult result, String failureCode) {
+        AiReplyTask candidate = aiTaskMapper.selectById(taskId);
+        if (candidate == null) {
+            return;
+        }
+        CustomerConversation conversation = lockConversation(candidate.getConversationId());
+        AiReplyTask task = aiTaskMapper.selectForUpdate(taskId);
+        if (!"RUNNING".equals(task.getStatus()) && !(failureCode != null && "PENDING".equals(task.getStatus()))) {
+            return;
+        }
+        if (!ConversationStatus.AI_PROCESSING.name().equals(conversation.getConversationStatus())) {
+            aiTaskService.finish(task, "CANCELLED", "CONVERSATION_CHANGED");
+        } else if (failureCode != null) {
+            aiTaskService.finish(task, "FAILED", failureCode);
+            MessageView failure = messageService.saveMessage(conversation.getId(), "ai-task-" + taskId,
+                    SenderType.SYSTEM, 0L, "AI 客服暂时无法完成回答，已为您转接人工客服。", false);
+            notifyMessage(conversation, failure);
+            transferToHuman(conversation, "AI 回答未完成，转人工继续处理");
+        } else {
+            aiTaskService.finish(task, result.response().fallback() ? "FALLBACK" : "COMPLETED",
+                    result.response().errorCode());
+            if (StringUtils.hasText(result.response().content())) {
+                MessageView aiMessage = messageService.saveMessage(conversation.getId(), "ai-task-" + taskId,
+                        SenderType.AI, 0L, result.response().content(), true);
+                notifyMessage(conversation, aiMessage);
+            }
+            if (result.decision() == AiDecision.TRANSFER_HUMAN) {
+                transferToHuman(conversation, result.reason());
+            }
+        }
+        aiTaskService.notifyStatus(task, conversation.getInitiatorUserId());
+        notifyAll(conversation, toView(requireConversation(conversation.getId())));
     }
 
     /** 用户主动转人工（FR-C10） */
     @Transactional
     public ConversationView requestHuman(Long userId, Long conversationId, String reason) {
-        CustomerConversation conversation = requireConversation(conversationId);
+        CustomerConversation conversation = lockConversation(conversationId);
         assertInitiator(conversation, userId);
         assertNotClosed(conversation);
         transferToHuman(conversation, StringUtils.hasText(reason) ? reason : "用户主动要求转人工");
@@ -228,7 +248,7 @@ public class CustomerConversationService {
     @Transactional
     public ConversationView claim(Long csUserId, Long conversationId, ConversationClaimRequest req) {
         CustomerServiceAccount account = csAccountService.assertAvailable(csUserId);
-        CustomerConversation conversation = requireConversation(conversationId);
+        CustomerConversation conversation = lockConversation(conversationId);
         if (!ConversationStatus.WAITING_HUMAN.name().equals(conversation.getConversationStatus())) {
             throw new BusinessException(ErrorCode.CS_CONVERSATION_ALREADY_CLAIMED, "会话不在等待人工状态");
         }
@@ -265,7 +285,8 @@ public class CustomerConversationService {
     /** 客服回复消息（FR-C26）：仅当前处理客服 */
     @Transactional
     public MessageView reply(Long csUserId, Long conversationId, MessageSendRequest req) {
-        CustomerConversation conversation = requireConversation(conversationId);
+        validateMessageRequest(req);
+        CustomerConversation conversation = lockConversation(conversationId);
         csAccountService.assertCurrentHandler(csUserId, conversation.getCurrentCsAccountId());
         assertNotClosed(conversation);
         MessageView message = messageService.saveMessage(conversationId, req.getClientMsgId(),
@@ -277,9 +298,10 @@ public class CustomerConversationService {
     /** 关闭会话（FR-C29）：处理分类 + 结果 */
     @Transactional
     public ConversationView close(Long csUserId, Long conversationId, CloseConversationRequest req) {
-        CustomerConversation conversation = requireConversation(conversationId);
+        CustomerConversation conversation = lockConversation(conversationId);
         csAccountService.assertCurrentHandler(csUserId, conversation.getCurrentCsAccountId());
         assertNotClosed(conversation);
+        aiTaskService.cancelActive(conversation);
         conversationMapper.update(null, new LambdaUpdateWrapper<CustomerConversation>()
                 .set(CustomerConversation::getConversationStatus, ConversationStatus.CLOSED.name())
                 .set(CustomerConversation::getClosedCategory, req.getCategory())
@@ -298,7 +320,7 @@ public class CustomerConversationService {
     /** 转交管理员（FR-C28）：退款/投诉仲裁/封禁申诉等超权限事项 */
     @Transactional
     public ConversationView escalate(Long csUserId, Long conversationId, EscalateRequest req) {
-        CustomerConversation conversation = requireConversation(conversationId);
+        CustomerConversation conversation = lockConversation(conversationId);
         csAccountService.assertCurrentHandler(csUserId, conversation.getCurrentCsAccountId());
         if (ConversationStatus.CLOSED.name().equals(conversation.getConversationStatus())
                 || ConversationStatus.ESCALATED_ADMIN.name().equals(conversation.getConversationStatus())) {
@@ -337,8 +359,20 @@ public class CustomerConversationService {
 
     // ==================== 内部方法 ====================
 
+    /** 服务入口也校验外部幂等键，避免直接调用绕过 HTTP/WS 校验并占用系统消息键。 */
+    private void validateMessageRequest(MessageSendRequest request) {
+        if (request == null) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        var violations = validator.validate(request);
+        if (!violations.isEmpty()) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, violations.iterator().next().getMessage());
+        }
+    }
+
     /** AI 转人工：状态 → WAITING_HUMAN，写轨迹与系统消息 */
     private void transferToHuman(CustomerConversation conversation, String reason) {
+        aiTaskService.cancelActive(conversation);
         if (!ConversationStatus.AI_PROCESSING.name().equals(conversation.getConversationStatus())) {
             return; // 已转人工或已关闭，不重复处理
         }
@@ -350,8 +384,9 @@ public class CustomerConversationService {
                 .eq(CustomerConversation::getId, conversation.getId())
                 .eq(CustomerConversation::getVersion, conversation.getVersion()));
         recordAssignment(conversation.getId(), AssignmentType.AI_TRANSFER, 0L, 0L, 0L, reason);
-        messageService.saveMessage(conversation.getId(), "sys-transfer-" + java.util.UUID.randomUUID(),
+        MessageView message = messageService.saveMessage(conversation.getId(), "sys-transfer-" + java.util.UUID.randomUUID(),
                 SenderType.SYSTEM, 0L, "已转人工客服，请稍候，客服人员将尽快接入。", false);
+        notifyMessage(conversation, message);
     }
 
     private void recordAssignment(Long conversationId, AssignmentType type, Long fromCsId,
@@ -396,6 +431,8 @@ public class CustomerConversationService {
             if (relatedOrderId == null || relatedOrderId <= 0) {
                 throw new BusinessException(ErrorCode.VALIDATION_FAILED, "订单来源必须关联订单");
             }
+        }
+        if (relatedOrderId != null && relatedOrderId > 0) {
             assertOrderOwner(userId, relatedOrderId);
         }
     }
@@ -410,20 +447,16 @@ public class CustomerConversationService {
         }
     }
 
-    /** 脱敏订单摘要（FR-C13：不向 AI 或客服提供超出业务需要的数据） */
-    private String orderSummary(Long relatedOrderId) {
-        if (relatedOrderId == null || relatedOrderId <= 0) {
-            return "";
-        }
-        PlayOrder order = orderMapper.selectById(relatedOrderId);
-        if (order == null) {
-            return "";
-        }
-        return "订单#" + order.getOrderNo() + " 状态:" + order.getOrderStatus();
-    }
-
     private CustomerConversation requireConversation(Long conversationId) {
         CustomerConversation conversation = conversationMapper.selectById(conversationId);
+        if (conversation == null) {
+            throw new BusinessException(ErrorCode.CS_CONVERSATION_NOT_FOUND);
+        }
+        return conversation;
+    }
+
+    private CustomerConversation lockConversation(Long conversationId) {
+        CustomerConversation conversation = conversationMapper.selectForUpdate(conversationId);
         if (conversation == null) {
             throw new BusinessException(ErrorCode.CS_CONVERSATION_NOT_FOUND);
         }
@@ -487,6 +520,7 @@ public class CustomerConversationService {
                 .currentCsAccountId(c.getCurrentCsAccountId())
                 .transferReason(c.getTransferReason())
                 .unresolvedCount(c.getUnresolvedCount())
+                .aiTask(aiTaskService.latest(c.getId()))
                 .version(c.getVersion())
                 .createdAt(c.getCreatedAt())
                 .closedAt(c.getClosedAt())

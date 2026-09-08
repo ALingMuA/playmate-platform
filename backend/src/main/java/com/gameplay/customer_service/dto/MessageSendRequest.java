@@ -1,6 +1,7 @@
 package com.gameplay.customer_service.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -13,7 +14,8 @@ public class MessageSendRequest {
 
     /** 客户端消息幂等ID（UUID） */
     @NotBlank(message = "clientMsgId 不能为空")
-    @Size(max = 64, message = "clientMsgId 过长")
+    @Pattern(regexp = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+            message = "clientMsgId 必须为标准 UUID")
     private String clientMsgId;
 
     /** 消息内容 */
