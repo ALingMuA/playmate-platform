@@ -28,22 +28,17 @@ public class TransferDecisionService {
      * 决策：CONTINUE_AI 或 TRANSFER_HUMAN（附原因）。
      */
     public AiDecision decide(AiRequest request, AiResponse response) {
-        if (request.requestHuman()) {
-            return AiDecision.TRANSFER_HUMAN;
-        }
-        String content = request.content() == null ? "" : request.content();
-        for (String term : SENSITIVE_TERMS) {
-            if (content.contains(term)) {
-                return AiDecision.TRANSFER_HUMAN;
-            }
-        }
-        if (response.confidence() < 0.70D) {
-            return AiDecision.TRANSFER_HUMAN;
-        }
-        if (request.unresolvedCount() >= MAX_UNRESOLVED_COUNT) {
+        if (requiresHumanBeforeModel(request) || response.needsHuman() || response.confidence() < 0.70D) {
             return AiDecision.TRANSFER_HUMAN;
         }
         return AiDecision.CONTINUE_AI;
+    }
+
+    public boolean requiresHumanBeforeModel(AiRequest request) {
+        String content = request.content() == null ? "" : request.content();
+        return request.requestHuman() || content.contains("转人工") || content.contains("人工客服")
+                || request.unresolvedCount() >= MAX_UNRESOLVED_COUNT
+                || SENSITIVE_TERMS.stream().anyMatch(content::contains);
     }
 
     /** 生成转人工原因描述 */
@@ -51,7 +46,8 @@ public class TransferDecisionService {
         if (decision != AiDecision.TRANSFER_HUMAN) {
             return "";
         }
-        if (request.requestHuman()) {
+        if (request.requestHuman() || (request.content() != null
+                && (request.content().contains("转人工") || request.content().contains("人工客服")))) {
             return "用户主动要求转人工";
         }
         String content = request.content() == null ? "" : request.content();
@@ -60,8 +56,11 @@ public class TransferDecisionService {
                 return "命中敏感业务词：" + term;
             }
         }
-        if (response.confidence() < 0.70D) {
-            return "AI 回答置信度不足";
+        if (request.unresolvedCount() >= MAX_UNRESOLVED_COUNT) {
+            return "连续未解决次数达到阈值";
+        }
+        if (response.needsHuman() || response.confidence() < 0.70D) {
+            return "缺少可靠回答依据或需要人工处理";
         }
         return "连续未解决次数达到阈值";
     }

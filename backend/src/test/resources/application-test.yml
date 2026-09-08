@@ -4,3 +4,13 @@
 spring:
   config:
     import: optional:classpath:application-local.yml
+
+# 测试显式推进任务，避免后台线程读取尚未提交的测试数据。
+app:
+  ai:
+    tasks:
+      scheduling-enabled: false
+
+ai:
+  model:
+    enabled: false

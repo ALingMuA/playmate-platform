@@ -35,11 +35,16 @@ jwt:
   # 令牌有效期（秒），默认 24 小时
   expire-seconds: 86400
 
-# AI 客服（概要设计 4.7：知识库模板离线可用；模型增强按需开启）
+# AI 客服：启用后由真实模型生成回答，知识库提供依据和故障兜底。
 ai:
   model:
-    # 是否启用模型增强应答（演示环境默认关闭，仅知识库匹配）
     enabled: ${AI_MODEL_ENABLED:false}
+    base-url: ${AI_MODEL_BASE_URL:https://token.sensenova.cn/v1}
+    api-key: ${AI_MODEL_API_KEY:${SENSENOVA_API_KEY:}}
+    name: ${AI_MODEL_NAME:sensenova-6.7-flash-lite}
+    timeout-seconds: ${AI_MODEL_TIMEOUT_SECONDS:25}
+    max-output-tokens: ${AI_MODEL_MAX_OUTPUT_TOKENS:800}
+    history-messages: ${AI_MODEL_HISTORY_MESSAGES:12}
 
 # 文件存储（概要设计 4.7：本地磁盘实现，可替换为对象存储）
 file:

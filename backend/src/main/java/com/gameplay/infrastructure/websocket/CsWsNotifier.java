@@ -1,6 +1,7 @@
 package com.gameplay.infrastructure.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gameplay.ai.task.dto.AiTaskView;
 import com.gameplay.customer_service.dto.ConversationView;
 import com.gameplay.customer_service.dto.MessageView;
 import com.gameplay.customer_service.service.CsMessageNotifier;
@@ -8,6 +9,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.Map;
 
@@ -28,23 +31,44 @@ public class CsWsNotifier implements CsMessageNotifier {
     @Override
     public void notifyMessage(MessageView message, Long initiatorUserId, Long currentCsAccountUserId) {
         String payload = payload(WsMessageType.MESSAGE_NEW, message);
-        sessionRegistry.sendToUser(initiatorUserId, payload);
-        sessionRegistry.sendToUser(currentCsAccountUserId, payload);
+        afterCommit(() -> send(payload, initiatorUserId, currentCsAccountUserId));
     }
 
     @Override
     public void notifyConversationChanged(ConversationView conversation,
                                           Long initiatorUserId, Long currentCsAccountUserId) {
         String payload = payload(WsMessageType.CONVERSATION_CHANGED, conversation);
-        sessionRegistry.sendToUser(initiatorUserId, payload);
-        sessionRegistry.sendToUser(currentCsAccountUserId, payload);
+        afterCommit(() -> send(payload, initiatorUserId, currentCsAccountUserId));
     }
 
     /** 推送 AI 应答结果 */
     public void notifyAiResponse(Object data, Long initiatorUserId, Long currentCsAccountUserId) {
         String payload = payload(WsMessageType.AI_RESPONSE, data);
+        afterCommit(() -> send(payload, initiatorUserId, currentCsAccountUserId));
+    }
+
+    @Override
+    public void notifyAiStatus(AiTaskView task, Long initiatorUserId) {
+        String payload = payload(WsMessageType.AI_STATUS, task);
+        afterCommit(() -> sessionRegistry.sendToUser(initiatorUserId, payload));
+    }
+
+    private void send(String payload, Long initiatorUserId, Long currentCsAccountUserId) {
         sessionRegistry.sendToUser(initiatorUserId, payload);
         sessionRegistry.sendToUser(currentCsAccountUserId, payload);
+    }
+
+    private void afterCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                action.run();
+            }
+        });
     }
 
     @SneakyThrows

@@ -18,6 +18,7 @@ import java.time.LocalDateTime;
 public class MessageView {
 
     private Long messageId;
+    private String clientMsgId;
     private Long conversationId;
     private String senderType;
     private Long senderId;

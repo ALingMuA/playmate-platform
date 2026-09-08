@@ -2,17 +2,20 @@
  * 客服 WebSocket 客户端（概要设计 4.7：端点 /ws/cs，握手带 JWT）。
  *
  * <p>上行帧：MESSAGE_SEND（clientMsgId 幂等）；
- * 下行帧：MESSAGE_NEW / AI_RESPONSE / CONVERSATION_CHANGED / ERROR。
+ * 下行帧：MESSAGE_NEW / AI_STATUS / AI_RESPONSE / CONVERSATION_CHANGED / ERROR。
  * 断线自动重连，服务端推送通过 onMessage 回调分发。</p>
  */
-import type { AiResponseView, ConversationView, MessageView } from '@/api/cs'
+import type { AiResponseView, AiTaskView, ConversationView, MessageView } from '@/api/cs'
 
 /** 服务端下行帧 */
 export type WsPush =
   | { type: 'MESSAGE_NEW'; data: MessageView }
+  | { type: 'AI_STATUS'; data: AiTaskView }
   | { type: 'CONVERSATION_CHANGED'; data: ConversationView }
   | { type: 'AI_RESPONSE'; data: AiResponseView }
-  | { type: 'ERROR'; data: string }
+  | { type: 'ERROR'; data: { message: string; conversationId?: number; clientMsgId?: string } | string; message?: string }
+
+export type WsConnectionState = 'CONNECTING' | 'OPEN' | 'CLOSED'
 
 /** 上行发送帧参数 */
 export interface WsSendParams {
@@ -29,6 +32,11 @@ export class CsSocket {
   private closedByUser = false
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private readonly handlers = new Set<(msg: WsPush) => void>()
+  private readonly connectionHandlers = new Set<(state: WsConnectionState) => void>()
+
+  private notifyConnection(state: WsConnectionState) {
+    this.connectionHandlers.forEach((handler) => handler(state))
+  }
 
   /** 建立连接（带 token 握手），已有连接则忽略 */
   connect(token: string) {
@@ -45,6 +53,11 @@ export class CsSocket {
     const url = `${protocol}://${location.host}/ws/cs?token=${encodeURIComponent(this.token)}`
     const ws = new WebSocket(url)
     this.ws = ws
+    this.notifyConnection('CONNECTING')
+
+    ws.onopen = () => {
+      if (this.ws === ws) this.notifyConnection('OPEN')
+    }
 
     ws.onmessage = (event) => {
       try {
@@ -56,7 +69,9 @@ export class CsSocket {
     }
 
     ws.onclose = () => {
+      if (this.ws !== ws) return
       this.ws = null
+      this.notifyConnection('CLOSED')
       if (!this.closedByUser && this.token) {
         // 断线自动重连（3 秒后）
         this.reconnectTimer = setTimeout(() => this.open(), 3000)
@@ -83,6 +98,13 @@ export class CsSocket {
     return () => this.handlers.delete(handler)
   }
 
+  /** 订阅连接状态；订阅后会立即收到当前状态。 */
+  onConnectionState(handler: (state: WsConnectionState) => void): () => void {
+    this.connectionHandlers.add(handler)
+    handler(this.connected ? 'OPEN' : this.ws ? 'CONNECTING' : 'CLOSED')
+    return () => this.connectionHandlers.delete(handler)
+  }
+
   /** 连接是否可用 */
   get connected(): boolean {
     return !!this.ws && this.ws.readyState === WebSocket.OPEN
@@ -97,6 +119,7 @@ export class CsSocket {
     }
     this.ws?.close()
     this.ws = null
+    this.notifyConnection('CLOSED')
   }
 }
 

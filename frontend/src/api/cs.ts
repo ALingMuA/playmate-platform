@@ -6,6 +6,8 @@ import { request, type PageResult } from '@/api/http'
 export interface MessageView {
   messageId: number
   conversationId: number
+  /** 客户端幂等键，用于断线重试后确认消息已入库。 */
+  clientMsgId?: string
   /** USER / AI / CS / SYSTEM / ADMIN */
   senderType: string
   senderId: number
@@ -15,6 +17,17 @@ export interface MessageView {
   aiMark: number
   readStatus: number
   createdAt: string
+}
+
+/** AI 异步应答任务。 */
+export interface AiTaskView {
+  id: number
+  conversationId: number
+  userMessageId: number
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FALLBACK' | 'FAILED' | 'CANCELLED'
+  errorCode?: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 /** 客服会话视图（FR-C12 会话状态） */
@@ -33,6 +46,8 @@ export interface ConversationView {
   version: number
   createdAt: string
   closedAt?: string
+  /** 当前会话最近一次 AI 异步任务。 */
+  aiTask?: AiTaskView
 }
 
 /** AI 应答结果（FR-C09/C11） */
@@ -44,6 +59,8 @@ export interface AiResponseView {
   userMessageId: number
   aiMessage?: MessageView
   transferReason?: string
+  /** REST 兜底请求会快速返回任务，结果通过 WebSocket 或补拉获取。 */
+  task?: AiTaskView
 }
 
 /** 会话队列项（FR-C24） */
@@ -112,6 +129,15 @@ export function conversationMessages(id: number, afterId?: number, size = 50): P
     url: `/customer-service/conversations/${id}/messages`,
     method: 'get',
     params: { afterId, size },
+  })
+}
+
+/** 发送用户消息并创建 AI 异步应答任务（WebSocket 断线兜底）。 */
+export function sendConversationMessage(id: number, data: { clientMsgId: string; content: string }): Promise<AiResponseView> {
+  return request<AiResponseView>({
+    url: `/customer-service/conversations/${id}/ai-responses`,
+    method: 'post',
+    data,
   })
 }
 

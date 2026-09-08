@@ -1,6 +1,7 @@
 package com.gameplay.customer_service.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.gameplay.ai.strategy.AiRequest;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.customer_service.domain.CustomerServiceMessage;
@@ -18,6 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Collections;
+import java.util.Objects;
 
 /**
  * 客服消息服务（FR-C08、FR-C26、FR-C27）。
@@ -51,6 +54,7 @@ public class CustomerMessageService {
         CustomerServiceMessage existing = messageMapper.selectOne(new LambdaQueryWrapper<CustomerServiceMessage>()
                 .eq(CustomerServiceMessage::getClientMsgId, clientMsgId));
         if (existing != null) {
+            assertSameMessage(existing, conversationId, senderType, senderId, content);
             return toView(existing);
         }
         CustomerServiceMessage message = new CustomerServiceMessage();
@@ -70,9 +74,34 @@ public class CustomerMessageService {
             if (dup == null) {
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR, "消息保存冲突");
             }
+            assertSameMessage(dup, conversationId, senderType, senderId, content);
             return toView(dup);
         }
         return toView(message);
+    }
+
+    private void assertSameMessage(CustomerServiceMessage message, Long conversationId,
+                                   SenderType senderType, Long senderId, String content) {
+        if (!Objects.equals(message.getConversationId(), conversationId)
+                || !Objects.equals(message.getSenderType(), senderType.name())
+                || !Objects.equals(message.getSenderId(), senderId == null ? 0L : senderId)
+                || !Objects.equals(message.getContent(), content)) {
+            throw new BusinessException(ErrorCode.IDEMPOTENCY_KEY_CONFLICT);
+        }
+    }
+
+    /** 仅取本会话当前问题之前的公开对话，内部备注和人工接待内容不进入模型上下文。 */
+    public List<AiRequest.ContextMessage> aiHistory(Long conversationId, Long beforeMessageId, int size) {
+        List<CustomerServiceMessage> messages = messageMapper.selectList(
+                new LambdaQueryWrapper<CustomerServiceMessage>()
+                        .eq(CustomerServiceMessage::getConversationId, conversationId)
+                        .lt(CustomerServiceMessage::getId, beforeMessageId)
+                        .in(CustomerServiceMessage::getSenderType, SenderType.USER.name(), SenderType.AI.name())
+                        .orderByDesc(CustomerServiceMessage::getId)
+                        .last("LIMIT " + Math.min(Math.max(size, 1), 30)));
+        Collections.reverse(messages);
+        return messages.stream().map(m -> new AiRequest.ContextMessage(
+                SenderType.USER.name().equals(m.getSenderType()) ? "user" : "assistant", m.getContent())).toList();
     }
 
     /** 会话消息游标分页补拉（详细设计 5.2：afterId 游标） */
@@ -121,6 +150,7 @@ public class CustomerMessageService {
     private MessageView toView(CustomerServiceMessage m) {
         return MessageView.builder()
                 .messageId(m.getId())
+                .clientMsgId(m.getClientMsgId())
                 .conversationId(m.getConversationId())
                 .senderType(m.getSenderType())
                 .senderId(m.getSenderId())

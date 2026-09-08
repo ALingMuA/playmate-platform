@@ -174,4 +174,39 @@ main {
 .logout-item {
   color: var(--destructive);
 }
+@media (max-width: 768px) {
+  .site-header {
+    height: auto;
+  }
+  .header-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding-top: 12px;
+    padding-bottom: 8px;
+  }
+  .site-header .brand {
+    white-space: nowrap;
+  }
+  .brand-icon {
+    flex-shrink: 0;
+  }
+  .header-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .user-name {
+    max-width: 88px;
+  }
+  .main-nav {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    min-width: 0;
+    overflow-x: auto;
+    justify-content: space-between;
+  }
+  .main-nav a {
+    flex-shrink: 0;
+  }
+}
 </style>

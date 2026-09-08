@@ -4,7 +4,7 @@ package com.gameplay.ai.strategy;
  * AI 应答结果（详细设计 3.3）。
  *
  * @param content    应答内容（可能为空，表示无可靠回答）
- * @param confidence 置信度 0~1
+ * @param confidence 本地规则可靠性标记 0~1，兼容旧接口，不代表模型正确率
  * @param provider   应答提供方编码
  * @param knowledgeBaseId 命中知识库ID，未命中为0
  * @param fallback   是否降级回答
@@ -14,7 +14,16 @@ public record AiResponse(
         double confidence,
         String provider,
         Long knowledgeBaseId,
-        boolean fallback) {
+        boolean fallback,
+        boolean needsHuman,
+        String modelName,
+        Integer inputTokens,
+        Integer outputTokens,
+        String errorCode) {
+
+    public AiResponse(String content, double confidence, String provider, Long knowledgeBaseId, boolean fallback) {
+        this(content, confidence, provider, knowledgeBaseId, fallback, false, null, null, null, null);
+    }
 
     /** 成功回答 */
     public static AiResponse success(String content, double confidence, String provider, Long knowledgeBaseId) {
@@ -28,6 +37,7 @@ public record AiResponse(
 
     /** 带降级说明的回答 */
     public AiResponse withFallback(String content, String provider, double confidence) {
-        return new AiResponse(content, confidence, provider, this.knowledgeBaseId, true);
+        return new AiResponse(content, confidence, provider, this.knowledgeBaseId, true,
+                needsHuman, modelName, inputTokens, outputTokens, errorCode);
     }
 }
