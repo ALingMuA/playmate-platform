@@ -175,6 +175,27 @@ class ModelEnhancedResponderTest {
     }
 
     @Test
+    void distinguishesOutputLimitFromMalformedResponse() throws Exception {
+        var root = (ObjectNode) mapper.readTree(responseBody);
+        ((ObjectNode) root.path("choices").path(0)).put("finish_reason", "length");
+        responseBody = root.toString();
+        assertThatThrownBy(() -> responder.respond(question())).hasMessage("MODEL_OUTPUT_LIMIT");
+    }
+
+    @Test
+    void acceptsOneJsonFenceButRejectsTrailingObjects() throws Exception {
+        var root = (ObjectNode) mapper.readTree(responseBody);
+        var message = (ObjectNode) root.path("choices").path(0).path("message");
+        String json = message.path("content").asText();
+        message.put("content", "```json\n" + json + "\n```");
+        responseBody = root.toString();
+        assertThat(responder.respond(question()).fallback()).isFalse();
+        message.put("content", json + " {}");
+        responseBody = root.toString();
+        assertThatThrownBy(() -> responder.respond(question())).hasMessage("MODEL_INVALID_RESPONSE");
+    }
+
+    @Test
     void rejectsMalformedCompletion() {
         responseBody = "not json";
         assertThatThrownBy(() -> responder.respond(question())).hasMessage("MODEL_INVALID_RESPONSE");

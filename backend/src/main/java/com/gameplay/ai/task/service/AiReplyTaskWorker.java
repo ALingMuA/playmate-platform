@@ -108,7 +108,8 @@ public class AiReplyTaskWorker {
         taskService.notifyStatus(task, conversation.getInitiatorUserId());
         return new AiRequest(message.getContent(), "来源:" + conversation.getSourceType(), conversation.getId(),
                 orderSummary, conversation.getUnresolvedCount(), false,
-                messageService.aiHistory(conversation.getId(), message.getId(), properties.getHistoryMessages()));
+                // 客户端根据本次配置快照裁剪历史；此处只读到最大允许条数。
+                messageService.aiHistory(conversation.getId(), message.getId(), 50));
     }
 
     /** 超时遗留任务只终止并转人工，避免进程重启后重复请求模型产生额外费用。 */
@@ -116,7 +117,7 @@ public class AiReplyTaskWorker {
         LocalDateTime now = LocalDateTime.now();
         List<AiReplyTask> candidates = taskMapper.selectList(new LambdaQueryWrapper<AiReplyTask>()
                 .in(AiReplyTask::getStatus, "PENDING", "RUNNING")
-                .lt(AiReplyTask::getUpdatedAt, now.minusSeconds(Math.max(properties.getTimeoutSeconds() + 15, 40)))
+                .lt(AiReplyTask::getUpdatedAt, now.minusSeconds(135))
                 .orderByAsc(AiReplyTask::getId).last("LIMIT 100"));
         for (AiReplyTask candidate : candidates) {
             try {
@@ -140,7 +141,8 @@ public class AiReplyTaskWorker {
                 return;
             }
             boolean expired = "RUNNING".equals(task.getStatus()) && task.getStartedAt() != null
-                    && task.getStartedAt().isBefore(now.minusSeconds(Math.max(properties.getTimeoutSeconds() + 15, 40)));
+                    // 管理员降低超时时不能提前终止使用旧配置的在途请求。
+                    && task.getStartedAt().isBefore(now.minusSeconds(135));
             expired |= "PENDING".equals(task.getStatus()) && task.getCreatedAt().isBefore(now.minusMinutes(2));
             if (expired) {
                 conversationService.completeAiTask(task.getId(), null, "TASK_TIMEOUT");

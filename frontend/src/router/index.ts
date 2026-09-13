@@ -135,6 +135,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'complaints', name: 'admin-complaints', component: () => import('@/views/admin/ComplaintsManageView.vue'), meta: { title: '投诉管理' } },
       { path: 'announcements', name: 'admin-announcements', component: () => import('@/views/admin/AnnouncementsManageView.vue'), meta: { title: '公告管理' } },
       { path: 'ai-knowledge', name: 'admin-ai-knowledge', component: () => import('@/views/admin/AiKnowledgeManageView.vue'), meta: { title: 'AI 知识库' } },
+      { path: 'ai-settings', name: 'admin-ai-settings', component: () => import('@/views/admin/AiSettingsView.vue'), meta: { title: 'AI 接口配置' } },
       { path: 'cs-accounts', name: 'admin-cs-accounts', component: () => import('@/views/admin/CsAccountsManageView.vue'), meta: { title: '客服账号' } },
       { path: 'operation-logs', name: 'admin-operation-logs', component: () => import('@/views/admin/OperationLogsView.vue'), meta: { title: '操作日志' } },
     ],

@@ -41,10 +41,13 @@ ai:
     enabled: ${AI_MODEL_ENABLED:false}
     base-url: ${AI_MODEL_BASE_URL:https://token.sensenova.cn/v1}
     api-key: ${AI_MODEL_API_KEY:${SENSENOVA_API_KEY:}}
-    name: ${AI_MODEL_NAME:sensenova-6.7-flash-lite}
+    name: ${AI_MODEL_NAME:sensenova-6.8-flash-lite}
     timeout-seconds: ${AI_MODEL_TIMEOUT_SECONDS:25}
     max-output-tokens: ${AI_MODEL_MAX_OUTPUT_TOKENS:800}
     history-messages: ${AI_MODEL_HISTORY_MESSAGES:12}
+  config:
+    # 可指定独立的加密主密钥；未指定时从本机 JWT 密钥派生，不输出到管理页面。
+    encryption-key: ${AI_CONFIG_ENCRYPTION_KEY:${jwt.secret}}
 
 # 文件存储（概要设计 4.7：本地磁盘实现，可替换为对象存储）
 file:
