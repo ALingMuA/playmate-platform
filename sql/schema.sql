@@ -524,3 +524,11 @@ CREATE TABLE operation_log (
   KEY idx_ol_target (target_type, target_id, created_at),
   KEY idx_ol_request (request_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='后台与客服操作审计日志表';
+
+CREATE TABLE IF NOT EXISTS ai_model_settings (
+  id BIGINT NOT NULL PRIMARY KEY,
+  encrypted_config MEDIUMTEXT NULL COMMENT 'AES-GCM 加密后的完整配置；NULL 表示使用本机配置',
+  version BIGINT NOT NULL DEFAULT 1,
+  updated_by BIGINT NOT NULL DEFAULT 0,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='管理员 AI 接口配置';

@@ -1,6 +1,9 @@
 package com.gameplay.ai.service;
 
 import com.gameplay.ai.config.AiModelProperties;
+import com.gameplay.ai.config.AiModelConfigService;
+import com.gameplay.ai.strategy.ModelEnhancedResponder;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.gameplay.ai.domain.AiCallLog;
 import com.gameplay.ai.enums.AiDecision;
 import com.gameplay.ai.mapper.AiCallLogMapper;
@@ -34,6 +37,8 @@ public class AiResponseFacade {
     private final AiCallLogMapper aiCallLogMapper;
     private final AiTextSanitizer sanitizer;
     private final AiModelProperties modelProperties;
+    @Autowired(required = false)
+    private AiModelConfigService configService;
 
     /** 处理一条用户消息：返回最终应答与决策 */
     public AiProcessResult process(AiRequest request) {
@@ -48,16 +53,23 @@ public class AiResponseFacade {
             AiResponder model = enhancedResponders.stream()
                     .filter(r -> !(r instanceof KnowledgeBaseResponder))
                     .findFirst().orElse(null);
-            if (model != null && modelProperties.isEnabled()) {
+            AiModelProperties settings = modelProperties.copy();
+            boolean configFailed = false;
+            try {
+                if (configService != null) settings = configService.current();
+            } catch (Exception ignored) { configFailed = true; }
+            if (model != null && (settings.isEnabled() || configFailed)) {
                 attemptedProvider = model.provider();
                 try {
-                    response = model.respond(request);
+                    if (configFailed) throw new ModelCallException("MODEL_CONFIGURATION");
+                    response = model instanceof ModelEnhancedResponder configured
+                            ? configured.respond(request, settings) : model.respond(request);
                 } catch (Exception failure) {
                     errorCode = failure instanceof ModelCallException known ? known.errorCode() : "MODEL_UNAVAILABLE";
                     log.warn("AI 模型调用失败，类别={}", errorCode);
                     AiResponse base = knowledgeBaseResponder.respond(request);
                     response = new AiResponse(base.content(), base.confidence(), base.provider(), base.knowledgeBaseId(),
-                            true, false, sanitizer.sanitize(modelProperties.getName(), 100), null, null, errorCode);
+                            true, false, sanitizer.sanitize(settings.getName(), 100), null, null, errorCode);
                 }
             } else {
                 response = knowledgeBaseResponder.respond(request);

@@ -5,10 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.gameplay.ai.config.AiModelProperties;
+import com.gameplay.ai.config.AiModelConfigService;
+import com.gameplay.ai.config.AiModelConfigValidator;
 import com.gameplay.ai.enums.AiProvider;
 import com.gameplay.ai.service.AiKnowledgeBaseService;
 import com.gameplay.ai.service.AiTextSanitizer;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -33,7 +35,6 @@ import java.util.stream.Collectors;
  * 兼容 Chat Completions 的完整回答客户端，不在此层开启数据库事务。
  */
 @Component
-@ConditionalOnProperty(name = "ai.model.enabled", havingValue = "true")
 public class ModelEnhancedResponder implements AiResponder {
 
     private static final String SYSTEM_PROMPT = """
@@ -55,7 +56,9 @@ public class ModelEnhancedResponder implements AiResponder {
     private final AiKnowledgeBaseService knowledgeBaseService;
     private final AiTextSanitizer sanitizer;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private final java.util.concurrent.ConcurrentMap<Integer, HttpClient> clients = new java.util.concurrent.ConcurrentHashMap<>();
+    @Autowired(required = false)
+    private AiModelConfigService configService;
 
     public ModelEnhancedResponder(AiModelProperties properties, AiKnowledgeBaseService knowledgeBaseService,
                                   AiTextSanitizer sanitizer, ObjectMapper objectMapper) {
@@ -63,44 +66,65 @@ public class ModelEnhancedResponder implements AiResponder {
         this.knowledgeBaseService = knowledgeBaseService;
         this.sanitizer = sanitizer;
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .build();
     }
 
     @Override
     public AiResponse respond(AiRequest request) {
-        URI endpoint = endpoint();
-        int timeoutSeconds = Math.max(1, Math.min(properties.getTimeoutSeconds(), 60));
+        return respond(request, configService == null ? properties.copy() : configService.current());
+    }
+
+    public AiResponse respond(AiRequest request, AiModelProperties settings) {
         List<AiKnowledgeBaseService.MatchResult> knowledge = knowledgeBaseService.findRelevant(searchText(request), 3);
+        return execute(request, settings, knowledge);
+    }
+
+    /** 管理员测试只发送固定问候及系统约束，不发送业务数据，也不写客服消息。 */
+    public AiResponse probe(AiModelProperties settings) {
+        return execute(new AiRequest("你好", "", 0L, "", 0, false), settings, List.of());
+    }
+
+    private AiResponse execute(AiRequest request, AiModelProperties properties,
+                               List<AiKnowledgeBaseService.MatchResult> knowledge) {
+        URI endpoint;
+        try {
+            AiModelConfigValidator.validate(properties, true);
+            endpoint = AiModelConfigValidator.endpoint(properties);
+        } catch (Exception ignored) { throw new ModelCallException("MODEL_CONFIGURATION"); }
+        int timeoutSeconds = properties.getTimeoutSeconds();
         String body;
         try {
-            body = objectMapper.writeValueAsString(buildBody(request, knowledge));
+            body = objectMapper.writeValueAsString(buildBody(request, knowledge, properties));
         } catch (Exception ignored) {
             throw new ModelCallException("MODEL_INVALID_REQUEST");
         }
-        HttpRequest httpRequest = HttpRequest.newBuilder(endpoint)
+        HttpRequest.Builder builder = HttpRequest.newBuilder(endpoint)
                 .timeout(Duration.ofSeconds(timeoutSeconds))
-                .header("Authorization", "Bearer " + properties.getApiKey())
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
+                .POST(HttpRequest.BodyPublishers.ofString(body));
+        if ("BEARER".equals(properties.getAuthMode())) builder.header("Authorization", "Bearer " + properties.getApiKey());
+        if ("API_KEY".equals(properties.getAuthMode())) builder.header(properties.getAuthHeaderName(), properties.getApiKey());
+        properties.getCustomHeaders().forEach(builder::header);
+        HttpRequest httpRequest = builder.build();
+        HttpClient httpClient = clients.computeIfAbsent(properties.getConnectTimeoutSeconds(), seconds -> HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(seconds)).followRedirects(HttpClient.Redirect.NEVER).build());
         CompletableFuture<HttpResponse<String>> pending = httpClient.sendAsync(httpRequest,
                 ignored -> new LimitedBodySubscriber());
         try {
             // get 的期限覆盖响应体接收，避免只收到响应头后无限等待。
             HttpResponse<String> result = pending.get(timeoutSeconds, TimeUnit.SECONDS);
             if (result.statusCode() == 401 || result.statusCode() == 403) {
-                throw new ModelCallException("MODEL_AUTH");
+                throw new ModelCallException("MODEL_AUTH", result.statusCode());
             }
             if (result.statusCode() == 429) {
-                throw new ModelCallException("MODEL_RATE_LIMIT");
+                throw new ModelCallException("MODEL_RATE_LIMIT", result.statusCode());
             }
+            if (result.statusCode() == 404) throw new ModelCallException("MODEL_NOT_FOUND", 404);
+            if (result.statusCode() == 400 || result.statusCode() == 422) throw new ModelCallException("MODEL_BAD_REQUEST", result.statusCode());
             if (result.statusCode() < 200 || result.statusCode() >= 300) {
-                throw new ModelCallException("MODEL_UNAVAILABLE");
+                throw new ModelCallException("MODEL_UNAVAILABLE", result.statusCode());
             }
-            return parseResponse(result.body(), request, knowledge);
+            try { return parseResponse(result.body(), request, knowledge, properties); }
+            catch (ModelCallException invalid) { throw new ModelCallException(invalid.errorCode(), result.statusCode()); }
         } catch (TimeoutException ignored) {
             pending.cancel(true);
             throw new ModelCallException("MODEL_TIMEOUT");
@@ -117,24 +141,6 @@ public class ModelEnhancedResponder implements AiResponder {
         }
     }
 
-    private URI endpoint() {
-        try {
-            if (!StringUtils.hasText(properties.getApiKey()) || !StringUtils.hasText(properties.getName())) {
-                throw new IllegalArgumentException();
-            }
-            URI uri = URI.create(properties.getBaseUrl().replaceAll("/+$", "") + "/chat/completions");
-            boolean loopback = uri.getHost() != null && Set.of("localhost", "127.0.0.1", "[::1]", "::1").contains(uri.getHost());
-            if (uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null
-                    || uri.getHost() == null || !("https".equalsIgnoreCase(uri.getScheme())
-                    || ("http".equalsIgnoreCase(uri.getScheme()) && loopback))) {
-                throw new IllegalArgumentException();
-            }
-            return uri;
-        } catch (Exception ignored) {
-            throw new ModelCallException("MODEL_CONFIGURATION");
-        }
-    }
-
     private String searchText(AiRequest request) {
         StringBuilder text = new StringBuilder(sanitizer.sanitize(request.content(), AiRequest.MAX_CONTENT_LENGTH));
         List<AiRequest.ContextMessage> history = request.history();
@@ -144,16 +150,16 @@ public class ModelEnhancedResponder implements AiResponder {
         return text.toString();
     }
 
-    private ObjectNode buildBody(AiRequest request, List<AiKnowledgeBaseService.MatchResult> knowledge) {
-        ObjectNode body = objectMapper.createObjectNode();
+    private ObjectNode buildBody(AiRequest request, List<AiKnowledgeBaseService.MatchResult> knowledge, AiModelProperties properties) {
+        ObjectNode body = properties.getExtraBody() == null ? objectMapper.createObjectNode() : properties.getExtraBody().deepCopy();
         body.put("model", properties.getName());
         body.put("stream", false);
-        body.put("temperature", 0.2);
-        body.put("max_tokens", Math.max(64, Math.min(properties.getMaxOutputTokens(), 4000)));
+        if (properties.getTemperature() != null) body.put("temperature", properties.getTemperature());
+        body.put(properties.getMaxTokensParameter(), properties.getMaxOutputTokens());
         ArrayNode messages = body.putArray("messages");
         messages.addObject().put("role", "system").put("content", SYSTEM_PROMPT);
 
-        int historyLimit = Math.max(0, Math.min(properties.getHistoryMessages(), 20));
+        int historyLimit = Math.max(0, Math.min(properties.getHistoryMessages(), 50));
         List<AiRequest.ContextMessage> history = request.history();
         history.stream().skip(Math.max(0, history.size() - historyLimit))
                 .filter(message -> "user".equals(message.role()) || "assistant".equals(message.role()))
@@ -176,13 +182,14 @@ public class ModelEnhancedResponder implements AiResponder {
     }
 
     private AiResponse parseResponse(String raw, AiRequest request,
-                                     List<AiKnowledgeBaseService.MatchResult> knowledge) {
+                                     List<AiKnowledgeBaseService.MatchResult> knowledge, AiModelProperties properties) {
         try {
             if (raw == null || raw.length() > 100_000) {
                 throw new ModelCallException("MODEL_INVALID_RESPONSE");
             }
             JsonNode root = objectMapper.readTree(raw);
             JsonNode choice = root.path("choices").path(0);
+            if ("length".equals(choice.path("finish_reason").asText())) throw new ModelCallException("MODEL_OUTPUT_LIMIT");
             if (!"stop".equals(choice.path("finish_reason").asText())) {
                 throw new ModelCallException("MODEL_INVALID_RESPONSE");
             }
@@ -190,7 +197,11 @@ public class ModelEnhancedResponder implements AiResponder {
             if (!content.isTextual() || content.asText().length() > 12_000) {
                 throw new ModelCallException("MODEL_INVALID_RESPONSE");
             }
-            JsonNode answer = objectMapper.readTree(content.asText());
+            String json = content.asText().trim();
+            // 只兼容包围完整 JSON 的单层代码围栏，仍执行相同的内容与依据校验。
+            if (json.startsWith("```json\n") && json.endsWith("```")) json = json.substring(8, json.length() - 3).trim();
+            else if (json.startsWith("```\n") && json.endsWith("```")) json = json.substring(4, json.length() - 3).trim();
+            JsonNode answer = objectMapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(json);
             if (!answer.isObject() || !answer.path("answer").isTextual()
                     || !answer.path("needsHuman").isBoolean() || !answer.path("knowledgeIds").isArray()) {
                 throw new ModelCallException("MODEL_INVALID_RESPONSE");

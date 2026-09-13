@@ -12,6 +12,7 @@ const menus = [
   { path: '/admin/complaints', label: '投诉管理' },
   { path: '/admin/announcements', label: '公告管理' },
   { path: '/admin/ai-knowledge', label: 'AI 知识库' },
+  { path: '/admin/ai-settings', label: 'AI 接口配置' },
   { path: '/admin/cs-accounts', label: '客服账号' },
   { path: '/admin/operation-logs', label: '操作日志' },
 ]

@@ -98,7 +98,7 @@ public class CustomerMessageService {
                         .lt(CustomerServiceMessage::getId, beforeMessageId)
                         .in(CustomerServiceMessage::getSenderType, SenderType.USER.name(), SenderType.AI.name())
                         .orderByDesc(CustomerServiceMessage::getId)
-                        .last("LIMIT " + Math.min(Math.max(size, 1), 30)));
+                        .last("LIMIT " + Math.min(Math.max(size, 1), 50)));
         Collections.reverse(messages);
         return messages.stream().map(m -> new AiRequest.ContextMessage(
                 SenderType.USER.name().equals(m.getSenderType()) ? "user" : "assistant", m.getContent())).toList();
