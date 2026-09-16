@@ -34,5 +34,9 @@ application-local.*.yml
 upload/
 uploads/
 
+# 部署时的生产环境变量（含数据库密码/模型密钥，不入库）
+deploy/gameplay.env
+deploy/.staging/
+
 # 测试与覆盖率报告
 coverage/
