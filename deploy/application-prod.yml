@@ -1,0 +1,18 @@
+# 生产环境覆盖项（部署到 /opt/gamemate/application-prod.yml）
+# 敏感值不在本文件里，由 /opt/gamemate/gameplay.env 通过环境变量注入。
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+logging:
+  level:
+    com.gameplay: info
+    org.springframework: warn
+  file:
+    name: /opt/gamemate/spring.log
+
+# 上传文件落盘目录，与 nginx 的 /uploads/ 别名保持一致
+file:
+  storage:
+    dir: /opt/gamemate/uploads

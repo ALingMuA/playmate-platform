@@ -1,0 +1,21 @@
+[Unit]
+Description=游戏陪玩系统后端（Spring Boot 3）
+Documentation=file:/opt/gamemate/README.md
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/gamemate
+EnvironmentFile=/opt/gamemate/gameplay.env
+# 1.6G 小内存实例：限制堆与元空间，避免与 MySQL/Redis 争抢导致 OOM
+ExecStart=/usr/bin/java -Xms128m -Xmx512m -XX:MaxMetaspaceSize=192m -jar /opt/gamemate/gameplay-backend.jar --spring.profiles.active=prod
+SuccessExitStatus=143
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/gamemate/app.log
+StandardError=append:/opt/gamemate/app.log
+
+[Install]
+WantedBy=multi-user.target
