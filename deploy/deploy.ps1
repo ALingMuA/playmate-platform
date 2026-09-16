@@ -57,9 +57,12 @@ New-Item -ItemType Directory -Path $staging -Force | Out-Null
 Copy-Item $jar (Join-Path $staging 'gameplay-backend.jar') -Force
 Copy-Item (Join-Path $repo 'sql\schema.sql') $staging -Force
 Copy-Item (Join-Path $repo 'sql\data.sql') $staging -Force
-foreach ($f in 'gameplay.service', 'application-prod.yml', 'nginx-gamemate.conf', 'remote-deploy.sh') {
+foreach ($f in 'gameplay.service', 'application-prod.yml', 'nginx-gamemate.conf') {
   Copy-Item (Join-Path $PSScriptRoot $f) $staging -Force
 }
+# shell 脚本强制 LF：Windows 检出后若为 CRLF，Linux 上 bash 会报 $'\\r': command not found
+$shText = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'remote-deploy.sh')) -replace ([string][char]13 + [string][char]10), [string][char]10
+[System.IO.File]::WriteAllText((Join-Path $staging 'remote-deploy.sh'), $shText, (New-Object System.Text.UTF8Encoding($false)))
 Copy-Item $envFile (Join-Path $staging 'gameplay.env') -Force
 
 Step '打包前端 dist'
