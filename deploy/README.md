@@ -16,7 +16,22 @@
 
 nginx 职责：`/` 静态前端（SPA 回退 index.html）、`/api/` → 8080、`/ws/cs` → 8080（WebSocket，需 Upgrade 转发）。
 
-## 二、日常运维
+## 二、已停止的其他服务（2026-09-16）
+
+本实例原本还跑着另一个独立项目 **skn**。按要求「除本系统外全部停掉」后，当前服务器只服务本系统：
+
+| 服务 | 停止方式 | 恢复方式 |
+|---|---|---|
+| `skn-api`（node，:3001，PM2 托管） | `pm2 delete skn-api` → `pm2 save` → `pm2 kill` → `systemctl disable --now pm2-root` | `systemctl enable --now pm2-root` 后 `pm2 resurrect` |
+| `redis-server`（:6379，已设密码） | `systemctl disable --now redis-server` | `systemctl enable --now redis-server` |
+
+- 两者**开机自启均已关闭**，重启不会复活。本系统不依赖 Redis（pom 与源码 0 引用，java 进程只连 MySQL）。
+- `/opt/skn`（572M）文件与 nginx 站点 `sknstse.cn` **均保留未删**，恢复后即可用。
+  当前 `https://sknstse.cn/` 仍返回 200（静态前端由 nginx 提供），只有 `/skn-api/` 返回 502。
+- **保留未动**：`mysql`、`nginx`（本系统依赖），以及阿里云平台代理（`aliyun` 云助手、
+  `cloudmonitor` 云监控、aegis 云盾）——停掉会失去控制台的远程连接与监控能力。
+
+## 三、日常运维
 
 ```bash
 systemctl status gameplay        # 查看状态
@@ -27,7 +42,7 @@ tail -f /opt/gamemate/app.log    # 应用日志
 
 登录入口 <http://120.27.144.223/login>，预置管理员 `admin / Admin@123456`（首次登录后请立即修改）。
 
-## 三、重新部署
+## 四、重新部署
 
 ### 1. 配置密钥（首次）
 
@@ -49,7 +64,7 @@ pwsh -File deploy\deploy.ps1 -SkipBuild   # 用现有产物直接部署
 
 **回滚**：把 `/opt/backup-<时间戳>/` 中的 `frontend` 与旧 jar 拷回 `/opt/gamemate`，再 `systemctl restart gameplay`。
 
-## 四、连接服务器
+## 五、连接服务器
 
 ### 方式一：SSH（推荐，部署脚本走这条）
 
@@ -75,7 +90,7 @@ workbench connect -i i-bp1g2jk5s1tq8lsa1r3p --region cn-hangzhou
 > pwsh -File deploy\ecs-runcommand.ps1 -Action RunCommand -Script "systemctl status gameplay"
 > ```
 
-## 五、目录说明
+## 六、目录说明
 
 | 文件 | 作用 |
 |---|---|
@@ -87,7 +102,7 @@ workbench connect -i i-bp1g2jk5s1tq8lsa1r3p --region cn-hangzhou
 | `gameplay.env.example` | 环境变量模板（真实文件 `gameplay.env` 不入库） |
 | `ecs-runcommand.ps1` | 直连阿里云 ECS OpenAPI，经云助手在实例上执行命令 |
 
-## 六、本次部署的注意事项
+## 七、本次部署的注意事项
 
 1. 服务器上原有的 `/opt/gamemate` 是**另一个更早的项目**（`com.gamemate` 包、JPA、库名 `gamemate`），
    与当前项目（`com.gameplay`、MyBatis-Plus、库名 `game_companion_app`）表结构完全不同，
