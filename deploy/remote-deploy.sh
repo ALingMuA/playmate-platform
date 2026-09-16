@@ -62,6 +62,9 @@ install -m 600 "$STAGE/gameplay.env" "$APP_DIR/gameplay.env"
 install -m 644 "$STAGE/application-prod.yml" "$APP_DIR/application-prod.yml"
 mkdir -p "$APP_DIR/uploads"
 chown -R root:root "$APP_DIR/frontend" "$APP_DIR/$JAR" "$APP_DIR/uploads"
+# tar 解包可能带出 777 权限，Web 根目录必须收紧
+find "$APP_DIR/frontend" -type d -exec chmod 755 {} +
+find "$APP_DIR/frontend" -type f -exec chmod 644 {} +
 
 log "5/7 初始化数据库 $DB_NAME"
 mysql -uroot < "$STAGE/schema.sql"
