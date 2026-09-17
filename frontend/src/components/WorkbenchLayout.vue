@@ -42,10 +42,11 @@ const userStore = useUserStore()
 
 const activeMenu = computed(() => (props.activePath ? props.activePath(route.path) : route.path))
 const pageTitle = computed(() => (route.meta.title as string | undefined) ?? props.brand)
-const canGoBack = computed(() => route.path !== '/companion/schedule' && route.path !== '/cs/queue' && route.path !== '/admin/dashboard')
+// 工作台首页不显示"返回上一页"按钮；首页由路由 meta.workbenchHome 标注，避免硬编码路径
+const canGoBack = computed(() => !route.meta.workbenchHome)
 
 const menuIcons: Record<string, Component> = {
-  '入驻申请': Document,
+  '我的陪玩主页': UserFilled,
   '服务管理': Service,
   '档期管理': Tickets,
   '接单履约': Collection,

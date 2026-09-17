@@ -1,4 +1,11 @@
 <script setup lang="ts">
+/**
+ * @deprecated 入驻申请已迁移到用户端 `views/user/BecomeCompanionView.vue`（路由 `/become-companion`）。
+ *
+ * <p>本页原先挂在 `/companion/application` 下，因父路由要求 COMPANION 角色，普通用户无法访问，
+ * 形成"要申请得先是陪玩师"的死锁；该地址现已改为重定向到用户端申请页。
+ * 文件暂时保留（其能力表单与申请时间线已被新页复用），确认新页验收通过后由后续任务删除。</p>
+ */
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { listGames, listTags, type Game, type TagView } from '@/api/catalog'
