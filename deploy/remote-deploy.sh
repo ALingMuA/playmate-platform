@@ -66,10 +66,17 @@ chown -R root:root "$APP_DIR/frontend" "$APP_DIR/$JAR" "$APP_DIR/uploads"
 find "$APP_DIR/frontend" -type d -exec chmod 755 {} +
 find "$APP_DIR/frontend" -type f -exec chmod 644 {} +
 
-log "5/7 初始化数据库 $DB_NAME"
-mysql -uroot < "$STAGE/schema.sql"
-mysql -uroot < "$STAGE/data.sql"
+log "5/7 检查数据库 $DB_NAME"
 set -a; . "$STAGE/gameplay.env"; set +a
+# schema.sql 使用 CREATE TABLE（非 IF NOT EXISTS），重复执行会报错并因 set -e 中断部署，
+# 因此仅在库不存在时初始化，已有库保持不变（结构变更需另写迁移脚本）。
+if mysql -uroot -N -e "select 1 from information_schema.tables where table_schema='$DB_NAME' and table_name='user';" | grep -q 1; then
+  echo "  数据库已存在，跳过 schema/种子数据导入（保留线上数据）"
+else
+  echo "  首次部署，执行 schema.sql 与 data.sql"
+  mysql -uroot < "$STAGE/schema.sql"
+  mysql -uroot < "$STAGE/data.sql"
+fi
 mysql -uroot -e "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASSWORD';"
 mysql -uroot -e "ALTER USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASSWORD';"
 mysql -uroot -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost'; FLUSH PRIVILEGES;"
@@ -107,8 +114,17 @@ echo
 echo "=== 健康检查 ==="
 printf '  首页        : '; curl -s -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1/
 printf '  后端直连    : '; curl -s -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:8080/api/announcements
-printf '  登录(admin) : '; curl -s -o /dev/null -w 'HTTP %{http_code}\n' -X POST http://127.0.0.1/api/auth/login -H 'Content-Type: application/json' -d '{"username":"admin","password":"Admin@123456"}'
-printf '  WebSocket   : '; curl -s -o /dev/null -w 'HTTP %{http_code}\n' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' http://127.0.0.1/ws/cs
+printf '  登录(admin) : '; curl -s -o /dev/null -w 'HTTP %{http_code}\n' -X POST http://127.0.0.1/api/auth/login -H 'Content-Type: application/json' -d '{"account":"admin","password":"Admin@123456"}'
+TOKEN=$(curl -s -X POST http://127.0.0.1:8080/api/auth/login -H 'Content-Type: application/json' -d '{"account":"admin","password":"Admin@123456"}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+printf '  受保护接口  : '; curl -s -o /dev/null -w 'HTTP %{http_code}\n' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/admin/stats/overview
+printf '  WebSocket   : '; curl -s -o /dev/null --max-time 3 -w 'HTTP %{http_code}\n' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "http://127.0.0.1/ws/cs?token=$TOKEN"
+# 只保留最近 5 份备份，避免磁盘堆积（每份含 jar 与前端，约 40M）
+KEEP=5
+OLD_BACKUPS=$(ls -1dt /opt/backup-* 2>/dev/null | tail -n +$((KEEP + 1)) || true)
+if [ -n "$OLD_BACKUPS" ]; then
+  echo "$OLD_BACKUPS" | while read -r d; do echo "  清理旧备份: $d"; rm -rf "$d"; done
+fi
+
 echo
 echo "备份目录: $BACKUP_DIR"
 echo "查看日志: journalctl -u $SERVICE -f"
