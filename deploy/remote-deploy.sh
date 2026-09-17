@@ -117,7 +117,9 @@ printf '  后端直连    : '; curl -s -o /dev/null -w 'HTTP %{http_code}\n' htt
 printf '  登录(admin) : '; curl -s -o /dev/null -w 'HTTP %{http_code}\n' -X POST http://127.0.0.1/api/auth/login -H 'Content-Type: application/json' -d '{"account":"admin","password":"Admin@123456"}'
 TOKEN=$(curl -s -X POST http://127.0.0.1:8080/api/auth/login -H 'Content-Type: application/json' -d '{"account":"admin","password":"Admin@123456"}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 printf '  受保护接口  : '; curl -s -o /dev/null -w 'HTTP %{http_code}\n' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/admin/stats/overview
-printf '  WebSocket   : '; curl -s -o /dev/null --max-time 3 -w 'HTTP %{http_code}\n' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "http://127.0.0.1/ws/cs?token=$TOKEN"
+# 握手成功后连接会保持，curl 到 --max-time 超时退出（码 28）；必须吞掉退出码，
+# 否则 set -e 会把"健康检查成功"误判为部署失败
+printf '  WebSocket   : '; curl -s -o /dev/null --max-time 3 -w 'HTTP %{http_code}\n' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "http://127.0.0.1/ws/cs?token=$TOKEN" || true
 # 只保留最近 5 份备份，避免磁盘堆积（每份含 jar 与前端，约 40M）
 KEEP=5
 OLD_BACKUPS=$(ls -1dt /opt/backup-* 2>/dev/null | tail -n +$((KEEP + 1)) || true)
