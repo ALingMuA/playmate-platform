@@ -20,6 +20,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -724,5 +725,178 @@ class CompanionModuleTest {
                         .header("Authorization", bearer(nToken)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("PERMISSION_DATA_SCOPE_DENIED"));
+    }
+
+    // ==================== FR-M10~M12 目录引用校验与停用收口 ====================
+
+    @Test
+    @DisplayName("目录删除护栏：被服务引用的游戏/服务类型/标签返回 409 CATALOG_IN_USE")
+    void catalog_delete_referenced_blocks() throws Exception {
+        String admin = adminToken();
+        JsonNode companion = prepareCompanion(admin);
+        String cToken = companion.path("token").asText();
+        long gameId = firstGameId();
+        long typeId = firstServiceTypeId();
+        long tagId = firstTagId(gameId);
+
+        // 创建引用了「该游戏 + 该类型 + 该标签」的服务
+        long serviceId = createServiceWithTag(cToken, gameId, typeId, tagId);
+        assertThat(serviceId).isPositive();
+
+        mockMvc.perform(delete("/api/admin/service-types/" + typeId)
+                        .header("Authorization", bearer(admin)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CATALOG_IN_USE"));
+
+        mockMvc.perform(delete("/api/admin/tags/" + tagId)
+                        .header("Authorization", bearer(admin)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CATALOG_IN_USE"));
+
+        mockMvc.perform(delete("/api/admin/games/" + gameId)
+                        .header("Authorization", bearer(admin)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CATALOG_IN_USE"));
+
+        // 三个目录项都还在（未被误删）
+        mockMvc.perform(get("/api/games/" + gameId)).andExpect(status().isOk());
+        mockMvc.perform(get("/api/service-types")).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("停用游戏收口：服务从公开列表隐藏，且直接下单被拒（P4/P7）")
+    void disabled_game_hides_service_and_blocks_order() throws Exception {
+        String admin = adminToken();
+        JsonNode companion = prepareCompanion(admin);
+        String cToken = companion.path("token").asText();
+        long companionUserId = companion.path("userId").asLong();
+        long gameId = firstGameId();
+        String gameName = gameName(gameId);
+
+        // 陪玩师可接单 + 档期覆盖，服务过审并上架
+        mockMvc.perform(put("/api/companion/profile/service-status")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode().put("serviceStatus", "AVAILABLE").toString()))
+                .andExpect(status().isOk());
+        LocalDateTime now = LocalDateTime.now();
+        mockMvc.perform(post("/api/companion/availabilities")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("startAt", now.minusHours(1).format(FMT))
+                                .put("endAt", now.plusHours(5).format(FMT))
+                                .toString()))
+                .andExpect(status().isOk());
+        long serviceId = createService(cToken);
+        auditApproveService(admin, serviceId);
+        mockMvc.perform(put("/api/companion/services/" + serviceId + "/shelf?onShelf=true")
+                        .header("Authorization", bearer(cToken)))
+                .andExpect(status().isOk());
+
+        // 停用前：公开列表可见
+        assertThat(publicListHasService(serviceId, companionUserId)).isTrue();
+
+        // 管理员停用该游戏
+        setGameEnabled(admin, gameId, gameName, 0);
+
+        // P4：公开列表不再返回该服务
+        assertThat(publicListHasService(serviceId, companionUserId)).isFalse();
+
+        // P7：拿到 serviceId 直接下单也要被拒（修复前会下单成功）
+        JsonNode user = registerAndLogin(uniqueUser());
+        mockMvc.perform(post("/api/play-orders")
+                        .header("Authorization", bearer(user.path("token").asText()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("companionUserId", companionUserId)
+                                .put("companionServiceId", serviceId)
+                                .put("durationMinutes", 120)
+                                .put("gameServer", "微信区")
+                                .put("gameNickname", "路人乙")
+                                .put("userRemark", "停用游戏直接下单")
+                                .put("appointmentStartAt", now.plusMinutes(30).format(FMT))
+                                .toString()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("SERVICE_NOT_AVAILABLE"));
+
+        // 恢复启用后服务重新可见（停用是可逆的）
+        setGameEnabled(admin, gameId, gameName, 1);
+        assertThat(publicListHasService(serviceId, companionUserId)).isTrue();
+    }
+
+    /** 创建带标签的服务项目 */
+    private long createServiceWithTag(String token, long gameId, long serviceTypeId, long tagId) throws Exception {
+        ObjectNode req = objectMapper.createObjectNode()
+                .put("gameId", gameId)
+                .put("serviceTypeId", serviceTypeId)
+                .put("title", "目录校验服务" + uniqueUser())
+                .put("description", "用于目录引用校验")
+                .put("priceCents", 5000)
+                .put("minDurationMinutes", 60);
+        req.putArray("tagIds").add(tagId);
+        MvcResult result = mockMvc.perform(post("/api/companion/services")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(req.toString()))
+                .andExpect(status().isOk())
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+    }
+
+    /** 取指定游戏的第一个已启用标签 id */
+    private long firstTagId(long gameId) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/tags").param("gameId", String.valueOf(gameId)))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode data = objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+        assertThat(data.size()).isPositive();
+        return data.get(0).path("id").asLong();
+    }
+
+    /** 游戏名称（管理端更新为全量更新，需回填既有字段） */
+    private String gameName(long gameId) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/games")).andExpect(status().isOk()).andReturn();
+        JsonNode data = objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+        for (JsonNode game : data) {
+            if (game.path("id").asLong() == gameId) {
+                return game.path("gameName").asText();
+            }
+        }
+        throw new IllegalStateException("游戏不存在: " + gameId);
+    }
+
+    /** 管理员启用/停用游戏 */
+    private void setGameEnabled(String adminToken, long gameId, String gameName, int enabled) throws Exception {
+        mockMvc.perform(put("/api/admin/games/" + gameId)
+                        .header("Authorization", bearer(adminToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("gameName", gameName)
+                                .put("gameIconUrl", "")
+                                .put("gameIntro", "")
+                                .put("sortNo", 1)
+                                .put("enabled", enabled)
+                                .toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+    }
+
+    /** 公开可预约服务列表中是否存在指定服务（分页 total 也应同步变化） */
+    private boolean publicListHasService(long serviceId, long companionUserId) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/companion-services")
+                        .param("companionUserId", String.valueOf(companionUserId))
+                        .param("page", "1")
+                        .param("size", "50"))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode data = objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+        for (JsonNode record : data.path("records")) {
+            if (record.path("id").asLong() == serviceId) {
+                return true;
+            }
+        }
+        return false;
     }
 }

@@ -20,14 +20,21 @@ public class ServiceView {
     private String gameName;
     private Long serviceTypeId;
     private String serviceTypeName;
+
+    /** 服务类型是否仍启用：0 否（已停用，前端标注）、1 是；类型被删除时为 0 */
+    private Integer serviceTypeEnabled;
+
     private String title;
     private String description;
 
     /** 标签ID列表 */
     private List<Long> tagIds;
 
-    /** 标签名称列表 */
+    /** 已启用标签名称列表（现有消费方沿用该字段） */
     private List<String> tagNames;
+
+    /** 已停用或已被删除的标签名称（前端据此加"已停用"标注），取不到名称时回落为「标签#id」 */
+    private List<String> disabledTagNames;
 
     /** 每小时价格，单位分 */
     private Long priceCents;

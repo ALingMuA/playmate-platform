@@ -15,6 +15,8 @@ import com.gameplay.companion.enums.CompanionServiceStatus;
 import com.gameplay.companion.enums.ServiceAuditStatus;
 import com.gameplay.companion.enums.ShelfStatus;
 import com.gameplay.companion.mapper.CompanionAvailabilityMapper;
+import com.gameplay.catalog.domain.Game;
+import com.gameplay.catalog.mapper.GameMapper;
 import com.gameplay.companion.mapper.CompanionProfileMapper;
 import com.gameplay.companion.mapper.CompanionServiceMapper;
 import com.gameplay.order.domain.OrderStatusHistory;
@@ -60,6 +62,7 @@ public class OrderService {
     private final OrderStatusHistoryMapper historyMapper;
     private final CompanionServiceMapper companionServiceMapper;
     private final CompanionProfileMapper companionProfileMapper;
+    private final GameMapper gameMapper;
     private final CompanionAvailabilityMapper availabilityMapper;
     private final UserMapper userMapper;
     private final WalletService walletService;
@@ -77,6 +80,11 @@ public class OrderService {
         if (!ServiceAuditStatus.APPROVED.name().equals(service.getAuditStatus())
                 || !ShelfStatus.ON_SHELF.name().equals(service.getServiceStatus())) {
             throw new BusinessException(ErrorCode.SERVICE_NOT_AVAILABLE);
+        }
+        // 1.1 游戏启用校验：游戏停用后不得再产生新订单（与用户端列表隐藏口径一致，FR-M10）
+        Game game = gameMapper.selectById(service.getGameId());
+        if (game == null || !Integer.valueOf(1).equals(game.getEnabled())) {
+            throw new BusinessException(ErrorCode.SERVICE_NOT_AVAILABLE, "该游戏已停用，暂不可预约");
         }
         // 2. 不能预约自己
         if (req.getCompanionUserId().equals(userId)) {

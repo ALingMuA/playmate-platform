@@ -74,6 +74,8 @@ public enum ErrorCode {
     SERVICE_TYPE_CODE_EXISTS(409, "SERVICE_TYPE_CODE_EXISTS", "服务类型编码已存在"),
     TAG_NOT_FOUND(404, "TAG_NOT_FOUND", "标签不存在"),
     TAG_EXISTS(409, "TAG_EXISTS", "同一游戏同一分类下标签名称已存在"),
+    /** 目录项（游戏/服务类型/标签）已被当前业务数据引用，禁止删除，应改为停用 */
+    CATALOG_IN_USE(409, "CATALOG_IN_USE", "该目录项已被引用，无法删除，请改为停用"),
 
     // ===== 陪玩师入驻与主页（FR-P01~P06） =====
     COMPANION_APPLICATION_NOT_FOUND(404, "COMPANION_APPLICATION_NOT_FOUND", "入驻申请不存在"),
