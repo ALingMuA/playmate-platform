@@ -9,9 +9,14 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { listGames, type Game } from '@/api/catalog'
 import { listBookableServices, type BookableService } from '@/api/order'
+import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
+
+/** 入驻申请引导：非陪玩师（含游客）都能看到，点击后由路由守卫引导登录 */
+const showApplyCta = computed(() => !userStore.hasRole('COMPANION'))
 
 const games = ref<Game[]>([])
 const gameId = ref<number | undefined>(undefined)
@@ -140,6 +145,19 @@ watch(
       <div v-else class="empty-state">
         <div class="empty-icon">🔍</div>
         <p>暂无符合条件的陪玩服务，换个游戏看看吧</p>
+      </div>
+
+      <!-- 入驻引导（FR-P01）：陪玩师本人不展示 -->
+      <div v-if="showApplyCta" class="card mt-2">
+        <div class="card-body flex items-center justify-between flex-wrap gap-1">
+          <div>
+            <h3 class="card-title">你也想接单？</h3>
+            <p class="text-muted" style="font-size: 0.875rem; margin: 0">
+              成为平台陪玩师，上架你的陪玩服务，让更多玩家找到你
+            </p>
+          </div>
+          <button class="btn btn-primary btn-sm" @click="router.push('/become-companion')">成为陪玩师</button>
+        </div>
       </div>
 
       <!-- 分页（原型 pagination） -->

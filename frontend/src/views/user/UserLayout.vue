@@ -83,6 +83,10 @@ function goLogin() {
                 <el-dropdown-menu>
                   <el-dropdown-item command="/profile">个人中心</el-dropdown-item>
                   <el-dropdown-item command="/orders">我的订单</el-dropdown-item>
+                  <!-- 入驻申请入口：仅非陪玩师可见（已是陪玩师则显示下方工作台入口） -->
+                  <el-dropdown-item v-if="!userStore.hasRole('COMPANION')" command="/become-companion">
+                    成为陪玩师
+                  </el-dropdown-item>
                   <el-dropdown-item v-for="w in workbenches" :key="w.path" :command="w.path" divided>
                     {{ w.label }}
                   </el-dropdown-item>

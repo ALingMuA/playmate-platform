@@ -5,13 +5,14 @@
  * <p>展示并维护头像、昵称、性别、简介等资料（FR-A05），展示虚拟钱包概览（FR-U09），
  * 支持修改密码（FR-A04）、注销全部会话（FR-A06）与退出登录。</p>
  */
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { changePassword, logoutAll, updateProfile, type LoginUser } from '@/api/auth'
 import { walletMe } from '@/api/order'
 import { uploadFile } from '@/api/file'
+import { myApplications, myProfile, type Application, type CompanionProfile } from '@/api/companion'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -19,6 +20,36 @@ const userStore = useUserStore()
 const user = ref<LoginUser | null>(null)
 const wallet = ref<{ balanceCents: number; frozenCents: number; totalIncomeCents: number } | null>(null)
 const loading = ref(false)
+
+// 陪玩中心（FR-P01/P03）：入驻状态与陪玩主页
+const applications = ref<Application[]>([])
+const companionProfile = ref<CompanionProfile | null>(null)
+
+/** 入驻状态：已是陪玩师 / 已通过待生成资料 / 审核中 / 已驳回 / 未申请 */
+const companionState = computed<'COMPANION' | 'APPROVED' | 'PENDING' | 'REJECTED' | 'NEW'>(() => {
+  if (companionProfile.value) return 'COMPANION'
+  const latest = applications.value[0]
+  if (!latest) return 'NEW'
+  if (latest.auditStatus === 'PENDING') return 'PENDING'
+  if (latest.auditStatus === 'APPROVED') return 'APPROVED'
+  return 'REJECTED'
+})
+
+const companionStateText: Record<string, string> = {
+  COMPANION: '已是陪玩师',
+  APPROVED: '审核已通过',
+  PENDING: '审核中',
+  REJECTED: '已驳回',
+  NEW: '未申请',
+}
+
+const companionStateCls: Record<string, string> = {
+  COMPANION: 'badge-success',
+  APPROVED: 'badge-success',
+  PENDING: 'badge-warning',
+  REJECTED: 'badge-destructive',
+  NEW: 'badge-outline',
+}
 
 const roleMap: Record<string, string> = {
   USER: '普通用户',
@@ -38,6 +69,9 @@ async function load() {
     } catch {
       wallet.value = null
     }
+    // 陪玩中心：入驻状态探测失败不影响个人中心其它区块
+    applications.value = await myApplications().catch(() => [])
+    companionProfile.value = await myProfile(true).catch(() => null)
   } finally {
     loading.value = false
   }
@@ -212,6 +246,58 @@ onMounted(load)
               {{ wallet ? fmtMoney(wallet.totalIncomeCents) : '-' }}
             </div>
             <div class="wallet-label">累计收入</div>
+          </div>
+        </div>
+
+        <!-- 陪玩中心（FR-P01/P03/P05） -->
+        <div class="card mt-2">
+          <div class="card-body">
+            <div class="flex items-center justify-between flex-wrap gap-1">
+              <h3 class="card-title">陪玩中心</h3>
+              <span class="badge" :class="companionStateCls[companionState]">
+                {{ companionStateText[companionState] }}
+              </span>
+            </div>
+            <p class="text-muted mt-2" style="font-size: 0.875rem">
+              <template v-if="companionState === 'COMPANION'">
+                展示名：{{ companionProfile?.displayName }} · 已完成 {{ companionProfile?.completedOrderCount ?? 0 }} 单 ·
+                评分 {{ companionProfile?.ratingAvg ?? '-' }}
+              </template>
+              <template v-else-if="companionState === 'APPROVED'">
+                您的入驻审核已通过，可进入陪玩师工作台维护主页与陪玩服务。
+              </template>
+              <template v-else-if="companionState === 'PENDING'">
+                入驻申请已提交（{{ applications[0]?.createdAt?.slice(0, 16) }}），审核通过后即可上架陪玩服务。
+              </template>
+              <template v-else-if="companionState === 'REJECTED'">
+                上次申请未通过：{{ applications[0]?.auditReason || '未填写原因' }}，可修改资料后重新提交。
+              </template>
+              <template v-else>
+                提交入驻申请并通过审核后，即可上架陪玩服务、管理档期并接单赚取收益。
+              </template>
+            </p>
+            <div class="mt-2 flex gap-1 flex-wrap">
+              <button v-if="companionState === 'COMPANION'" class="btn btn-primary btn-sm" @click="router.push('/companion')">
+                进入陪玩师工作台
+              </button>
+              <button
+                v-else-if="companionState === 'APPROVED'"
+                class="btn btn-primary btn-sm"
+                @click="router.push('/companion')"
+              >
+                进入陪玩师工作台
+              </button>
+              <button
+                v-else-if="companionState === 'PENDING'"
+                class="btn btn-outline btn-sm"
+                @click="router.push('/become-companion')"
+              >
+                查看审核进度
+              </button>
+              <button v-else class="btn btn-primary btn-sm" @click="router.push('/become-companion')">
+                {{ companionState === 'REJECTED' ? '重新提交申请' : '成为陪玩师' }}
+              </button>
+            </div>
           </div>
         </div>
 

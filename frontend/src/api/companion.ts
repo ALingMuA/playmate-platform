@@ -99,8 +99,9 @@ export function myApplications(): Promise<Application[]> {
 
 // ==================== 主页 ====================
 
-export function myProfile(): Promise<CompanionProfile> {
-  return request<CompanionProfile>({ url: '/companion/profile', method: 'get' })
+export function myProfile(silentError = false): Promise<CompanionProfile> {
+  // silentError：非陪玩师调用会返回 403 COMPANION_NOT_APPROVED，属正常的"状态探测"结果
+  return request<CompanionProfile>({ url: '/companion/profile', method: 'get', silentError })
 }
 
 export function updateProfile(data: {
