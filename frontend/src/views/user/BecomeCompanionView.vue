@@ -67,6 +67,14 @@ const statusMap: Record<string, { label: string; cls: string }> = {
   REJECTED: { label: '已驳回', cls: 'badge-destructive' },
 }
 
+/** 能力展示名：优先用申请快照里的 gameName，缺失时按 gameId 回查游戏列表 */
+function capabilityText(app: Application): string {
+  const names = (app.capabilities ?? []).map(
+    (c) => c.gameName || games.value.find((g) => g.id === c.gameId)?.gameName || `游戏#${c.gameId}`,
+  )
+  return names.length ? names.join('、') : '-'
+}
+
 const serviceStatusMap: Record<string, string> = {
   AVAILABLE: '可接单',
   BUSY: '忙碌',
@@ -308,7 +316,7 @@ function goWorkbench() {
                 审核意见：{{ app.auditReason }}
               </div>
               <div class="text-muted" style="font-size: 0.8125rem">
-                游戏能力：{{ app.capabilities.map((c) => c.gameName ?? c.gameId).join('、') || '-' }}
+                游戏能力：{{ capabilityText(app) }}
               </div>
             </div>
           </div>
