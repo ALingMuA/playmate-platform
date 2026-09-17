@@ -5,14 +5,26 @@ import { startRouteProgress, stopRouteProgress } from '@/utils/progress'
 
 /**
  * 前端路由分区（与《概要设计说明书》3.3 节一致）：
- *   /           用户端（游客、普通用户、陪玩师共用）
+ *   /           用户端（游客、普通用户、陪玩师共用），含"成为陪玩师"入驻申请页
  *   /companion  陪玩师端（已审核陪玩师）
  *   /support    在线客服（普通用户、陪玩师）
  *   /cs         客服工作台（客服人员）
  *   /admin      管理后台（管理员）
  *
+ * 入驻申请（FR-P01）属于"普通用户 → 陪玩师"的前置流程，因此放在用户端 `/become-companion`，
+ * 不设角色要求；若仍挂在 `/companion` 分区下，普通用户会被角色守卫拦回首页，形成
+ * "先成为陪玩师才能申请、要申请才能成为陪玩师"的死锁。
+ *
  * 路由守卫仅改善体验；真实权限判断由后端 Spring Security 与数据范围校验执行。
  */
+declare module 'vue-router' {
+  interface RouteMeta {
+    /** 角色不足时的兜底跳转路径（未设置时回到首页） */
+    roleFallback?: string
+    /** 是否为工作台首页（首页不显示"返回上一页"按钮） */
+    workbenchHome?: boolean
+  }
+}
 const routes: RouteRecordRaw[] = [
   // ===== 用户端（统一顶部导航布局） =====
   {
@@ -48,6 +60,13 @@ const routes: RouteRecordRaw[] = [
         name: 'user-profile',
         component: () => import('@/views/user/ProfileView.vue'),
         meta: { title: '个人中心', requiresAuth: true },
+      },
+      {
+        // 入驻申请入口（FR-P01~P04）：登录即可访问，不要求陪玩师角色
+        path: 'become-companion',
+        name: 'become-companion',
+        component: () => import('@/views/user/BecomeCompanionView.vue'),
+        meta: { title: '成为陪玩师', requiresAuth: true },
       },
       {
         path: 'support',
@@ -98,10 +117,12 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/companion',
     component: () => import('@/views/companion/CompanionLayout.vue'),
-    meta: { requiresAuth: true, roles: ['COMPANION'] },
+    // 非陪玩师访问时兜底到入驻申请页，而不是丢弃到首页（角色不足的提示与下一步更明确）
+    meta: { requiresAuth: true, roles: ['COMPANION'], roleFallback: '/become-companion' },
     children: [
       { path: '', redirect: '/companion/schedule' },
-      { path: 'application', name: 'companion-application', component: () => import('@/views/companion/ApplicationView.vue'), meta: { title: '入驻申请' } },
+      // 入驻申请已迁移到用户端 `/become-companion`，此处保留重定向以兼容旧链接
+      { path: 'application', redirect: '/become-companion' },
       { path: 'services', name: 'companion-services', component: () => import('@/views/companion/ServiceManageView.vue'), meta: { title: '服务管理' } },
       { path: 'schedule', name: 'companion-schedule', component: () => import('@/views/companion/ScheduleView.vue'), meta: { title: '档期管理' } },
       { path: 'orders', name: 'companion-orders', component: () => import('@/views/companion/OrderFulfillView.vue'), meta: { title: '接单履约' } },
@@ -173,20 +194,28 @@ router.beforeEach(async (to) => {
   const userStore = useUserStore()
   const requiresAuth = to.matched.some((r) => r.meta.requiresAuth)
   const requiredRoles = to.matched.flatMap((r) => (r.meta.roles as string[] | undefined) ?? [])
+  const roleSatisfied = () =>
+    requiredRoles.length === 0 || requiredRoles.some((role) => userStore.hasRole(role))
 
   if (requiresAuth && !userStore.token) {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
-  if (requiresAuth && !userStore.user) {
-    // 刷新后恢复登录态
+  if (requiresAuth && (!userStore.user || !roleSatisfied())) {
+    // 刷新后恢复登录态；角色不足时也刷新一次：
+    // 角色集合写在 JWT 里，入驻审核通过（授予 COMPANION）后旧令牌中的角色是滞后的，
+    // 因此以 `/auth/me` 返回的实时角色为准，避免"审核已通过但仍进不去工作台"
     try {
       await userStore.refreshUser()
     } catch {
-      return { path: '/login', query: { redirect: to.fullPath } }
+      if (!userStore.user) {
+        return { path: '/login', query: { redirect: to.fullPath } }
+      }
     }
   }
-  if (requiredRoles.length > 0 && !requiredRoles.some((role) => userStore.hasRole(role))) {
-    return { path: '/' }
+  if (!roleSatisfied()) {
+    // 角色仍不足：按分区兜底跳转（陪玩师端 → 入驻申请页），未配置兜底的仍在首页
+    const fallback = to.matched.map((r) => r.meta.roleFallback).find((path) => !!path)
+    return { path: fallback ?? '/' }
   }
   return true
 })
