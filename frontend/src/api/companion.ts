@@ -231,3 +231,30 @@ export function adminAudit(id: number, approved: boolean, reason: string): Promi
     data: { approved, reason },
   })
 }
+
+/** 服务项目分页（FR-M07） */
+export function adminServices(
+  auditStatus?: string,
+  page = 1,
+  size = 10,
+): Promise<PageResult<CompanionService>> {
+  return request<PageResult<CompanionService>>({
+    url: '/admin/companion-services',
+    method: 'get',
+    params: { auditStatus, page, size },
+  })
+}
+
+/**
+ * 服务项目审核通过/驳回（FR-M07）。
+ *
+ * <p>注意：后端 `AuditRequest.reason` 为无条件 `@NotBlank`，**通过时也必须传非空 reason**，
+ * 否则返回 400 VALIDATION_FAILED。</p>
+ */
+export function adminAuditService(id: number, approved: boolean, reason: string): Promise<void> {
+  return request<void>({
+    url: `/admin/companion-services/${id}/audit`,
+    method: 'post',
+    data: { approved, reason },
+  })
+}
