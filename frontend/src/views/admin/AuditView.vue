@@ -28,18 +28,43 @@ function onFilterChange() {
 
 onMounted(load)
 
+/**
+ * 审核意见兜底文案。
+ *
+ * <p>后端 `AuditRequest.reason` 是无条件 `@NotBlank`（注释为"驳回必填"，但 Bean Validation
+ * 不区分 approved），因此**通过时也必须提交非空 reason**，否则返回 400 VALIDATION_FAILED
+ * "驳回时必须填写原因"、审核不生效。这里的默认文案是对该约束的前端适配，
+ * 后续若后端改为条件校验（通过时可空），可一并移除。</p>
+ */
+const DEFAULT_APPROVE_REASON = '符合要求'
+
 async function handleAudit(row: Application, approved: boolean) {
   let reason = ''
-  if (approved) {
-    await ElMessageBox.confirm(`确认通过 ${row.realName} 的入驻申请？通过后将自动授予陪玩师资格。`, '通过申请', {
-      type: 'info',
-    })
-  } else {
-    const { value } = await ElMessageBox.prompt('请填写驳回原因', '驳回申请', {
-      inputPlaceholder: '驳回原因将展示给申请人',
-      inputValidator: (v: string) => (v && v.trim().length > 0 ? true : '驳回原因不能为空'),
-    })
-    reason = value
+  try {
+    if (approved) {
+      const { value } = await ElMessageBox.prompt(
+        `确认通过 ${row.realName} 的入驻申请？通过后将自动授予陪玩师资格。`,
+        '通过申请',
+        {
+          type: 'info',
+          inputValue: DEFAULT_APPROVE_REASON,
+          inputPlaceholder: '审核意见（将展示给申请人）',
+          confirmButtonText: '确认通过',
+          // 通过时允许留空，由前端兜底默认文案；后端 reason 必填
+          inputValidator: () => true,
+        },
+      )
+      reason = (value ?? '').trim() || DEFAULT_APPROVE_REASON
+    } else {
+      const { value } = await ElMessageBox.prompt('请填写驳回原因', '驳回申请', {
+        inputPlaceholder: '驳回原因将展示给申请人',
+        inputValidator: (v: string) => (v && v.trim().length > 0 ? true : '驳回原因不能为空'),
+      })
+      reason = value
+    }
+  } catch {
+    // 用户取消弹窗：不提交审核
+    return
   }
   await adminAudit(row.id, approved, reason)
   ElMessage.success(approved ? '已通过' : '已驳回')
