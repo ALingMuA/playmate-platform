@@ -53,6 +53,10 @@ export interface CompanionService {
   tagNames: string[]
   priceCents: number
   minDurationMinutes: number
+  /** 服务类型是否仍启用：0 表示类型已被停用或删除（前端标注"已停用"） */
+  serviceTypeEnabled?: number
+  /** 已停用或已删除的标签名列表（前端加"已停用"标注） */
+  disabledTagNames?: string[]
   auditStatus: 'PENDING' | 'APPROVED' | 'REJECTED'
   serviceStatus: 'ON_SHELF' | 'OFF_SHELF'
   auditReason: string
