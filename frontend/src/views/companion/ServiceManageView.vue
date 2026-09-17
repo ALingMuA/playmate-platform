@@ -14,12 +14,20 @@ import type { PageResult } from '@/api/http'
 
 const games = ref<Game[]>([])
 const types = ref<ServiceType[]>([])
-const tags = ref<TagView[]>([])
 const list = ref<CompanionService[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = 10
 const loading = ref(false)
+const tagLoading = ref(false)
+
+/**
+ * 标签按"所选游戏 + 通用标签"加载（FR-M12）。
+ *
+ * <p>此前是 `listTags()` 全量拉取，陪玩师可以给"王者荣耀"服务挂上其它游戏的位置/英雄标签，
+ * 类别语义被稀释；现在跟随所选游戏加载，与入驻申请页、陪玩主页的能力标签口径一致。</p>
+ */
+const tagOptions = ref<TagView[]>([])
 
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
@@ -48,7 +56,27 @@ async function load() {
 async function loadCatalog() {
   games.value = await listGames()
   types.value = await listServiceTypes()
-  tags.value = await listTags()
+}
+
+/** 切换游戏：清空已选标签并拉取"该游戏 + 通用"的启用标签 */
+async function loadTagsForGame(gameId?: number) {
+  if (!gameId) {
+    tagOptions.value = []
+    return
+  }
+  tagLoading.value = true
+  try {
+    tagOptions.value = await listTags(gameId)
+  } catch {
+    tagOptions.value = []
+  } finally {
+    tagLoading.value = false
+  }
+}
+
+function onFormGameChange() {
+  form.tagIds = []
+  loadTagsForGame(form.gameId)
 }
 
 onMounted(() => {
@@ -67,6 +95,7 @@ function openCreate() {
     priceYuan: 20,
     minDurationMinutes: 60,
   })
+  tagOptions.value = []
   dialogVisible.value = true
 }
 
@@ -81,6 +110,8 @@ function openEdit(row: CompanionService) {
     priceYuan: row.priceCents / 100,
     minDurationMinutes: row.minDurationMinutes,
   })
+  // 编辑旧服务时保留已选标签（可能含已停用标签），仅刷新可选范围
+  loadTagsForGame(row.gameId)
   dialogVisible.value = true
 }
 
@@ -150,14 +181,28 @@ const shelfTag: Record<string, { label: string; type: 'success' | 'info' }> = {
     <el-table :data="list" v-loading="loading" border stripe>
       <el-table-column prop="title" label="服务标题" min-width="160" show-overflow-tooltip />
       <el-table-column prop="gameName" label="游戏" width="110" />
-      <el-table-column prop="serviceTypeName" label="类型" width="100" />
+      <el-table-column label="类型" width="130">
+        <template #default="{ row }">
+          {{ row.serviceTypeName }}
+          <el-tag v-if="row.serviceTypeEnabled === 0" type="warning" size="small" class="tag-mini">已停用</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="价格" width="100">
         <template #default="{ row }">¥{{ (row.priceCents / 100).toFixed(2) }}/小时</template>
       </el-table-column>
       <el-table-column prop="minDurationMinutes" label="最小时长" width="90" />
-      <el-table-column label="标签" min-width="140">
+      <el-table-column label="标签" min-width="160">
         <template #default="{ row }">
           <el-tag v-for="name in row.tagNames" :key="name" size="small" class="tag-mini">{{ name }}</el-tag>
+          <el-tag
+            v-for="name in row.disabledTagNames"
+            :key="'off-' + name"
+            type="warning"
+            size="small"
+            class="tag-mini"
+          >
+            {{ name }}（已停用）
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="审核" width="90">
@@ -203,7 +248,7 @@ const shelfTag: Record<string, { label: string; type: 'success' | 'info' }> = {
     <el-dialog v-model="dialogVisible" :title="editingId == null ? '新增服务' : '编辑服务'" width="640px">
       <el-form :model="form" label-width="100px">
         <el-form-item label="游戏" required>
-          <el-select v-model="form.gameId" placeholder="选择游戏" style="width: 100%">
+          <el-select v-model="form.gameId" placeholder="选择游戏" style="width: 100%" @change="onFormGameChange">
             <el-option v-for="g in games" :key="g.id" :label="g.gameName" :value="g.id" />
           </el-select>
         </el-form-item>
@@ -211,6 +256,9 @@ const shelfTag: Record<string, { label: string; type: 'success' | 'info' }> = {
           <el-select v-model="form.serviceTypeId" placeholder="选择服务类型" style="width: 100%">
             <el-option v-for="t in types" :key="t.id" :label="t.typeName" :value="t.id" />
           </el-select>
+          <div class="form-hint">
+            服务类型由平台统一维护，停用后不再可选；需要新增类型请联系管理员
+          </div>
         </el-form-item>
         <el-form-item label="服务标题" required>
           <el-input v-model="form.title" maxlength="100" show-word-limit placeholder="如：王者荣耀 荣耀王者 带飞上分" />
@@ -219,9 +267,20 @@ const shelfTag: Record<string, { label: string; type: 'success' | 'info' }> = {
           <el-input v-model="form.description" type="textarea" :rows="3" maxlength="2000" show-word-limit />
         </el-form-item>
         <el-form-item label="标签">
-          <el-select v-model="form.tagIds" multiple collapse-tags placeholder="选择标签" style="width: 100%">
-            <el-option v-for="t in tags" :key="t.id" :label="t.tagName" :value="t.id" />
+          <el-select
+            v-model="form.tagIds"
+            multiple
+            collapse-tags
+            :loading="tagLoading"
+            :disabled="!form.gameId"
+            :placeholder="form.gameId ? '选择标签（该游戏 + 通用标签）' : '请先选择游戏'"
+            style="width: 100%"
+          >
+            <el-option v-for="t in tagOptions" :key="t.id" :label="t.tagName" :value="t.id" />
           </el-select>
+          <div class="form-hint">
+            标签只显示所选游戏与通用标签，由平台统一维护
+          </div>
         </el-form-item>
         <el-form-item label="价格(元/小时)" required>
           <el-input-number v-model="form.priceYuan" :min="1" :max="9999" :precision="2" :step="5" />
