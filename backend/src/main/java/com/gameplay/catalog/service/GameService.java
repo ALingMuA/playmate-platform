@@ -24,6 +24,7 @@ import java.util.List;
 public class GameService {
 
     private final GameMapper gameMapper;
+    private final CatalogReferenceChecker referenceChecker;
 
     // ==================== 公开查询（前台，仅启用） ====================
 
@@ -92,12 +93,19 @@ public class GameService {
 
     /**
      * 删除游戏（FR-M10）。
-     * <p>当前为物理删除；后续服务/订单模块接入后，此处应校验是否存在
-     * 关联的陪玩服务或有效订单（停用优先，不允许直接删除）。</p>
+     *
+     * <p>删除前校验"当前态引用"：存在陪玩服务或陪玩师认证能力引用时拒绝删除（409 CATALOG_IN_USE），
+     * 应改为停用（停用后不会产生新服务与新订单，见 OrderService 的游戏启用校验）。</p>
      */
     @Transactional
     public void deleteGame(Long id) {
         requireGame(id);
+        long serviceRefs = referenceChecker.countServicesByGame(id);
+        referenceChecker.assertDeletable(serviceRefs,
+                "该游戏已被 " + serviceRefs + " 个陪玩服务引用，无法删除，请改为停用");
+        long profileRefs = referenceChecker.countProfilesByGame(id);
+        referenceChecker.assertDeletable(profileRefs,
+                "该游戏已被 " + profileRefs + " 位陪玩师的认证能力引用，无法删除，请改为停用");
         gameMapper.deleteById(id);
     }
 

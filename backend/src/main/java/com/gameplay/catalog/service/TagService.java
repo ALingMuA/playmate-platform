@@ -26,6 +26,7 @@ public class TagService {
 
     private final TagMapper tagMapper;
     private final GameService gameService;
+    private final CatalogReferenceChecker referenceChecker;
 
     // ==================== 公开查询（前台，仅启用） ====================
 
@@ -100,10 +101,21 @@ public class TagService {
         return tag;
     }
 
-    /** 删除标签（FR-M12）。后续陪玩师资料接入后需校验标签引用 */
+    /**
+     * 删除标签（FR-M12）。
+     *
+     * <p>删除前校验当前态引用：已被陪玩服务（{@code tag_ids_json}）或陪玩师资料
+     * （{@code capability_json} 的位置标签）引用的标签拒绝删除（409 CATALOG_IN_USE），应改为停用。</p>
+     */
     @Transactional
     public void deleteTag(Long id) {
         requireTag(id);
+        long serviceRefs = referenceChecker.countServicesByTag(id);
+        referenceChecker.assertDeletable(serviceRefs,
+                "该标签已被 " + serviceRefs + " 个陪玩服务引用，无法删除，请改为停用");
+        long profileRefs = referenceChecker.countProfilesByTag(id);
+        referenceChecker.assertDeletable(profileRefs,
+                "该标签已被 " + profileRefs + " 位陪玩师的认证能力引用，无法删除，请改为停用");
         tagMapper.deleteById(id);
     }
 

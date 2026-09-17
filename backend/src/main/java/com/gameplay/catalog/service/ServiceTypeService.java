@@ -23,6 +23,7 @@ import java.util.List;
 public class ServiceTypeService {
 
     private final ServiceTypeMapper serviceTypeMapper;
+    private final CatalogReferenceChecker referenceChecker;
 
     // ==================== 公开查询（前台，仅启用） ====================
 
@@ -79,10 +80,18 @@ public class ServiceTypeService {
         return type;
     }
 
-    /** 删除服务类型（FR-M11）。后续服务模块接入后需校验关联服务引用 */
+    /**
+     * 删除服务类型（FR-M11）。
+     *
+     * <p>删除前校验当前态引用：已被陪玩服务引用的类型拒绝删除（409 CATALOG_IN_USE），应改为停用。
+     * 停用后该类型不再出现在陪玩师的选择列表中，已创建服务保留类型名并标注"已停用"。</p>
+     */
     @Transactional
     public void deleteType(Long id) {
         requireType(id);
+        long serviceRefs = referenceChecker.countServicesByType(id);
+        referenceChecker.assertDeletable(serviceRefs,
+                "该服务类型已被 " + serviceRefs + " 个陪玩服务引用，无法删除，请改为停用");
         serviceTypeMapper.deleteById(id);
     }
 

@@ -101,11 +101,17 @@ public class CompanionServiceService {
         return toView(requireOwnService(userId, serviceId));
     }
 
-    /** 公开可预约服务分页（FR-U02/U03）：仅 APPROVED + ON_SHELF，可按游戏/陪玩师筛选 */
+    /**
+     * 公开可预约服务分页（FR-U02/U03）：仅 APPROVED + ON_SHELF，可按游戏/陪玩师筛选。
+     *
+     * <p>同时要求所属游戏处于启用状态（FR-M10）：管理员停用游戏后，其已上架服务不再对用户可见；
+     * 用子查询完成过滤，保证分页 total 仍然准确（若改为查询后过滤会破坏分页计数）。</p>
+     */
     public Page<ServiceView> listBookable(Long gameId, Long companionUserId, long page, long size) {
         LambdaQueryWrapper<CompanionService> wrapper = new LambdaQueryWrapper<CompanionService>()
                 .eq(CompanionService::getAuditStatus, ServiceAuditStatus.APPROVED.name())
                 .eq(CompanionService::getServiceStatus, ShelfStatus.ON_SHELF.name())
+                .inSql(CompanionService::getGameId, "SELECT id FROM game WHERE enabled = 1")
                 .orderByDesc(CompanionService::getId);
         if (gameId != null) {
             wrapper.eq(CompanionService::getGameId, gameId);
@@ -204,13 +210,17 @@ public class CompanionServiceService {
         Game game = gameMapper.selectById(s.getGameId());
         ServiceType type = serviceTypeMapper.selectById(s.getServiceTypeId());
         List<Long> tagIds = fromJson(s.getTagIdsJson(), new TypeReference<List<Long>>() {});
-        List<String> tagNames = tagIds.stream()
-                .map(id -> {
-                    Tag tag = tagMapper.selectById(id);
-                    return tag == null ? null : tag.getTagName();
-                })
-                .filter(name -> name != null)
-                .toList();
+        // 标签分两组：仍启用的正常展示，已停用/已删除的单独返回，供前端加"已停用"标注（FR-M12 收口）
+        List<String> tagNames = new ArrayList<>();
+        List<String> disabledTagNames = new ArrayList<>();
+        for (Long tagId : tagIds) {
+            Tag tag = tagMapper.selectById(tagId);
+            if (tag != null && Integer.valueOf(1).equals(tag.getEnabled())) {
+                tagNames.add(tag.getTagName());
+            } else {
+                disabledTagNames.add(tag == null ? "标签#" + tagId : tag.getTagName());
+            }
+        }
         return ServiceView.builder()
                 .id(s.getId())
                 .companionUserId(s.getCompanionUserId())
@@ -218,10 +228,12 @@ public class CompanionServiceService {
                 .gameName(game == null ? "" : game.getGameName())
                 .serviceTypeId(s.getServiceTypeId())
                 .serviceTypeName(type == null ? "" : type.getTypeName())
+                .serviceTypeEnabled(type == null ? 0 : type.getEnabled())
                 .title(s.getTitle())
                 .description(s.getDescription())
                 .tagIds(tagIds)
                 .tagNames(tagNames)
+                .disabledTagNames(disabledTagNames)
                 .priceCents(s.getPriceCents())
                 .minDurationMinutes(s.getMinDurationMinutes())
                 .auditStatus(s.getAuditStatus())
