@@ -8,6 +8,7 @@ const menus = [
   { path: '/admin/dashboard', label: '数据概览' },
   { path: '/admin/audit', label: '审核管理' },
   { path: '/admin/users', label: '用户管理' },
+  { path: '/admin/catalog', label: '目录管理' },
   { path: '/admin/reviews', label: '评价管理' },
   { path: '/admin/complaints', label: '投诉管理' },
   { path: '/admin/announcements', label: '公告管理' },

@@ -55,6 +55,7 @@ const menuIcons: Record<string, Component> = {
   '数据概览': HomeFilled,
   '审核管理': Files,
   '用户管理': UserFilled,
+  '目录管理': Files,
   '评价管理': Collection,
   '投诉管理': Bell,
   '公告管理': Document,

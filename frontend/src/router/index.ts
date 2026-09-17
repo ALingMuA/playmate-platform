@@ -154,6 +154,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'dashboard', name: 'admin-dashboard', component: () => import('@/views/admin/DashboardView.vue'), meta: { title: '数据概览', workbenchHome: true } },
       { path: 'audit', name: 'admin-audit', component: () => import('@/views/admin/AuditView.vue'), meta: { title: '审核管理' } },
       { path: 'users', name: 'admin-users', component: () => import('@/views/admin/UsersView.vue'), meta: { title: '用户管理' } },
+      { path: 'catalog', name: 'admin-catalog', component: () => import('@/views/admin/CatalogManageView.vue'), meta: { title: '目录管理' } },
       { path: 'reviews', name: 'admin-reviews', component: () => import('@/views/admin/ReviewsManageView.vue'), meta: { title: '评价管理' } },
       { path: 'complaints', name: 'admin-complaints', component: () => import('@/views/admin/ComplaintsManageView.vue'), meta: { title: '投诉管理' } },
       { path: 'announcements', name: 'admin-announcements', component: () => import('@/views/admin/AnnouncementsManageView.vue'), meta: { title: '公告管理' } },

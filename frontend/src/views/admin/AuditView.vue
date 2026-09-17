@@ -245,7 +245,12 @@ onMounted(async () => {
           <el-table-column label="游戏" width="110">
             <template #default="{ row }">{{ row.gameName || gameName(row.gameId) }}</template>
           </el-table-column>
-          <el-table-column prop="serviceTypeName" label="类型" width="110" />
+          <el-table-column label="类型" width="130">
+            <template #default="{ row }">
+              {{ row.serviceTypeName }}
+              <el-tag v-if="row.serviceTypeEnabled === 0" type="warning" size="small">已停用</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="价格" width="110">
             <template #default="{ row }">
               {{ fmtPrice(row.priceCents) }}/小时
