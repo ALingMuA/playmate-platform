@@ -48,6 +48,21 @@
         └── views               各分区页面（陪玩师端五页 + 用户端订单页已实现）
 ```
 
+## 陪玩师入驻与管理链路
+
+普通用户 → 陪玩师的完整链路（与《需求分析说明书》FR-P01~P09、FR-M06、FR-M07 对应）：
+
+| 步骤 | 页面/路由 | 说明 |
+|---|---|---|
+| 1. 提交入驻申请 | 用户端 `/become-companion` | 五态自适应（未申请/审核中/已通过/已驳回/已是陪玩师）；入口还出现在用户菜单、个人中心「陪玩中心」、找陪玩页引导条 |
+| 2. 管理员审核 | `/admin/audit` → 入驻申请 Tab | 通过后自动授予 `COMPANION` 角色并创建陪玩主页；**通过与驳回都必须提交审核意见**（后端 `reason` 为无条件必填） |
+| 3. 维护陪玩主页 | `/companion/profile` | 展示名、简介、认证能力（FR-P05）与接单状态（FR-P06） |
+| 4. 上架服务 | `/companion/services` | 新建/编辑服务后进入待审核，过审后才能上架（FR-P07~P09） |
+| 5. 服务审核 | `/admin/audit` → 服务项目 Tab | 通过后陪玩师可自行上架，上架服务才对用户可见（FR-M07） |
+| 6. 档期与履约 | `/companion/schedule`、`/companion/orders`、`/companion/earnings` | 设置可约时段、接单履约、查看收益（FR-P10~P19） |
+
+> 说明：`/companion` 分区要求 `COMPANION` 角色，非陪玩师访问会按路由 `meta.roleFallback` 兜底跳转到 `/become-companion`；`/companion/application` 保留重定向以兼容旧链接。
+
 ## 快速启动
 
 ### 1. 初始化数据库（本机 MySQL）
@@ -66,6 +81,16 @@ cd backend
 mvn spring-boot:run
 ```
 
+答辩演示可使用 `demo` 配置启动，并通过环境变量提供数据库、JWT 和 CORS 配置：
+
+```powershell
+$env:SPRING_PROFILES_ACTIVE="demo"
+$env:DB_PASSWORD="本机数据库密码"
+$env:JWT_SECRET="至少 32 字节的随机字符串"
+$env:APP_CORS_ALLOWED_ORIGINS="http://localhost"
+mvn spring-boot:run
+```
+
 ### 3. 前端
 
 ```bash
@@ -80,6 +105,8 @@ cd backend && mvn test
 # 测试数据在事务中回滚，不污染数据库。
 ```
 
+后端测试覆盖认证、目录、陪玩师、订单、评价投诉、客服和管理模块；前端使用 `npm run build` 执行类型检查与生产构建。
+
 ## 初始账号（演示环境）
 
 | 账号 | 密码 | 角色 |
@@ -89,6 +116,8 @@ cd backend && mvn test
 > 演示陪玩师流程：注册普通用户 → 陪玩师端提交入驻申请 → 管理员在后台审核通过（自动授予 COMPANION 角色）→ 重新登录后即可管理服务、档期与接单。
 
 ## 后端接口（已实现）
+
+除下列基础接口外，项目还提供客服会话与消息（`/api/customer-service`）、AI 知识库（`/api/admin/ai`）、评价投诉（`/api/reviews`、`/api/complaints`）、文件（`/api/files`）、公告（`/api/announcements`）、通知（`/api/notifications`）、收藏（`/api/favorites`）、审计和管理端接口。具体权限以控制器上的 `@PreAuthorize` 和 `SecurityConfig` 为准。
 
 ### 认证与账号 `/api/auth`
 
