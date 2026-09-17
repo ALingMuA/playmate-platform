@@ -5,7 +5,7 @@
 import WorkbenchLayout from '@/components/WorkbenchLayout.vue'
 
 const menus = [
-  { path: '/companion/application', label: '入驻申请' },
+  { path: '/companion/profile', label: '我的陪玩主页' },
   { path: '/companion/services', label: '服务管理' },
   { path: '/companion/schedule', label: '档期管理' },
   { path: '/companion/orders', label: '接单履约' },

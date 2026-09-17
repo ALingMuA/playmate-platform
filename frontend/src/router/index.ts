@@ -120,9 +120,11 @@ const routes: RouteRecordRaw[] = [
     // 非陪玩师访问时兜底到入驻申请页，而不是丢弃到首页（角色不足的提示与下一步更明确）
     meta: { requiresAuth: true, roles: ['COMPANION'], roleFallback: '/become-companion' },
     children: [
-      { path: '', redirect: '/companion/schedule' },
+      // 默认落地"我的陪玩主页"：进入工作台先看到自己的陪玩项目门面
+      { path: '', redirect: '/companion/profile' },
       // 入驻申请已迁移到用户端 `/become-companion`，此处保留重定向以兼容旧链接
       { path: 'application', redirect: '/become-companion' },
+      { path: 'profile', name: 'companion-profile', component: () => import('@/views/companion/CompanionProfileView.vue'), meta: { title: '我的陪玩主页', workbenchHome: true } },
       { path: 'services', name: 'companion-services', component: () => import('@/views/companion/ServiceManageView.vue'), meta: { title: '服务管理' } },
       { path: 'schedule', name: 'companion-schedule', component: () => import('@/views/companion/ScheduleView.vue'), meta: { title: '档期管理' } },
       { path: 'orders', name: 'companion-orders', component: () => import('@/views/companion/OrderFulfillView.vue'), meta: { title: '接单履约' } },
@@ -137,7 +139,7 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, roles: ['CUSTOMER_SERVICE'] },
     children: [
       { path: '', redirect: '/cs/queue' },
-      { path: 'queue', name: 'cs-queue', component: () => import('@/views/cs/QueueView.vue'), meta: { title: '会话队列' } },
+      { path: 'queue', name: 'cs-queue', component: () => import('@/views/cs/QueueView.vue'), meta: { title: '会话队列', workbenchHome: true } },
       { path: 'conversation/:id', name: 'cs-conversation', component: () => import('@/views/cs/ConversationView.vue'), meta: { title: '会话详情' } },
     ],
   },
@@ -149,7 +151,7 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, roles: ['ADMIN'] },
     children: [
       { path: '', redirect: '/admin/dashboard' },
-      { path: 'dashboard', name: 'admin-dashboard', component: () => import('@/views/admin/DashboardView.vue'), meta: { title: '数据概览' } },
+      { path: 'dashboard', name: 'admin-dashboard', component: () => import('@/views/admin/DashboardView.vue'), meta: { title: '数据概览', workbenchHome: true } },
       { path: 'audit', name: 'admin-audit', component: () => import('@/views/admin/AuditView.vue'), meta: { title: '审核管理' } },
       { path: 'users', name: 'admin-users', component: () => import('@/views/admin/UsersView.vue'), meta: { title: '用户管理' } },
       { path: 'reviews', name: 'admin-reviews', component: () => import('@/views/admin/ReviewsManageView.vue'), meta: { title: '评价管理' } },
