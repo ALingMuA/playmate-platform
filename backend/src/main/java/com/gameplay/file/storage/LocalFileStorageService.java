@@ -111,6 +111,13 @@ public class LocalFileStorageService implements FileStorageService {
             throw new BusinessException(ErrorCode.FILE_PATH_INVALID);
         }
         String relative = url.substring("/api/files/".length());
+        String[] segments = relative.split("/", -1);
+        if (segments.length != 3
+                || !segments[0].matches("[a-zA-Z0-9_-]{1,32}")
+                || !segments[1].matches("\\d{8}")
+                || !segments[2].matches("[0-9a-fA-F-]{32,36}\\.(jpg|jpeg|png|gif|webp)")) {
+            throw new BusinessException(ErrorCode.FILE_PATH_INVALID);
+        }
         Path target = rootDir.resolve(relative).normalize();
         if (!target.startsWith(rootDir)) {
             throw new BusinessException(ErrorCode.FILE_PATH_INVALID);
