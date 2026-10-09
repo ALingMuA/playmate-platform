@@ -45,7 +45,7 @@ public class ModelEnhancedResponder implements AiResponder {
             不得编造价格、时间、政策、订单状态或其他平台事实。知识不足时询问必要信息或转人工。
             仅提供咨询，不执行或承诺退款、赔偿、改单、提现、封禁等操作；此类请求 needsHuman=true。
             不索要密码、验证码、支付凭据、身份证或银行卡信息。不要输出用户联系方式。
-            仅返回 JSON 对象：{"answer":"回答","needsHuman":false,"kind":"knowledge","knowledgeIds":[1]}。
+            无论历史对话消息如何展示，本次回答必须且仅返回 JSON 对象：{"answer":"回答","needsHuman":false,"kind":"knowledge","knowledgeIds":[1]}。
             kind 只能是 knowledge、order、clarification、greeting、human。
             knowledge 必须列出实际使用且本次提供的知识 ID；order 必须有已校验订单摘要。
             greeting 仅用于问候或致谢；clarification 只能是简短澄清问题，不得附加未经证实的平台事实。
@@ -164,8 +164,28 @@ public class ModelEnhancedResponder implements AiResponder {
         history.stream().skip(Math.max(0, history.size() - historyLimit))
                 .filter(message -> "user".equals(message.role()) || "assistant".equals(message.role()))
                 .filter(message -> StringUtils.hasText(message.content()))
-                .forEach(message -> messages.addObject().put("role", message.role())
-                        .put("content", sanitizer.sanitize(message.content(), 1000)));
+                .forEach(message -> {
+                    if ("assistant".equals(message.role())) {
+                        String raw = message.content().trim();
+                        if (raw.startsWith("【AI客服】")) {
+                            raw = raw.substring("【AI客服】".length()).trim();
+                        }
+                        String sanitized = sanitizer.sanitize(raw, 1000);
+                        if (sanitized.startsWith("{") && sanitized.endsWith("}")) {
+                            messages.addObject().put("role", "assistant").put("content", sanitized);
+                        } else {
+                            ObjectNode asstObj = objectMapper.createObjectNode();
+                            asstObj.put("answer", sanitized);
+                            asstObj.put("needsHuman", false);
+                            asstObj.put("kind", "knowledge");
+                            asstObj.putArray("knowledgeIds");
+                            messages.addObject().put("role", "assistant").put("content", asstObj.toString());
+                        }
+                    } else {
+                        messages.addObject().put("role", message.role())
+                                .put("content", sanitizer.sanitize(message.content(), 1000));
+                    }
+                });
 
         ObjectNode context = objectMapper.createObjectNode();
         context.put("question", sanitizer.sanitize(request.content(), AiRequest.MAX_CONTENT_LENGTH));
@@ -198,9 +218,13 @@ public class ModelEnhancedResponder implements AiResponder {
                 throw new ModelCallException("MODEL_INVALID_RESPONSE");
             }
             String json = content.asText().trim();
-            // 只兼容包围完整 JSON 的单层代码围栏，仍执行相同的内容与依据校验。
-            if (json.startsWith("```json\n") && json.endsWith("```")) json = json.substring(8, json.length() - 3).trim();
-            else if (json.startsWith("```\n") && json.endsWith("```")) json = json.substring(4, json.length() - 3).trim();
+            // 兼容各类 Markdown 代码围栏（```json\n、```json\r\n、```\n、```\r\n）
+            if (json.startsWith("```")) {
+                int firstNewline = json.indexOf('\n');
+                if (firstNewline > 0 && json.endsWith("```")) {
+                    json = json.substring(firstNewline + 1, json.length() - 3).trim();
+                }
+            }
             JsonNode answer = objectMapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(json);
             if (!answer.isObject() || !answer.path("answer").isTextual()
                     || !answer.path("needsHuman").isBoolean() || !answer.path("knowledgeIds").isArray()) {
