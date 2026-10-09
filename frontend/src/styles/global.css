@@ -1075,8 +1075,13 @@ textarea.form-control {
 
 .auth-page {
   min-height: 100vh;
+  width: 100%;
   display: grid;
   grid-template-columns: 1fr 1fr;
+}
+
+.auth-page > * {
+  min-width: 0;
 }
 
 .auth-visual {
@@ -1104,8 +1109,14 @@ textarea.form-control {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  align-items: center;
   padding: 48px 64px;
   background: var(--background);
+}
+
+.auth-panel,
+.auth-tabs {
+  width: min(100%, 520px);
 }
 
 .auth-tabs {
@@ -1828,6 +1839,7 @@ textarea.form-control {
   .auth-form-wrap {
     padding: 40px 24px;
     min-height: 100vh;
+    width: 100%;
   }
   .hero {
     padding: 40px 0 48px;
