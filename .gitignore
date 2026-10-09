@@ -40,3 +40,8 @@ deploy/.staging/
 
 # 测试与覆盖率报告
 coverage/
+
+# 本地测试工具与过程分析产物
+.playwright-cli/
+_pdf_analysis/
+output/
