@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
- * 首页（对齐 frontend-prototype index.html：Hero + 公告 + 功能入口 + 推荐陪玩师）。
+ * 首页（活动展示 + 公告 + 推荐陪玩师）。
  *
  * <p>游客可访问；数据来自公告公开接口与可预约服务接口。</p>
  */
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { publicAnnouncements, type AnnouncementView } from '@/api/admin'
 import { listBookableServices, type BookableService } from '@/api/order'
@@ -18,13 +18,101 @@ const expanded = ref<Record<number, boolean>>({})
 /** 推荐可预约服务 */
 const recommended = ref<BookableService[]>([])
 
-/** 功能入口（原型 feature-grid） */
-const features = [
-  { path: '/games', icon: '🎮', title: '游戏列表', desc: '海量游戏，任你选择' },
-  { path: '/companions', icon: '🤝', title: '找陪玩', desc: '大神陪练，随时开黑' },
-  { path: '/orders', icon: '📋', title: '我的订单', desc: '预约支付，一键完成' },
-  { path: '/support', icon: '💬', title: '在线客服', desc: 'AI 应答，可转人工' },
+/** 活动展示数据 */
+interface ActivityItem {
+  id: number
+  title: string
+  subtitle: string
+  description: string
+  bgGradient: string
+  icon: string
+  tag: string
+  tagColor: string
+  actionText: string
+  actionRoute: string
+}
+
+const activities: ActivityItem[] = [
+  {
+    id: 1,
+    title: '新人专享福利',
+    subtitle: '首单立减 50%',
+    description: '注册即送新人优惠券，首次预约陪玩服务享半价优惠，大神陪你畅快开黑！',
+    bgGradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    icon: '🎁',
+    tag: '限时活动',
+    tagColor: '#ff6b6b',
+    actionText: '立即领取',
+    actionRoute: '/companions',
+  },
+  {
+    id: 2,
+    title: '周末狂欢赛',
+    subtitle: '组队开黑赢大奖',
+    description: '每周六日参与组队活动，完成指定游戏任务即可赢取积分奖励和限定称号！',
+    bgGradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+    icon: '🏆',
+    tag: '每周活动',
+    tagColor: '#ffa726',
+    actionText: '查看详情',
+    actionRoute: '/games',
+  },
+  {
+    id: 3,
+    title: '陪玩师招募计划',
+    subtitle: '月入过万不是梦',
+    description: '平台正在火热招募游戏陪玩师，灵活工作时间，丰厚收入回报，快来加入我们！',
+    bgGradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+    icon: '🌟',
+    tag: '长期有效',
+    tagColor: '#26c6da',
+    actionText: '立即申请',
+    actionRoute: '/companion/apply',
+  },
+  {
+    id: 4,
+    title: '好评返现活动',
+    subtitle: '评价有礼 最高返 20 元',
+    description: '完成订单后发表真实评价，即可获得现金红包奖励，评价越详细奖励越多！',
+    bgGradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
+    icon: '💰',
+    tag: '进行中',
+    tagColor: '#66bb6a',
+    actionText: '了解更多',
+    actionRoute: '/orders',
+  },
 ]
+
+/** 轮播控制 */
+const currentSlide = ref(0)
+let autoPlayTimer: ReturnType<typeof setInterval> | null = null
+
+const totalSlides = computed(() => activities.length)
+
+function goToSlide(index: number) {
+  currentSlide.value = index
+  resetAutoPlay()
+}
+
+function nextSlide() {
+  currentSlide.value = (currentSlide.value + 1) % totalSlides.value
+}
+
+function prevSlide() {
+  currentSlide.value = (currentSlide.value - 1 + totalSlides.value) % totalSlides.value
+  resetAutoPlay()
+}
+
+function startAutoPlay() {
+  autoPlayTimer = setInterval(() => {
+    nextSlide()
+  }, 5000)
+}
+
+function resetAutoPlay() {
+  if (autoPlayTimer) clearInterval(autoPlayTimer)
+  startAutoPlay()
+}
 
 function fmtTime(t?: string): string {
   if (!t) return ''
@@ -36,6 +124,7 @@ function fmtPrice(cents: number): string {
 }
 
 onMounted(async () => {
+  startAutoPlay()
   try {
     const result = await publicAnnouncements(1, 5)
     announcements.value = result.records
@@ -49,28 +138,54 @@ onMounted(async () => {
     recommended.value = []
   }
 })
+
+onUnmounted(() => {
+  if (autoPlayTimer) clearInterval(autoPlayTimer)
+})
 </script>
 
 <template>
   <div class="home">
-    <!-- Hero（原型 hero） -->
-    <section class="hero">
-      <div class="container hero-inner">
-        <div>
-          <h1 class="hero-title">
-            找到属于你的<br /><span>最佳游戏搭档</span>
-          </h1>
-          <p class="hero-desc">技术大神、娱乐伙伴、耐心教练，应有尽有。一键预约，畅享开黑乐趣。</p>
-          <div class="hero-actions">
-            <button class="btn btn-primary btn-lg" @click="router.push('/companions')">开始找陪玩</button>
-            <button class="btn btn-outline btn-lg" @click="router.push('/games')">浏览游戏</button>
+    <!-- 活动展示轮播 -->
+    <section class="activity-showcase">
+      <div class="container">
+        <div class="carousel-wrapper">
+          <!-- 轮播主体 -->
+          <div class="carousel-viewport">
+            <div
+              v-for="(item, index) in activities"
+              :key="item.id"
+              class="carousel-slide"
+              :class="{ active: currentSlide === index }"
+              :style="{ background: item.bgGradient }"
+            >
+              <div class="slide-content">
+                <div class="slide-text">
+                  <span class="slide-tag" :style="{ background: item.tagColor }">{{ item.tag }}</span>
+                  <h2 class="slide-title">{{ item.title }}</h2>
+                  <p class="slide-subtitle">{{ item.subtitle }}</p>
+                  <p class="slide-desc">{{ item.description }}</p>
+                  <button class="btn btn-lg slide-btn" @click="router.push(item.actionRoute)">
+                    {{ item.actionText }}
+                  </button>
+                </div>
+                <div class="slide-icon">{{ item.icon }}</div>
+              </div>
+            </div>
           </div>
-        </div>
-        <div class="hero-visual">
-          <div class="hero-stat"><div class="num">12,000+</div><div class="label">注册陪玩师</div></div>
-          <div class="hero-stat"><div class="num">50+</div><div class="label">覆盖游戏</div></div>
-          <div class="hero-stat"><div class="num">98%</div><div class="label">好评率</div></div>
-          <div class="hero-stat"><div class="num">24h</div><div class="label">在线客服</div></div>
+          <!-- 左右箭头 -->
+          <button class="carousel-arrow carousel-arrow-left" @click="prevSlide">‹</button>
+          <button class="carousel-arrow carousel-arrow-right" @click="nextSlide(); resetAutoPlay()">›</button>
+          <!-- 指示器 -->
+          <div class="carousel-indicators">
+            <button
+              v-for="(_, index) in activities"
+              :key="index"
+              class="indicator-dot"
+              :class="{ active: currentSlide === index }"
+              @click="goToSlide(index)"
+            />
+          </div>
         </div>
       </div>
     </section>
@@ -88,17 +203,6 @@ onMounted(async () => {
               </div>
               <div v-if="expanded[a.id]" class="announce-content">{{ a.content }}</div>
             </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- 功能入口（原型 feature-grid） -->
-      <section class="section">
-        <div class="feature-grid">
-          <div v-for="f in features" :key="f.path" class="feature-card" @click="router.push(f.path)">
-            <div class="feature-icon">{{ f.icon }}</div>
-            <div class="feature-title">{{ f.title }}</div>
-            <div class="feature-desc">{{ f.desc }}</div>
           </div>
         </div>
       </section>
@@ -138,6 +242,171 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* ===== 活动展示轮播 ===== */
+.activity-showcase {
+  padding: 32px 0 0;
+}
+
+.carousel-wrapper {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+.carousel-viewport {
+  position: relative;
+  height: 320px;
+}
+
+.carousel-slide {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  pointer-events: none;
+}
+
+.carousel-slide.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.slide-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+  padding: 48px 56px;
+  color: #fff;
+}
+
+.slide-text {
+  max-width: 520px;
+}
+
+.slide-tag {
+  display: inline-block;
+  padding: 4px 14px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.5px;
+}
+
+.slide-title {
+  font-size: 2.25rem;
+  font-weight: 800;
+  margin-top: 16px;
+  line-height: 1.2;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.slide-subtitle {
+  font-size: 1.375rem;
+  font-weight: 600;
+  margin-top: 8px;
+  opacity: 0.95;
+}
+
+.slide-desc {
+  font-size: 0.9375rem;
+  margin-top: 12px;
+  opacity: 0.85;
+  line-height: 1.6;
+  max-width: 420px;
+}
+
+.slide-btn {
+  margin-top: 24px;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(4px);
+  font-weight: 700;
+  transition: background 0.2s, border-color 0.2s, transform 0.15s;
+}
+
+.slide-btn:hover {
+  background: rgba(255, 255, 255, 0.35);
+  border-color: #fff;
+  transform: translateY(-1px);
+}
+
+.slide-icon {
+  font-size: 120px;
+  line-height: 1;
+  opacity: 0.3;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+/* 箭头 */
+.carousel-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+  font-size: 24px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.2s;
+  z-index: 2;
+}
+
+.carousel-arrow:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.carousel-arrow-left {
+  left: 16px;
+}
+
+.carousel-arrow-right {
+  right: 16px;
+}
+
+/* 指示器 */
+.carousel-indicators {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  z-index: 2;
+}
+
+.indicator-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s, border-color 0.2s, transform 0.2s;
+}
+
+.indicator-dot.active {
+  background: #fff;
+  border-color: #fff;
+  transform: scale(1.2);
+}
+
+.indicator-dot:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+/* ===== 公告 ===== */
 .announce-item {
   padding: 6px 0;
   border-bottom: 1px dashed var(--border);
