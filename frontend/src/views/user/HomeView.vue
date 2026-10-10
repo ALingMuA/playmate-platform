@@ -6,88 +6,68 @@
  */
 import { onMounted, onUnmounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { useUserStore } from '@/stores/user'
 import { publicAnnouncements, type AnnouncementView } from '@/api/admin'
 import { listBookableServices, type BookableService } from '@/api/order'
+import { publicActivities, type ActivityView } from '@/api/activity'
+import { claimCoupon } from '@/api/coupon'
 
 const router = useRouter()
+const userStore = useUserStore()
 
 /** 平台公告（仅已发布，FR-A08） */
 const announcements = ref<AnnouncementView[]>([])
-const expanded = ref<Record<number, boolean>>({})
 
 /** 推荐可预约服务 */
 const recommended = ref<BookableService[]>([])
 
 /** 活动展示数据 */
-interface ActivityItem {
-  id: number
-  title: string
-  subtitle: string
-  description: string
-  bgGradient: string
-  icon: string
-  tag: string
-  tagColor: string
-  actionText: string
-  actionRoute: string
-}
-
-const activities: ActivityItem[] = [
+const defaultActivities: ActivityView[] = [
   {
     id: 1,
     title: '新人专享福利',
-    subtitle: '首单立减 50%',
-    description: '注册即送新人优惠券，首次预约陪玩服务享半价优惠，大神陪你畅快开黑！',
+    subtitle: '首单立减优惠券免费领',
+    description: '注册即送新人优惠券，首次预约陪玩服务享专属优惠，大神陪你畅快开黑！',
+    bannerImage: '',
     bgGradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
     icon: '🎁',
     tag: '限时活动',
     tagColor: '#ff6b6b',
-    actionText: '立即领取',
+    actionType: 'COMPANION_LIST',
     actionRoute: '/companions',
+    sortOrder: 1,
+    status: 'PUBLISHED',
+    createdBy: 1,
+    createdAt: '',
   },
   {
     id: 2,
     title: '周末狂欢赛',
     subtitle: '组队开黑赢大奖',
     description: '每周六日参与组队活动，完成指定游戏任务即可赢取积分奖励和限定称号！',
+    bannerImage: '',
     bgGradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
     icon: '🏆',
     tag: '每周活动',
     tagColor: '#ffa726',
-    actionText: '查看详情',
-    actionRoute: '/games',
-  },
-  {
-    id: 3,
-    title: '陪玩师招募计划',
-    subtitle: '月入过万不是梦',
-    description: '平台正在火热招募游戏陪玩师，灵活工作时间，丰厚收入回报，快来加入我们！',
-    bgGradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
-    icon: '🌟',
-    tag: '长期有效',
-    tagColor: '#26c6da',
-    actionText: '立即申请',
-    actionRoute: '/companion/apply',
-  },
-  {
-    id: 4,
-    title: '好评返现活动',
-    subtitle: '评价有礼 最高返 20 元',
-    description: '完成订单后发表真实评价，即可获得现金红包奖励，评价越详细奖励越多！',
-    bgGradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
-    icon: '💰',
-    tag: '进行中',
-    tagColor: '#66bb6a',
-    actionText: '了解更多',
-    actionRoute: '/orders',
+    actionType: 'PAGE_NAV',
+    actionRoute: '/activities',
+    sortOrder: 2,
+    status: 'PUBLISHED',
+    createdBy: 1,
+    createdAt: '',
   },
 ]
+
+const activities = ref<ActivityView[]>(defaultActivities)
+const claimingCouponId = ref<number | null>(null)
 
 /** 轮播控制 */
 const currentSlide = ref(0)
 let autoPlayTimer: ReturnType<typeof setInterval> | null = null
 
-const totalSlides = computed(() => activities.length)
+const totalSlides = computed(() => activities.value.length || 1)
 
 function goToSlide(index: number) {
   currentSlide.value = index
@@ -95,11 +75,15 @@ function goToSlide(index: number) {
 }
 
 function nextSlide() {
-  currentSlide.value = (currentSlide.value + 1) % totalSlides.value
+  if (totalSlides.value > 0) {
+    currentSlide.value = (currentSlide.value + 1) % totalSlides.value
+  }
 }
 
 function prevSlide() {
-  currentSlide.value = (currentSlide.value - 1 + totalSlides.value) % totalSlides.value
+  if (totalSlides.value > 0) {
+    currentSlide.value = (currentSlide.value - 1 + totalSlides.value) % totalSlides.value
+  }
   resetAutoPlay()
 }
 
@@ -114,6 +98,49 @@ function resetAutoPlay() {
   startAutoPlay()
 }
 
+function getSlideActionText(item: ActivityView): string {
+  if (item.actionType === 'COUPON_CLAIM') return '立即领券'
+  if (item.actionType === 'COMPANION_LIST') return '挑选陪玩'
+  return '查看详情'
+}
+
+async function handleSlideAction(item: ActivityView) {
+  if (item.actionType === 'COUPON_CLAIM') {
+    if (!userStore.isLoggedIn) {
+      ElMessage.warning('请先登录后再领取优惠券')
+      router.push(`/login?redirect=${encodeURIComponent(router.currentRoute.value.fullPath)}`)
+      return
+    }
+    if (!item.couponTemplateId) {
+      ElMessage.warning('活动未绑定优惠券')
+      return
+    }
+    claimingCouponId.value = item.couponTemplateId
+    try {
+      await claimCoupon(item.couponTemplateId)
+      ElMessage.success('优惠券领取成功！快去下单使用吧')
+    } catch {
+      // 全局拦截器处理
+    } finally {
+      claimingCouponId.value = null
+    }
+    return
+  }
+  if (item.actionType === 'COMPANION_LIST') {
+    router.push('/companions')
+    return
+  }
+  if (item.actionRoute) {
+    if (item.actionRoute.startsWith('http')) {
+      window.open(item.actionRoute, '_blank')
+    } else {
+      router.push(item.actionRoute)
+    }
+    return
+  }
+  router.push(`/activities/${item.id}`)
+}
+
 function fmtTime(t?: string): string {
   if (!t) return ''
   return t.length >= 16 ? t.slice(0, 16) : t
@@ -125,6 +152,14 @@ function fmtPrice(cents: number): string {
 
 onMounted(async () => {
   startAutoPlay()
+  try {
+    const actList = await publicActivities()
+    if (actList && actList.length > 0) {
+      activities.value = actList
+    }
+  } catch {
+    // 降级使用默认活动
+  }
   try {
     const result = await publicAnnouncements(1, 5)
     announcements.value = result.records
@@ -162,11 +197,11 @@ onUnmounted(() => {
               <div class="slide-content">
                 <div class="slide-text">
                   <span class="slide-tag" :style="{ background: item.tagColor }">{{ item.tag }}</span>
-                  <h2 class="slide-title">{{ item.title }}</h2>
+                  <h2 class="slide-title" style="cursor: pointer" @click="router.push(`/activities/${item.id}`)">{{ item.title }}</h2>
                   <p class="slide-subtitle">{{ item.subtitle }}</p>
                   <p class="slide-desc">{{ item.description }}</p>
-                  <button class="btn btn-lg slide-btn" @click="router.push(item.actionRoute)">
-                    {{ item.actionText }}
+                  <button class="btn btn-lg slide-btn" :disabled="claimingCouponId === item.couponTemplateId" @click="handleSlideAction(item)">
+                    {{ claimingCouponId === item.couponTemplateId ? '领取中...' : getSlideActionText(item) }}
                   </button>
                 </div>
                 <div class="slide-icon">{{ item.icon }}</div>
@@ -195,13 +230,15 @@ onUnmounted(() => {
       <section v-if="announcements.length" class="section" style="padding-bottom: 0">
         <div class="card">
           <div class="card-body">
-            <div class="card-title mb-2">📢 平台公告</div>
+            <div class="card-title mb-2" style="display: flex; justify-content: space-between; align-items: center;">
+              <span>📢 平台公告</span>
+              <span style="font-size: 0.875rem; cursor: pointer; color: var(--primary); font-weight: normal;" @click="router.push('/announcements')">更多公告 →</span>
+            </div>
             <div v-for="a in announcements" :key="a.id" class="announce-item">
-              <div class="announce-title-row" @click="expanded[a.id] = !expanded[a.id]">
+              <div class="announce-title-row" @click="router.push(`/announcements/${a.id}`)">
                 <span class="announce-title">{{ a.title }}</span>
                 <span class="announce-time">{{ fmtTime(a.publishedAt) }}</span>
               </div>
-              <div v-if="expanded[a.id]" class="announce-content">{{ a.content }}</div>
             </div>
           </div>
         </div>

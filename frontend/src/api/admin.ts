@@ -216,3 +216,10 @@ export function publicAnnouncements(page = 1, size = 10): Promise<PageResult<Ann
     params: { page, size },
   })
 }
+
+export function publicAnnouncementDetail(id: number): Promise<AnnouncementView> {
+  return request<AnnouncementView>({
+    url: `/announcements/${id}`,
+    method: 'get',
+  })
+}

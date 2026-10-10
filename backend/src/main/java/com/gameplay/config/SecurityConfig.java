@@ -60,6 +60,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/files/**").permitAll()
                         // 公告查看公开（仅已发布，FR-A08）
                         .requestMatchers(HttpMethod.GET, "/api/announcements/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/activities/**").permitAll()
                         // WebSocket 客服端点：握手拦截器自行完成 JWT 鉴权（详细设计 7.3）
                         .requestMatchers("/ws/cs").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
