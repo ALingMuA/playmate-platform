@@ -30,6 +30,7 @@ import com.gameplay.order.mapper.OrderStatusHistoryMapper;
 import com.gameplay.order.mapper.OrderTimeSlotMapper;
 import com.gameplay.order.mapper.PlayOrderMapper;
 import com.gameplay.wallet.service.WalletService;
+import com.gameplay.coupon.service.CouponService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -66,6 +67,7 @@ public class OrderService {
     private final CompanionAvailabilityMapper availabilityMapper;
     private final UserMapper userMapper;
     private final WalletService walletService;
+    private final CouponService couponService;
 
     // ==================== 用户端 ====================
 
@@ -114,10 +116,23 @@ public class OrderService {
         checkAvailabilityAndSlotConflict(req.getCompanionUserId(), startAt, endAt);
 
         // 6. 金额计算（按分钟比例计费，向上取整到分）
-        long totalAmount = service.getPriceCents() * req.getDurationMinutes() / 60L;
+        long originalAmount = service.getPriceCents() * req.getDurationMinutes() / 60L;
         if (service.getPriceCents() * req.getDurationMinutes() % 60L != 0) {
-            totalAmount += 1;
+            originalAmount += 1;
         }
+
+        // 优惠券核算
+        long discountAmount = 0L;
+        String couponNameSnapshot = "";
+        Long couponId = null;
+        if (req.getCouponId() != null && req.getCouponId() > 0) {
+            var preview = couponService.preview(userId, service.getId(), req.getDurationMinutes(), req.getCouponId());
+            discountAmount = preview.getDiscountAmountCents() == null ? 0L : preview.getDiscountAmountCents();
+            couponNameSnapshot = preview.getCouponName() == null ? "" : preview.getCouponName();
+            couponId = req.getCouponId();
+        }
+        long totalAmount = Math.max(0, originalAmount - discountAmount);
+        long settlementAmount = originalAmount; // 平台承担补贴，陪玩师结算等于原价
 
         // 7. 落库
         PlayOrder order = new PlayOrder();
@@ -131,6 +146,11 @@ public class OrderService {
         order.setCompanionNameSnapshot(profile.getDisplayName());
         order.setUnitPriceCents(service.getPriceCents());
         order.setDurationMinutes(req.getDurationMinutes());
+        order.setOriginalAmountCents(originalAmount);
+        order.setDiscountAmountCents(discountAmount);
+        order.setCouponId(couponId);
+        order.setCouponNameSnapshot(couponNameSnapshot);
+        order.setSettlementAmountCents(settlementAmount);
         order.setTotalAmountCents(totalAmount);
         order.setGameServer(req.getGameServer() == null ? "" : req.getGameServer());
         order.setGameNickname(req.getGameNickname() == null ? "" : req.getGameNickname());
@@ -142,6 +162,11 @@ public class OrderService {
         order.setClosedReason("");
         order.setVersion(0);
         orderMapper.insert(order);
+
+        // 锁定使用的优惠券
+        if (couponId != null && couponId > 0) {
+            couponService.lockForOrder(userId, couponId, order.getId(), originalAmount, service);
+        }
 
         // 临时档期占用（支付后转有效）
         OrderTimeSlot slot = new OrderTimeSlot();
@@ -175,6 +200,7 @@ public class OrderService {
             throw new BusinessException(ErrorCode.ORDER_PAYMENT_EXPIRED);
         }
         walletService.pay(order, userId);
+        couponService.useForOrder(order.getId());
         transition(order, OrderStatus.WAITING_ACCEPTANCE, userId, "USER", "PAY", "模拟支付成功");
         order.setAcceptExpireAt(LocalDateTime.now().plusMinutes(ACCEPT_EXPIRE_MINUTES));
         orderMapper.updateById(order);
@@ -290,6 +316,8 @@ public class OrderService {
         String reasonText = reason == null || reason.isBlank() ? "用户取消订单" : reason;
         if (paid) {
             walletService.refund(order, reasonText, userId);
+        } else {
+            couponService.releaseFromOrder(order.getId());
         }
         transition(order, OrderStatus.CLOSED, userId, "USER", "CANCEL", reasonText);
         order.setClosedReason(reasonText);
@@ -346,6 +374,7 @@ public class OrderService {
         if (order == null || !OrderStatus.PENDING_PAYMENT.name().equals(order.getOrderStatus())) {
             return;
         }
+        couponService.releaseFromOrder(order.getId());
         transition(order, OrderStatus.CLOSED, 0L, "SYSTEM", "CLOSE_EXPIRED_PAYMENT", "支付超时自动关闭");
         order.setClosedReason("支付超时自动关闭");
         orderMapper.updateById(order);
@@ -562,6 +591,11 @@ public class OrderService {
                 .serviceTypeNameSnapshot(order.getServiceTypeNameSnapshot())
                 .unitPriceCents(order.getUnitPriceCents())
                 .durationMinutes(order.getDurationMinutes())
+                .originalAmountCents(order.getOriginalAmountCents())
+                .discountAmountCents(order.getDiscountAmountCents())
+                .couponId(order.getCouponId())
+                .couponNameSnapshot(order.getCouponNameSnapshot())
+                .settlementAmountCents(order.getSettlementAmountCents())
                 .totalAmountCents(order.getTotalAmountCents())
                 .gameServer(order.getGameServer())
                 .gameNickname(order.getGameNickname())

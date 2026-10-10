@@ -20,6 +20,7 @@ const activeMenu = computed(() => {
   if (route.path.startsWith('/profile')) return '/profile'
   if (route.path.startsWith('/companions')) return '/companions'
   if (route.path.startsWith('/games')) return '/games'
+  if (route.path.startsWith('/activities')) return '/activities'
   if (route.path.startsWith('/support')) return '/support'
   return '/'
 })
@@ -61,6 +62,7 @@ function goLogin() {
           <router-link to="/" :class="{ active: activeMenu === '/' }">首页</router-link>
           <router-link to="/games" :class="{ active: activeMenu === '/games' }">游戏</router-link>
           <router-link to="/companions" :class="{ active: activeMenu === '/companions' }">找陪玩</router-link>
+          <router-link to="/activities" :class="{ active: activeMenu === '/activities' }">活动</router-link>
           <router-link to="/orders" :class="{ active: activeMenu === '/orders' }">我的订单</router-link>
           <router-link to="/support" :class="{ active: activeMenu === '/support' }">客服</router-link>
         </nav>
@@ -83,6 +85,7 @@ function goLogin() {
                 <el-dropdown-menu>
                   <el-dropdown-item command="/profile">个人中心</el-dropdown-item>
                   <el-dropdown-item command="/orders">我的订单</el-dropdown-item>
+                  <el-dropdown-item command="/coupons">我的优惠券</el-dropdown-item>
                   <!-- 入驻申请入口：仅非陪玩师可见（已是陪玩师则显示下方工作台入口） -->
                   <el-dropdown-item v-if="!userStore.hasRole('COMPANION')" command="/become-companion">
                     成为陪玩师
@@ -121,11 +124,14 @@ function goLogin() {
             <h4>快速入口</h4>
             <router-link to="/games">游戏列表</router-link>
             <router-link to="/companions">查找陪玩师</router-link>
+            <router-link to="/activities">平台活动</router-link>
+            <router-link to="/announcements">平台公告</router-link>
             <router-link to="/support">在线客服</router-link>
           </div>
           <div class="footer-col">
             <h4>个人中心</h4>
             <router-link to="/orders">我的订单</router-link>
+            <router-link to="/coupons">我的优惠券</router-link>
             <router-link to="/profile">个人资料</router-link>
           </div>
           <div class="footer-col">

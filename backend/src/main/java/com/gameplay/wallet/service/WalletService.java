@@ -130,13 +130,15 @@ public class WalletService {
             return; // 幂等
         }
         WalletAccount wallet = ensureWalletForUpdate(order.getCompanionUserId());
+        long settleAmount = (order.getSettlementAmountCents() != null && order.getSettlementAmountCents() > 0)
+                ? order.getSettlementAmountCents() : order.getTotalAmountCents();
         int rows = walletAccountMapper.settleIncomeWithVersion(
-                wallet.getId(), wallet.getVersion(), order.getTotalAmountCents());
+                wallet.getId(), wallet.getVersion(), settleAmount);
         if (rows != 1) {
             throw new BusinessException(ErrorCode.WALLET_CONCURRENT_MODIFICATION);
         }
         insertLedger(businessNo, order.getCompanionUserId(), order.getId(), LedgerType.SETTLEMENT, LedgerDirection.IN,
-                order.getTotalAmountCents(), wallet, "订单完成收益结算：" + order.getServiceTitleSnapshot(),
+                settleAmount, wallet, "订单完成收益结算：" + order.getServiceTitleSnapshot(),
                 operatorId);
     }
 
@@ -173,7 +175,9 @@ public class WalletService {
             return; // 幂等
         }
         WalletAccount wallet = ensureWalletForUpdate(order.getCompanionUserId());
-        long actual = Math.min(order.getTotalAmountCents(), wallet.getBalanceCents());
+        long settleAmount = (order.getSettlementAmountCents() != null && order.getSettlementAmountCents() > 0)
+                ? order.getSettlementAmountCents() : order.getTotalAmountCents();
+        long actual = Math.min(settleAmount, wallet.getBalanceCents());
         if (actual <= 0) {
             return; // 陪玩师无可扣余额，演示环境允许
         }

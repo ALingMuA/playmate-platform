@@ -3,13 +3,14 @@
  * 创建预约（对齐 frontend-prototype booking.html）。
  *
  * <p>选择服务项目、预约时间与时长，填写区服/昵称/备注后提交订单（FR-U07/U08），
- * 提交成功后跳转模拟支付页（FR-U09）。</p>
+ * 支持选择可用优惠券进行平台抵扣，提交成功后跳转模拟支付页（FR-U09）。</p>
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { createOrder, listBookableServices, type BookableService } from '@/api/order'
+import { availableCoupons, previewCoupon, type UserCouponView, type CouponPreviewResult } from '@/api/coupon'
 
 const route = useRoute()
 const router = useRouter()
@@ -32,7 +33,13 @@ const form = reactive({
 
 const selectedService = computed(() => services.value.find((s) => s.id === form.serviceId))
 
-/** 总价（分）= 单价 × 时长/60 */
+/** 优惠券状态 */
+const userCoupons = ref<UserCouponView[]>([])
+const selectedCouponId = ref<number | undefined>(undefined)
+const previewResult = ref<CouponPreviewResult | null>(null)
+const couponLoading = ref(false)
+
+/** 原价（分）= 单价 × 时长/60 */
 const totalAmountCents = computed(() => {
   if (!selectedService.value || !form.durationMinutes) return 0
   return Math.round((selectedService.value.priceCents * form.durationMinutes) / 60)
@@ -41,6 +48,52 @@ const totalAmountCents = computed(() => {
 function fmtPrice(cents: number): string {
   return '¥' + (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)
 }
+
+async function refreshCouponsAndPreview() {
+  if (!form.serviceId || !form.durationMinutes) {
+    userCoupons.value = []
+    previewResult.value = null
+    return
+  }
+  couponLoading.value = true
+  try {
+    const list = await availableCoupons(form.serviceId, form.durationMinutes)
+    userCoupons.value = list
+    // 若原先选中的券不再适用，重置
+    if (selectedCouponId.value) {
+      const found = list.find((c) => c.id === selectedCouponId.value)
+      if (!found || !found.isApplicable) {
+        selectedCouponId.value = undefined
+      }
+    }
+    await updatePreview()
+  } catch {
+    userCoupons.value = []
+  } finally {
+    couponLoading.value = false
+  }
+}
+
+async function updatePreview() {
+  if (!form.serviceId || !form.durationMinutes) return
+  try {
+    const res = await previewCoupon(form.serviceId, form.durationMinutes, selectedCouponId.value)
+    previewResult.value = res
+  } catch {
+    previewResult.value = null
+  }
+}
+
+watch(
+  () => [form.serviceId, form.durationMinutes],
+  () => {
+    refreshCouponsAndPreview()
+  },
+)
+
+watch(selectedCouponId, () => {
+  updatePreview()
+})
 
 async function handleSubmit() {
   const service = selectedService.value
@@ -66,6 +119,7 @@ async function handleSubmit() {
       gameNickname: form.gameNickname,
       userRemark: form.userRemark,
       appointmentStartAt: dayjs(form.appointmentStart).format('YYYY-MM-DD HH:mm:ss'),
+      couponId: selectedCouponId.value || undefined,
     })
     ElMessage.success('订单已创建，请尽快支付')
     router.push(`/payment/${order.id}`)
@@ -86,6 +140,7 @@ onMounted(async () => {
     } else if (services.value.length) {
       form.serviceId = services.value[0].id
     }
+    await refreshCouponsAndPreview()
   } finally {
     loading.value = false
   }
@@ -140,6 +195,30 @@ onMounted(async () => {
               </p>
             </div>
 
+            <!-- 优惠券选择 -->
+            <div class="form-group">
+              <label class="form-label">优惠券抵扣</label>
+              <el-select
+                v-model="selectedCouponId"
+                placeholder="请选择优惠券（可选）"
+                clearable
+                :loading="couponLoading"
+                style="width: 100%"
+              >
+                <el-option :value="undefined" label="不使用优惠券" />
+                <el-option
+                  v-for="c in userCoupons"
+                  :key="c.id"
+                  :value="c.id"
+                  :label="`${c.templateName}（${c.isApplicable ? `可抵扣 ¥${((c.expectedDiscountCents || 0) / 100).toFixed(2)}` : c.notApplicableReason}）`"
+                  :disabled="!c.isApplicable"
+                />
+              </el-select>
+              <p v-if="previewResult && previewResult.discountAmountCents > 0" class="form-hint text-success" style="color: #10b981">
+                ✓ 优惠券生效中：减免 ¥{{ (previewResult.discountAmountCents / 100).toFixed(2) }}
+              </p>
+            </div>
+
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">游戏区服</label>
@@ -176,9 +255,19 @@ onMounted(async () => {
             <p v-else class="text-muted" style="font-size: 0.875rem">请先选择服务项目</p>
           </div>
           <div class="sidebar-section">
-            <div class="flex justify-between items-center">
-              <span class="text-muted">应付金额</span>
-              <span class="companion-price" style="font-size: 1.75rem">{{ fmtPrice(totalAmountCents) }}</span>
+            <div class="flex justify-between items-center text-muted" style="margin-bottom: 8px">
+              <span>服务原价</span>
+              <span>{{ fmtPrice(previewResult?.originalAmountCents || totalAmountCents) }}</span>
+            </div>
+            <div v-if="previewResult && previewResult.discountAmountCents > 0" class="flex justify-between items-center" style="color: #ef4444; margin-bottom: 8px">
+              <span>优惠券抵扣</span>
+              <span>- {{ fmtPrice(previewResult.discountAmountCents) }}</span>
+            </div>
+            <div class="flex justify-between items-center" style="border-top: 1px dashed var(--border); padding-top: 8px">
+              <span class="text-muted">实付金额</span>
+              <span class="companion-price" style="font-size: 1.75rem">
+                {{ fmtPrice(previewResult?.payableAmountCents ?? totalAmountCents) }}
+              </span>
             </div>
           </div>
           <button class="btn btn-primary btn-block btn-lg" :disabled="submitting || !selectedService"
