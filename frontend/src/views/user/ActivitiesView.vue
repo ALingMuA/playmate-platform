@@ -95,7 +95,14 @@ onMounted(() => {
         >
           <div
             class="card-banner"
-            :style="{ background: item.bgGradient || 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }"
+            :style="item.bannerImage ? {
+              backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.65)), url(${item.bannerImage})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat'
+            } : {
+              background: item.bgGradient || 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)'
+            }"
           >
             <div class="banner-tag" v-if="item.tag">
               <span class="tag-badge" :style="{ backgroundColor: item.tagColor || 'rgba(255,255,255,0.25)' }">
