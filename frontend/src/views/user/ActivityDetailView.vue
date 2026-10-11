@@ -84,7 +84,14 @@ onMounted(() => {
         <!-- 头部 Banner 区域 -->
         <div
           class="hero-banner"
-          :style="{ background: activity.bgGradient || 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }"
+          :style="activity.bannerImage ? {
+            backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.7)), url(${activity.bannerImage})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat'
+          } : {
+            background: activity.bgGradient || 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)'
+          }"
         >
           <div class="banner-badge" v-if="activity.tag">
             <span class="tag-pill" :style="{ backgroundColor: activity.tagColor || 'rgba(255,255,255,0.25)' }">

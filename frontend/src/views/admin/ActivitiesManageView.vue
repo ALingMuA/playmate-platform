@@ -16,6 +16,7 @@ import {
   type ActivityView,
 } from '@/api/activity'
 import { adminCoupons, type CouponTemplateView } from '@/api/coupon'
+import { uploadFile } from '@/api/file'
 
 const list = ref<ActivityView[]>([])
 const total = ref(0)
@@ -23,6 +24,7 @@ const page = ref(1)
 const pageSize = 10
 const loading = ref(false)
 const status = ref<string | undefined>(undefined)
+const uploadingBanner = ref(false)
 
 const couponTemplates = ref<CouponTemplateView[]>([])
 
@@ -153,6 +155,28 @@ function openEdit(row: ActivityView) {
   editVisible.value = true
 }
 
+async function handleBannerUpload(file: File) {
+  if (!file.type.startsWith('image/')) {
+    ElMessage.warning('请选择图片文件（JPG/PNG/WEBP/GIF）')
+    return false
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    ElMessage.warning('图片大小不能超过 5MB')
+    return false
+  }
+  uploadingBanner.value = true
+  try {
+    const res = await uploadFile(file, 'activity')
+    form.bannerImage = res.url
+    ElMessage.success('横幅背景图上传成功')
+  } catch {
+    // 拦截器统一处理
+  } finally {
+    uploadingBanner.value = false
+  }
+  return false
+}
+
 async function handleSave() {
   if (!form.title.trim()) {
     ElMessage.warning('请输入活动标题')
@@ -253,10 +277,18 @@ onMounted(() => {
       <el-table :data="list" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="sortOrder" label="排序" width="70" />
-        <el-table-column label="活动名称与样式" min-width="200">
+        <el-table-column label="活动名称与视觉" min-width="220">
           <template #default="{ row }">
             <div class="flex items-center gap-2">
-              <span class="text-xl">{{ row.icon || '🎁' }}</span>
+              <el-image
+                v-if="row.bannerImage"
+                :src="row.bannerImage"
+                class="banner-table-thumb"
+                fit="cover"
+                :preview-src-list="[row.bannerImage]"
+                preview-teleported
+              />
+              <span v-else class="text-xl">{{ row.icon || '🎁' }}</span>
               <div>
                 <div class="font-bold flex items-center gap-1">
                   <span>{{ row.title }}</span>
@@ -354,14 +386,39 @@ onMounted(() => {
         <el-form-item label="副标题">
           <el-input v-model="form.subtitle" placeholder="如：首单立减 50%" maxlength="100" show-word-limit />
         </el-form-item>
-        <el-form-item label="标签与颜色">
-          <div class="flex gap-2 w-full">
-            <el-input v-model="form.tag" placeholder="如：限时活动" style="flex: 1" />
-            <el-color-picker v-model="form.tagColor" />
+        <el-form-item label="横幅背景图">
+          <div class="banner-uploader-container">
+            <div v-if="form.bannerImage" class="banner-preview-box">
+              <img :src="form.bannerImage" class="banner-img" alt="横幅背景图" />
+              <div class="banner-actions-mask">
+                <el-upload
+                  :show-file-list="false"
+                  accept="image/*"
+                  :before-upload="handleBannerUpload"
+                  :disabled="uploadingBanner"
+                >
+                  <el-button size="small" type="primary">更换图片</el-button>
+                </el-upload>
+                <el-button size="small" type="danger" @click="form.bannerImage = ''">移除图片</el-button>
+              </div>
+            </div>
+            <div v-else class="banner-upload-empty">
+              <el-upload
+                :show-file-list="false"
+                accept="image/*"
+                :before-upload="handleBannerUpload"
+                :disabled="uploadingBanner"
+              >
+                <div class="banner-dropzone" :class="{ 'is-loading': uploadingBanner }">
+                  <span v-if="uploadingBanner">⏳ 图片上传中...</span>
+                  <span v-else>📷 点击上传自定义背景图</span>
+                </div>
+              </el-upload>
+              <div class="text-xs text-muted mt-1">
+                支持 JPG/PNG/WEBP/GIF，建议尺寸 800×400 或 16:9，不超过 5MB
+              </div>
+            </div>
           </div>
-        </el-form-item>
-        <el-form-item label="图标 Emoji">
-          <el-input v-model="form.icon" placeholder="输入 Emoji 图标，如 🎁 / 🏆 / 🎮" style="width: 200px" />
         </el-form-item>
         <el-form-item label="卡片渐变背景">
           <el-select v-model="form.bgGradient" placeholder="选择预设渐变" class="w-full">
@@ -377,6 +434,16 @@ onMounted(() => {
               </div>
             </el-option>
           </el-select>
+          <div class="text-xs text-muted mt-1">未上传背景图时，将默认展示此预设渐变色</div>
+        </el-form-item>
+        <el-form-item label="标签与颜色">
+          <div class="flex gap-2 w-full">
+            <el-input v-model="form.tag" placeholder="如：限时活动" style="flex: 1" />
+            <el-color-picker v-model="form.tagColor" />
+          </div>
+        </el-form-item>
+        <el-form-item label="图标 Emoji">
+          <el-input v-model="form.icon" placeholder="输入 Emoji 图标，如 🎁 / 🏆 / 🎮" style="width: 200px" />
         </el-form-item>
         <el-form-item label="动作类型" required>
           <el-radio-group v-model="form.actionType">
@@ -488,5 +555,63 @@ onMounted(() => {
 }
 .inline-block {
   display: inline-block;
+}
+.banner-table-thumb {
+  width: 48px;
+  height: 36px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  border: 1px solid #e5e7eb;
+}
+.banner-uploader-container {
+  width: 100%;
+}
+.banner-preview-box {
+  position: relative;
+  width: 100%;
+  height: 140px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+}
+.banner-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.banner-actions-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.banner-preview-box:hover .banner-actions-mask {
+  opacity: 1;
+}
+.banner-dropzone {
+  border: 1.5px dashed #d1d5db;
+  border-radius: 8px;
+  padding: 24px;
+  text-align: center;
+  color: var(--primary, #4f46e5);
+  cursor: pointer;
+  background: #f9fafb;
+  transition: all 0.2s ease;
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+.banner-dropzone:hover {
+  border-color: var(--primary, #4f46e5);
+  background: #f3f4f6;
+}
+.banner-dropzone.is-loading {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>

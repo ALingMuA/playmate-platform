@@ -192,7 +192,14 @@ onUnmounted(() => {
               :key="item.id"
               class="carousel-slide"
               :class="{ active: currentSlide === index }"
-              :style="{ background: item.bgGradient }"
+              :style="item.bannerImage ? {
+                backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.65)), url(${item.bannerImage})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat'
+              } : {
+                background: item.bgGradient || 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)'
+              }"
             >
               <div class="slide-content">
                 <div class="slide-text">
