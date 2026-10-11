@@ -68,14 +68,38 @@ find "$APP_DIR/frontend" -type f -exec chmod 644 {} +
 
 log "5/7 检查数据库 $DB_NAME"
 set -a; . "$STAGE/gameplay.env"; set +a
-# schema.sql 使用 CREATE TABLE（非 IF NOT EXISTS），重复执行会报错并因 set -e 中断部署，
-# 因此仅在库不存在时初始化，已有库保持不变（结构变更需另写迁移脚本）。
+# 确保数据库存在
+mysql -uroot -e "CREATE DATABASE IF NOT EXISTS $DB_NAME DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+# 创建迁移版本记录表
+mysql -uroot "$DB_NAME" -e "CREATE TABLE IF NOT EXISTS schema_version (version VARCHAR(128) PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);"
+
 if mysql -uroot -N -e "select 1 from information_schema.tables where table_schema='$DB_NAME' and table_name='user';" | grep -q 1; then
-  echo "  数据库已存在，跳过 schema/种子数据导入（保留线上数据）"
+  echo "  数据库已存在，跳过初始建库；检查并应用增量迁移脚本..."
+  # 预置历史已执行迁移版本，避免重复执行非幂等老脚本
+  mysql -uroot "$DB_NAME" -e "INSERT IGNORE INTO schema_version (version) VALUES ('20260908_ai_model.sql'), ('20260913_ai_settings.sql');"
+  if [ -d "$STAGE/migrations" ]; then
+    for mf in $(ls -1 "$STAGE/migrations"/*.sql 2>/dev/null | sort); do
+      vname=$(basename "$mf")
+      if mysql -uroot -N "$DB_NAME" -e "SELECT 1 FROM schema_version WHERE version='$vname';" | grep -q 1; then
+        echo "    [跳过已执行] $vname"
+      else
+        echo "    [执行新迁移] $vname"
+        mysql -uroot "$DB_NAME" < "$mf"
+        mysql -uroot "$DB_NAME" -e "INSERT INTO schema_version (version) VALUES ('$vname');"
+      fi
+    done
+  fi
+  # 增量补充种子数据（INSERT IGNORE 幂等）
+  mysql -uroot "$DB_NAME" < "$STAGE/data.sql"
 else
   echo "  首次部署，执行 schema.sql 与 data.sql"
   mysql -uroot < "$STAGE/schema.sql"
   mysql -uroot < "$STAGE/data.sql"
+  if [ -d "$STAGE/migrations" ]; then
+    for mf in $(ls -1 "$STAGE/migrations"/*.sql 2>/dev/null | sort); do
+      mysql -uroot "$DB_NAME" -e "INSERT IGNORE INTO schema_version (version) VALUES ('$(basename "$mf")');"
+    done
+  fi
 fi
 mysql -uroot -e "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASSWORD';"
 mysql -uroot -e "ALTER USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASSWORD';"
