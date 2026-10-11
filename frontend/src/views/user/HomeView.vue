@@ -6,15 +6,11 @@
  */
 import { onMounted, onUnmounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { useUserStore } from '@/stores/user'
 import { publicAnnouncements, type AnnouncementView } from '@/api/admin'
 import { listBookableServices, type BookableService } from '@/api/order'
 import { publicActivities, type ActivityView } from '@/api/activity'
-import { claimCoupon } from '@/api/coupon'
 
 const router = useRouter()
-const userStore = useUserStore()
 
 /** 平台公告（仅已发布，FR-A08） */
 const announcements = ref<AnnouncementView[]>([])
@@ -61,7 +57,6 @@ const defaultActivities: ActivityView[] = [
 ]
 
 const activities = ref<ActivityView[]>(defaultActivities)
-const claimingCouponId = ref<number | null>(null)
 
 /** 轮播控制 */
 const currentSlide = ref(0)
@@ -98,44 +93,17 @@ function resetAutoPlay() {
   startAutoPlay()
 }
 
-function getSlideActionText(item: ActivityView): string {
-  if (item.actionType === 'COUPON_CLAIM') return '立即领券'
-  if (item.actionType === 'COMPANION_LIST') return '挑选陪玩'
-  return '查看详情'
-}
-
-async function handleSlideAction(item: ActivityView) {
-  if (item.actionType === 'COUPON_CLAIM') {
-    if (!userStore.isLoggedIn) {
-      ElMessage.warning('请先登录后再领取优惠券')
-      router.push(`/login?redirect=${encodeURIComponent(router.currentRoute.value.fullPath)}`)
-      return
-    }
-    if (!item.couponTemplateId) {
-      ElMessage.warning('活动未绑定优惠券')
-      return
-    }
-    claimingCouponId.value = item.couponTemplateId
-    try {
-      await claimCoupon(item.couponTemplateId)
-      ElMessage.success('优惠券领取成功！快去下单使用吧')
-    } catch {
-      // 全局拦截器处理
-    } finally {
-      claimingCouponId.value = null
-    }
-    return
-  }
-  if (item.actionType === 'COMPANION_LIST') {
-    router.push('/companions')
-    return
-  }
+function handleSlideAction(item: ActivityView) {
   if (item.actionRoute) {
     if (item.actionRoute.startsWith('http')) {
       window.open(item.actionRoute, '_blank')
     } else {
       router.push(item.actionRoute)
     }
+    return
+  }
+  if (item.actionType === 'COMPANION_LIST') {
+    router.push('/companions')
     return
   }
   router.push(`/activities/${item.id}`)
@@ -200,32 +168,36 @@ onUnmounted(() => {
               } : {
                 background: item.bgGradient || 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)'
               }"
+              @click="handleSlideAction(item)"
             >
               <div class="slide-content">
                 <div class="slide-text">
                   <span class="slide-tag" :style="{ background: item.tagColor }">{{ item.tag }}</span>
-                  <h2 class="slide-title" style="cursor: pointer" @click="router.push(`/activities/${item.id}`)">{{ item.title }}</h2>
+                  <h2 class="slide-title">{{ item.title }}</h2>
                   <p class="slide-subtitle">{{ item.subtitle }}</p>
                   <p class="slide-desc">{{ item.description }}</p>
-                  <button class="btn btn-lg slide-btn" :disabled="claimingCouponId === item.couponTemplateId" @click="handleSlideAction(item)">
-                    {{ claimingCouponId === item.couponTemplateId ? '领取中...' : getSlideActionText(item) }}
-                  </button>
                 </div>
                 <div class="slide-icon">{{ item.icon }}</div>
               </div>
             </div>
           </div>
-          <!-- 左右箭头 -->
-          <button class="carousel-arrow carousel-arrow-left" @click="prevSlide">‹</button>
-          <button class="carousel-arrow carousel-arrow-right" @click="nextSlide(); resetAutoPlay()">›</button>
+
+          <!-- 左右切换热区与小箭头 -->
+          <div class="carousel-side-zone left-zone" @click.stop="prevSlide">
+            <button class="carousel-arrow carousel-arrow-left" aria-label="上一张">‹</button>
+          </div>
+          <div class="carousel-side-zone right-zone" @click.stop="nextSlide(); resetAutoPlay()">
+            <button class="carousel-arrow carousel-arrow-right" aria-label="下一张">›</button>
+          </div>
+
           <!-- 指示器 -->
-          <div class="carousel-indicators">
+          <div class="carousel-indicators" @click.stop>
             <button
               v-for="(_, index) in activities"
               :key="index"
               class="indicator-dot"
               :class="{ active: currentSlide === index }"
-              @click="goToSlide(index)"
+              @click.stop="goToSlide(index)"
             />
           </div>
         </div>
@@ -309,6 +281,7 @@ onUnmounted(() => {
   opacity: 0;
   transition: opacity 0.6s ease;
   pointer-events: none;
+  cursor: pointer;
 }
 
 .carousel-slide.active {
@@ -323,6 +296,7 @@ onUnmounted(() => {
   height: 100%;
   padding: 48px 56px;
   color: #fff;
+  user-select: none;
 }
 
 .slide-text {
@@ -362,22 +336,6 @@ onUnmounted(() => {
   max-width: 420px;
 }
 
-.slide-btn {
-  margin-top: 24px;
-  background: rgba(255, 255, 255, 0.2);
-  color: #fff;
-  border: 2px solid rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(4px);
-  font-weight: 700;
-  transition: background 0.2s, border-color 0.2s, transform 0.15s;
-}
-
-.slide-btn:hover {
-  background: rgba(255, 255, 255, 0.35);
-  border-color: #fff;
-  transform: translateY(-1px);
-}
-
 .slide-icon {
   font-size: 120px;
   line-height: 1;
@@ -386,68 +344,89 @@ onUnmounted(() => {
   user-select: none;
 }
 
-/* 箭头 */
-.carousel-arrow {
+/* 侧边切换热区与小箭头 */
+.carousel-side-zone {
   position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 44px;
-  height: 44px;
+  top: 0;
+  bottom: 0;
+  width: 64px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.carousel-side-zone.left-zone {
+  left: 0;
+  justify-content: flex-start;
+  padding-left: 14px;
+}
+
+.carousel-side-zone.right-zone {
+  right: 0;
+  justify-content: flex-end;
+  padding-right: 14px;
+}
+
+.carousel-arrow {
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(4px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.25);
   color: #fff;
-  font-size: 24px;
+  font-size: 16px;
+  line-height: 1;
   display: grid;
   place-items: center;
-  cursor: pointer;
-  transition: background 0.2s;
-  z-index: 2;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 0.25s ease, transform 0.25s ease, background 0.2s ease;
+  pointer-events: none;
 }
 
-.carousel-arrow:hover {
-  background: rgba(255, 255, 255, 0.35);
+.carousel-side-zone:hover .carousel-arrow {
+  opacity: 0.95;
+  transform: scale(1);
+  background: rgba(0, 0, 0, 0.55);
 }
 
-.carousel-arrow-left {
-  left: 16px;
-}
-
-.carousel-arrow-right {
-  right: 16px;
+.carousel-side-zone:active .carousel-arrow {
+  transform: scale(0.92);
 }
 
 /* 指示器 */
 .carousel-indicators {
   position: absolute;
-  bottom: 16px;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 8px;
-  z-index: 2;
+  align-items: center;
+  gap: 6px;
+  z-index: 5;
 }
 
 .indicator-dot {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.6);
-  background: transparent;
+  border: none;
+  background: rgba(255, 255, 255, 0.4);
   cursor: pointer;
   padding: 0;
-  transition: background 0.2s, border-color 0.2s, transform 0.2s;
+  transition: all 0.25s ease;
 }
 
 .indicator-dot.active {
   background: #fff;
-  border-color: #fff;
-  transform: scale(1.2);
+  transform: scale(1.25);
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.6);
 }
 
 .indicator-dot:hover:not(.active) {
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.75);
 }
 
 /* ===== 公告 ===== */
