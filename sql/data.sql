@@ -19,9 +19,9 @@ SELECT u.id, r.id FROM `user` u JOIN `role` r ON r.role_code = 'ADMIN' WHERE u.u
 -- 3. 目录基础数据（FR-U01/FR-M10~M12 演示数据，概要设计"首批游戏"：王者荣耀、英雄联盟、和平精英）
 -- 3.1 游戏
 INSERT IGNORE INTO game (game_name, game_icon_url, game_intro, sort_no, enabled) VALUES
-  ('王者荣耀', '', '5v5 公平竞技 MOBA 手游，开黑上分首选', 1, 1),
-  ('英雄联盟', '', '经典端游 MOBA，团队配合与操作细节并重', 2, 1),
-  ('和平精英', '', '百人战术竞技射击手游，吃鸡必备', 3, 1);
+  ('王者荣耀', '/images/games/wzry.jpg', '5v5 公平竞技 MOBA 手游，开黑上分首选', 1, 1),
+  ('英雄联盟', '/images/games/lol.jpg', '经典端游 MOBA，团队配合与操作细节并重', 2, 1),
+  ('和平精英', '/images/games/hpjy.jpg', '百人战术竞技射击手游，吃鸡必备', 3, 1);
 
 -- 3.2 服务类型
 INSERT IGNORE INTO service_type (type_name, type_code, description, sort_no, enabled) VALUES
