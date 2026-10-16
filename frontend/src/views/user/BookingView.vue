@@ -48,6 +48,92 @@ function enableCustomDuration() {
   isCustomDuration.value = true
 }
 
+/** 开始时间模式：'today' | 'tomorrow' | 'afterTomorrow' | 'custom' */
+type DatePresetKey = 'today' | 'tomorrow' | 'afterTomorrow' | 'custom'
+const selectedDateKey = ref<DatePresetKey>('today')
+
+const dateOptions = computed(() => [
+  { key: 'today' as DatePresetKey, label: '今天', sub: dayjs().format('MM-DD') },
+  { key: 'tomorrow' as DatePresetKey, label: '明天', sub: dayjs().add(1, 'day').format('MM-DD') },
+  { key: 'afterTomorrow' as DatePresetKey, label: '后天', sub: dayjs().add(2, 'day').format('MM-DD') },
+  { key: 'custom' as DatePresetKey, label: '自定义', sub: '精确日历' },
+])
+
+/** 今天快捷时段：'15m' | '30m' | '60m' | 'exact' */
+type TodayQuickTime = '15m' | '30m' | '60m' | 'exact'
+const selectedTodayQuick = ref<TodayQuickTime>('15m')
+
+/** 明天/后天常用游戏时段：'14:00' | '19:30' | '21:30' | 'exact' */
+const futureTimePreset = ref<string>('19:30')
+const customTimeStr = ref<string>('20:00')
+
+function updateAppointmentStart() {
+  if (selectedDateKey.value === 'custom') {
+    return
+  }
+
+  const now = dayjs()
+  if (selectedDateKey.value === 'today') {
+    if (selectedTodayQuick.value === '15m') {
+      form.appointmentStart = now.add(15, 'minute').format('YYYY-MM-DD HH:mm:ss')
+    } else if (selectedTodayQuick.value === '30m') {
+      form.appointmentStart = now.add(30, 'minute').format('YYYY-MM-DD HH:mm:ss')
+    } else if (selectedTodayQuick.value === '60m') {
+      form.appointmentStart = now.add(60, 'minute').format('YYYY-MM-DD HH:mm:ss')
+    } else {
+      const [hh, mm] = customTimeStr.value.split(':').map(Number)
+      let target = now.hour(hh || 0).minute(mm || 0).second(0)
+      if (target.isBefore(now)) {
+        target = target.add(1, 'day')
+      }
+      form.appointmentStart = target.format('YYYY-MM-DD HH:mm:ss')
+    }
+  } else if (selectedDateKey.value === 'tomorrow') {
+    const tomorrow = now.add(1, 'day')
+    const timeStr = futureTimePreset.value === 'exact' ? customTimeStr.value : futureTimePreset.value
+    const [hh, mm] = (timeStr || '19:30').split(':').map(Number)
+    form.appointmentStart = tomorrow.hour(hh || 0).minute(mm || 0).second(0).format('YYYY-MM-DD HH:mm:ss')
+  } else if (selectedDateKey.value === 'afterTomorrow') {
+    const afterTomorrow = now.add(2, 'day')
+    const timeStr = futureTimePreset.value === 'exact' ? customTimeStr.value : futureTimePreset.value
+    const [hh, mm] = (timeStr || '19:30').split(':').map(Number)
+    form.appointmentStart = afterTomorrow.hour(hh || 0).minute(mm || 0).second(0).format('YYYY-MM-DD HH:mm:ss')
+  }
+}
+
+function selectDatePreset(key: DatePresetKey) {
+  selectedDateKey.value = key
+  if (key !== 'custom') {
+    updateAppointmentStart()
+  } else if (!form.appointmentStart) {
+    form.appointmentStart = dayjs().add(15, 'minute').format('YYYY-MM-DD HH:mm:ss')
+  }
+}
+
+function selectTodayQuickTime(quick: TodayQuickTime) {
+  selectedTodayQuick.value = quick
+  updateAppointmentStart()
+}
+
+function selectFutureTimePreset(time: string) {
+  futureTimePreset.value = time
+  updateAppointmentStart()
+}
+
+/** 友好展示已选开始时间 */
+const friendlyStartTime = computed(() => {
+  if (!form.appointmentStart) return '未设置开始时间'
+  const target = dayjs(form.appointmentStart)
+  const now = dayjs()
+  const diffDays = target.startOf('day').diff(now.startOf('day'), 'day')
+  let prefix = ''
+  if (diffDays === 0) prefix = '今天'
+  else if (diffDays === 1) prefix = '明天'
+  else if (diffDays === 2) prefix = '后天'
+  else prefix = target.format('MM月DD日')
+  return `${prefix} ${target.format('HH:mm')}`
+})
+
 /** 是否展开选填信息 */
 const showOptionalInfo = ref(false)
 
@@ -168,6 +254,7 @@ onMounted(async () => {
     if (!durationPresets.some((p) => p.minutes === form.durationMinutes)) {
       isCustomDuration.value = true
     }
+    updateAppointmentStart()
     await refreshCouponsAndPreview()
   } finally {
     loading.value = false
@@ -227,17 +314,139 @@ onMounted(async () => {
                 <p v-else class="text-muted" style="font-size: 0.875rem">该陪玩师暂无可预约服务</p>
               </div>
 
-              <!-- 开始时间 -->
+              <!-- 开始时间（今天 / 明天 / 后天 / 自定义） -->
               <div class="form-group">
                 <label class="form-label">开始时间</label>
-                <el-date-picker
-                  v-model="form.appointmentStart"
-                  type="datetime"
-                  placeholder="点击选择上号/开黑开始时间"
-                  :disabled-date="(d: Date) => d.getTime() < Date.now() - 86400000"
-                  style="width: 100%"
-                />
-                <p class="form-hint">建议选择至少 10 分钟后的时间，以便陪玩师提前就位</p>
+                <!-- 日期快捷胶囊 -->
+                <div class="duration-pills mb-1">
+                  <button
+                    v-for="d in dateOptions"
+                    :key="d.key"
+                    type="button"
+                    class="duration-pill"
+                    :class="{ active: selectedDateKey === d.key }"
+                    @click="selectDatePreset(d.key)"
+                  >
+                    <span>{{ d.label }}</span>
+                    <span v-if="d.sub" style="font-size: 0.75rem; opacity: 0.75; margin-left: 4px">({{ d.sub }})</span>
+                  </button>
+                </div>
+
+                <!-- 选“今天”时的快捷时段 -->
+                <div v-if="selectedDateKey === 'today'" class="quick-time-box mt-1">
+                  <div class="duration-pills">
+                    <button
+                      type="button"
+                      class="time-pill"
+                      :class="{ active: selectedTodayQuick === '15m' }"
+                      @click="selectTodayQuickTime('15m')"
+                    >
+                      ⚡ 尽快上号 (约15分钟后)
+                    </button>
+                    <button
+                      type="button"
+                      class="time-pill"
+                      :class="{ active: selectedTodayQuick === '30m' }"
+                      @click="selectTodayQuickTime('30m')"
+                    >
+                      30分钟后
+                    </button>
+                    <button
+                      type="button"
+                      class="time-pill"
+                      :class="{ active: selectedTodayQuick === '60m' }"
+                      @click="selectTodayQuickTime('60m')"
+                    >
+                      1小时后
+                    </button>
+                    <button
+                      type="button"
+                      class="time-pill"
+                      :class="{ active: selectedTodayQuick === 'exact' }"
+                      @click="selectTodayQuickTime('exact')"
+                    >
+                      指定时间点
+                    </button>
+                  </div>
+                  <div v-if="selectedTodayQuick === 'exact'" class="mt-1 flex items-center gap-1">
+                    <el-time-select
+                      v-model="customTimeStr"
+                      start="00:00"
+                      step="00:15"
+                      end="23:45"
+                      placeholder="选择具体时间点"
+                      style="width: 180px"
+                      @change="updateAppointmentStart"
+                    />
+                    <span class="text-muted" style="font-size: 0.8125rem">今天上号时间</span>
+                  </div>
+                </div>
+
+                <!-- 选“明天”或“后天”时的常用时段 -->
+                <div v-else-if="selectedDateKey === 'tomorrow' || selectedDateKey === 'afterTomorrow'" class="quick-time-box mt-1">
+                  <div class="duration-pills">
+                    <button
+                      type="button"
+                      class="time-pill"
+                      :class="{ active: futureTimePreset === '14:00' }"
+                      @click="selectFutureTimePreset('14:00')"
+                    >
+                      下午 14:00
+                    </button>
+                    <button
+                      type="button"
+                      class="time-pill"
+                      :class="{ active: futureTimePreset === '19:30' }"
+                      @click="selectFutureTimePreset('19:30')"
+                    >
+                      晚上黄金档 19:30
+                    </button>
+                    <button
+                      type="button"
+                      class="time-pill"
+                      :class="{ active: futureTimePreset === '21:30' }"
+                      @click="selectFutureTimePreset('21:30')"
+                    >
+                      深夜上分 21:30
+                    </button>
+                    <button
+                      type="button"
+                      class="time-pill"
+                      :class="{ active: futureTimePreset === 'exact' }"
+                      @click="selectFutureTimePreset('exact')"
+                    >
+                      其他时间点
+                    </button>
+                  </div>
+                  <div v-if="futureTimePreset === 'exact'" class="mt-1 flex items-center gap-1">
+                    <el-time-select
+                      v-model="customTimeStr"
+                      start="00:00"
+                      step="00:15"
+                      end="23:45"
+                      placeholder="选择时间点"
+                      style="width: 180px"
+                      @change="updateAppointmentStart"
+                    />
+                    <span class="text-muted" style="font-size: 0.8125rem">{{ selectedDateKey === 'tomorrow' ? '明天' : '后天' }}上号时间</span>
+                  </div>
+                </div>
+
+                <!-- 选“自定义”时的日期时间选择器 -->
+                <div v-else class="mt-1">
+                  <el-date-picker
+                    v-model="form.appointmentStart"
+                    type="datetime"
+                    placeholder="点击选择预约具体开始时间"
+                    :disabled-date="(d: Date) => d.getTime() < Date.now() - 86400000"
+                    style="width: 100%"
+                  />
+                </div>
+
+                <!-- 实时提示高亮徽章 -->
+                <div class="appointment-summary-pill mt-1">
+                  ⏰ <strong>已选预约开始时间：</strong>{{ friendlyStartTime }}
+                </div>
               </div>
 
               <!-- 服务时长 -->

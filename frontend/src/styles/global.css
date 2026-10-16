@@ -1953,6 +1953,49 @@ textarea.form-control {
   color: var(--primary);
 }
 
+/* 时间点快捷选择容器 */
+.quick-time-box {
+  background: var(--muted);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+
+.time-pill {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--card);
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.time-pill:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.time-pill.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+/* 实时预约时间确认提示 */
+.appointment-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--secondary);
+  color: #1e40af;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+}
+
 /* 折叠区域切换 */
 .collapsible-toggle {
   cursor: pointer;
