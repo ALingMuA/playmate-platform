@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 陪玩师详情（对齐 frontend-prototype companion-detail.html）。
+ * 陪玩师详情（对齐 frontend-prototype companion-detail.html，增强预约引导）。
  *
  * <p>展示陪玩师的服务项目与历史评价（FR-U05），支持选择服务后跳转预约下单（FR-U07）。
  * 数据来自可预约服务公开接口与陪玩师公开评价接口，游客可访问。</p>
@@ -19,6 +19,9 @@ const services = ref<BookableService[]>([])
 const reviews = ref<Review[]>([])
 const selectedId = ref<number | null>(null)
 const loading = ref(true)
+
+/** 当前选中的服务 */
+const selectedService = computed(() => services.value.find((s) => s.id === selectedId.value))
 
 /** 最低价格（元/小时） */
 const minPrice = computed(() => {
@@ -55,16 +58,20 @@ function fmtTime(t?: string): string {
   return t.length >= 10 ? t.slice(0, 10) : t
 }
 
-/** 选择服务后跳转预约 */
-function goBooking() {
-  const service = selectedId.value
-    ? services.value.find((s) => s.id === selectedId.value)
-    : services.value[0]
-  if (!service) return
+/** 选择指定服务直接预约 */
+function bookDirectly(service: BookableService) {
+  selectedId.value = service.id
   router.push({
     path: '/booking',
     query: { companionUserId: String(service.companionUserId), serviceId: String(service.id) },
   })
+}
+
+/** 侧边栏/底栏点击当前选中的服务后跳转预约 */
+function goBooking() {
+  const service = selectedService.value || services.value[0]
+  if (!service) return
+  bookDirectly(service)
 }
 
 onMounted(async () => {
@@ -83,7 +90,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="page">
+  <div class="page has-sticky-bar">
     <div class="container" v-loading="loading">
       <!-- 详情头部（原型 detail-header） -->
       <div v-if="services.length" class="detail-header">
@@ -91,10 +98,15 @@ onMounted(async () => {
           <div class="detail-avatar">🎮</div>
         </div>
         <div class="detail-header-body">
-          <h1 class="detail-name">
-            陪玩师 #{{ companionUserId }}
-            <span class="badge badge-secondary">已认证</span>
-          </h1>
+          <div class="flex items-center justify-between flex-wrap gap-1">
+            <h1 class="detail-name">
+              陪玩师 #{{ companionUserId }}
+              <span class="badge badge-secondary">已认证</span>
+            </h1>
+            <button class="btn btn-primary" @click="goBooking">
+              ⚡ 立即预约陪玩
+            </button>
+          </div>
           <div class="detail-meta">
             <span>⭐ {{ averageScore ? averageScore + ' 分' : '暂无评分' }}</span>
             <span>服务 {{ services.length }} 项</span>
@@ -117,11 +129,19 @@ onMounted(async () => {
         <!-- 侧栏（原型 sidebar） -->
         <aside class="sidebar">
           <div class="sidebar-section">
-            <h4>服务概况</h4>
-            <p class="text-muted" style="font-size: 0.875rem">
-              共 {{ services.length }} 个服务项目，价格从 {{ minPrice }}/小时起，支持在线预约。
-            </p>
+            <h4>当前选定服务</h4>
+            <div v-if="selectedService" class="mt-1">
+              <div style="font-weight: 700; font-size: 1rem">{{ selectedService.title }}</div>
+              <div class="text-muted" style="font-size: 0.8125rem">
+                {{ selectedService.gameName }} · {{ selectedService.serviceTypeName }}
+              </div>
+              <div class="companion-price mt-1" style="font-size: 1.5rem">
+                {{ fmtPrice(selectedService.priceCents) }}<span style="font-size: 0.875rem">/小时</span>
+              </div>
+            </div>
+            <p v-else class="text-muted" style="font-size: 0.875rem">请在右侧选择服务项目</p>
           </div>
+
           <div class="sidebar-section">
             <h4>服务标签</h4>
             <div class="companion-tags" style="margin: 0">
@@ -129,14 +149,23 @@ onMounted(async () => {
               <span v-if="!allTags.length" class="text-muted" style="font-size: 0.8125rem">暂无</span>
             </div>
           </div>
-          <button class="btn btn-primary btn-block btn-lg mt-2" @click="goBooking">立即预约</button>
+
+          <button class="btn btn-primary btn-block btn-lg mt-2" @click="goBooking">
+            下一步：去选时间与下单
+          </button>
+          <p class="text-muted" style="font-size: 0.75rem; text-align: center; margin-top: 10px">
+            预约后可按小时灵活结算
+          </p>
         </aside>
 
         <div>
           <!-- 服务项目（原型 service-list） -->
           <div class="card mb-2">
             <div class="card-body">
-              <h3 class="card-title">服务项目</h3>
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="card-title" style="margin: 0">选择服务项目</h3>
+                <span class="text-muted" style="font-size: 0.8125rem">点击项目可选中，或直接点击右侧预约</span>
+              </div>
               <div class="service-list">
                 <div
                   v-for="s in services"
@@ -145,8 +174,11 @@ onMounted(async () => {
                   :class="{ selected: selectedId === s.id }"
                   @click="selectedId = s.id"
                 >
-                  <div style="flex: 1">
-                    <div class="order-title">{{ s.title }}</div>
+                  <div style="flex: 1; min-width: 0">
+                    <div class="order-title flex items-center gap-1">
+                      {{ s.title }}
+                      <span v-if="selectedId === s.id" class="badge badge-primary" style="font-size: 0.6875rem">已选</span>
+                    </div>
                     <div class="order-meta">
                       {{ s.gameName }} · {{ s.serviceTypeName }}
                       <template v-if="s.description"> · {{ s.description }}</template>
@@ -155,7 +187,12 @@ onMounted(async () => {
                       <span v-for="t in s.tagNames" :key="t" class="badge badge-outline">{{ t }}</span>
                     </div>
                   </div>
-                  <div class="order-price">{{ fmtPrice(s.priceCents) }}/小时</div>
+                  <div class="flex items-center gap-2">
+                    <div class="order-price">{{ fmtPrice(s.priceCents) }}/小时</div>
+                    <button class="btn btn-primary btn-sm service-book-btn" @click.stop="bookDirectly(s)">
+                      立即预约
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -189,6 +226,19 @@ onMounted(async () => {
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- 移动端底部悬浮栏 -->
+      <div class="sticky-bottom-bar" v-if="services.length">
+        <div class="sticky-bottom-price">
+          <div style="font-weight: 600; color: var(--foreground); font-size: 0.875rem">
+            {{ selectedService?.title || '未选服务' }}
+          </div>
+          <span class="price-value">{{ selectedService ? fmtPrice(selectedService.priceCents) + '/小时' : '-' }}</span>
+        </div>
+        <button class="btn btn-primary" style="padding: 10px 24px" @click="goBooking">
+          去预约下单
+        </button>
       </div>
     </div>
   </div>
