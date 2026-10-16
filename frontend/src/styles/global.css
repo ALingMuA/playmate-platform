@@ -1865,6 +1865,168 @@ textarea.form-control {
   }
 }
 
+/* ==================== 预约下单流程优化 ==================== */
+
+/* 步骤标题 */
+.step-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.step-number.step-optional {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+/* 陪玩师信息卡（预约页顶部） */
+.booking-companion-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  background: var(--secondary);
+  border: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+  border-radius: var(--radius);
+  margin-bottom: 20px;
+}
+
+.booking-companion-card .companion-avatar {
+  width: 48px;
+  height: 48px;
+  font-size: 20px;
+}
+
+.booking-companion-card .booking-companion-name {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.booking-companion-card .booking-companion-meta {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  margin-top: 2px;
+}
+
+/* 时长快捷按钮 */
+.duration-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.duration-pill {
+  padding: 10px 20px;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  font-family: inherit;
+}
+
+.duration-pill:hover {
+  border-color: var(--primary);
+}
+
+.duration-pill.active {
+  border-color: var(--primary);
+  background: var(--secondary);
+  color: var(--primary);
+}
+
+/* 折叠区域切换 */
+.collapsible-toggle {
+  cursor: pointer;
+  user-select: none;
+}
+
+.collapsible-toggle .toggle-arrow {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  transition: transform 0.2s;
+}
+
+.collapsible-toggle .toggle-arrow.open {
+  transform: rotate(180deg);
+}
+
+/* 服务条目内预约按钮 */
+.service-item .service-book-btn {
+  flex-shrink: 0;
+}
+
+/* 移动端底部悬浮栏 */
+.sticky-bottom-bar {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .sticky-bottom-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 90;
+    padding: 12px 20px;
+    background: var(--card);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.06);
+  }
+
+  .sticky-bottom-price {
+    font-size: 0.875rem;
+    color: var(--muted-foreground);
+  }
+
+  .sticky-bottom-price .price-value {
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: var(--primary);
+  }
+
+  /* 有悬浮栏时给页面底部留空间 */
+  .page.has-sticky-bar {
+    padding-bottom: 100px;
+  }
+}
+
+/* 预约页两栏布局：表单在左占大空间，摘要在右 */
+.two-col-booking {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 768px) {
+  .two-col-booking {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ==================== 路由过渡动画 ==================== */
 
 .fade-slide-enter-active,
