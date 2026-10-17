@@ -142,6 +142,76 @@ class AdminModuleTest {
                 .andExpect(jsonPath("$.code").value("AUTH_ACCOUNT_DISABLED"));
     }
 
+    @Test
+    @DisplayName("管理员重置用户密码与旧令牌失效（FR-M04+）")
+    void user_reset_password_and_token_invalidation() throws Exception {
+        String oldPassword = PASSWORD;
+        String newPassword = "NewPassw0rd456";
+
+        String username = "reset" + System.currentTimeMillis() + "_" + SEQ.incrementAndGet();
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("username", username)
+                                .put("password", oldPassword)
+                                .put("nickname", "测试_" + username)
+                                .put("mobile", "1" + (8_100_000_000L + SEQ.incrementAndGet()))
+                                .toString()))
+                .andExpect(status().isOk());
+        String oldToken = loginAndGetToken(username, oldPassword);
+
+        // 获取刚注册的用户 ID
+        MvcResult listResult = mockMvc.perform(get("/api/admin/users")
+                        .header("Authorization", "Bearer " + adminToken())
+                        .param("keyword", username)
+                        .param("page", "1").param("size", "10"))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode records = objectMapper.readTree(listResult.getResponse().getContentAsString())
+                .path("data").path("records");
+        assertThat(records.size()).isPositive();
+        long userId = records.get(0).path("id").asLong();
+        assertThat(userId).isPositive();
+
+        // 管理员重置密码
+        mockMvc.perform(put("/api/admin/users/" + userId + "/password")
+                        .header("Authorization", "Bearer " + adminToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("newPassword", newPassword)
+                                .put("reason", "用户申诉找回密码")
+                                .toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+
+        // 断言一：携带旧 Token 请求受保护接口，因版本落后抛出 401 AUTH_TOKEN_VERSION_MISMATCH
+        mockMvc.perform(get("/api/auth/me")
+                        .header("Authorization", "Bearer " + oldToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_TOKEN_VERSION_MISMATCH"));
+
+        // 断言二：使用旧密码登录失败，统一返回 401 AUTH_CREDENTIAL_INVALID
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("account", username)
+                                .put("password", oldPassword)
+                                .toString()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_CREDENTIAL_INVALID"));
+
+        // 断言三：使用新密码登录成功并获取新 Token
+        String newToken = loginAndGetToken(username, newPassword);
+        assertThat(newToken).isNotBlank();
+
+        // 断言四：携带新 Token 正常访问受保护接口
+        mockMvc.perform(get("/api/auth/me")
+                        .header("Authorization", "Bearer " + newToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.username").value(username));
+    }
+
     // ==================== 公告 ====================
 
     @Test
