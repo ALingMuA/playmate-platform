@@ -7,7 +7,7 @@
  */
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { adminSetUserStatus, adminUsers, type UserAdminView } from '@/api/admin'
+import { adminResetUserPassword, adminSetUserStatus, adminUsers, type UserAdminView } from '@/api/admin'
 
 const list = ref<UserAdminView[]>([])
 const total = ref(0)
@@ -88,6 +88,76 @@ async function handleEnable(row: UserAdminView) {
   await load()
 }
 
+// ==================== 重置密码（FR-M04+） ====================
+
+const resetVisible = ref(false)
+const resetting = ref(false)
+const resetTarget = ref<UserAdminView | null>(null)
+const resetForm = reactive({
+  newPassword: '',
+  reason: '',
+})
+
+function generateRandomPassword() {
+  const charsLower = 'abcdefghjkmnpqrstuvwxyz'
+  const charsUpper = 'ABCDEFGHJKMNPQRSTUVWXYZ'
+  const numbers = '23456789'
+  const specials = '!@#$%^&*'
+  let pwd = ''
+  pwd += charsUpper[Math.floor(Math.random() * charsUpper.length)]
+  pwd += charsLower[Math.floor(Math.random() * charsLower.length)]
+  pwd += numbers[Math.floor(Math.random() * numbers.length)]
+  pwd += specials[Math.floor(Math.random() * specials.length)]
+  const allChars = charsLower + charsUpper + numbers + specials
+  for (let i = 0; i < 6; i++) {
+    pwd += allChars[Math.floor(Math.random() * allChars.length)]
+  }
+  resetForm.newPassword = pwd.split('').sort(() => Math.random() - 0.5).join('')
+}
+
+function openResetPassword(row: UserAdminView) {
+  resetTarget.value = row
+  resetForm.newPassword = ''
+  resetForm.reason = ''
+  resetVisible.value = true
+}
+
+async function handleResetPassword() {
+  if (!resetTarget.value) return
+  const pwd = resetForm.newPassword.trim()
+  const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)\S{8,32}$/
+  if (!passwordRegex.test(pwd)) {
+    ElMessage.warning('密码须为 8~32 位且同时包含字母和数字')
+    return
+  }
+
+  resetting.value = true
+  try {
+    await adminResetUserPassword(resetTarget.value.id, pwd, resetForm.reason.trim() || undefined)
+    const targetName = resetTarget.value.username
+    resetVisible.value = false
+    ElMessageBox.alert(
+      `用户 ${targetName} 的登录密码已成功重置为：${pwd}。\n\n该用户原有所有登录令牌已立即失效，请妥善将新密码告知用户。`,
+      '密码重置成功',
+      {
+        confirmButtonText: '复制密码并关闭',
+        callback: (action: string) => {
+          if (action === 'confirm' && navigator.clipboard) {
+            navigator.clipboard.writeText(pwd).then(() => {
+              ElMessage.success('新密码已复制到剪贴板')
+            }).catch(() => {
+              ElMessage.info('复制失败，请手动记录密码')
+            })
+          }
+        },
+      },
+    )
+    await load()
+  } finally {
+    resetting.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -163,8 +233,11 @@ onMounted(load)
         <el-table-column label="注册时间" width="130">
           <template #default="{ row }">{{ fmtTime(row.createdAt) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
+            <el-button size="small" type="warning" plain @click="openResetPassword(row)">
+              重置密码
+            </el-button>
             <el-button v-if="row.accountStatus === 'ENABLED'" size="small" type="danger" plain
               @click="handleDisable(row)">
               禁用
@@ -185,6 +258,49 @@ onMounted(load)
         @current-change="(p: number) => { page = p; load() }"
       />
     </el-card>
+
+    <!-- 重置密码弹窗 -->
+    <el-dialog v-model="resetVisible" title="重置用户密码" width="460px" destroy-on-close>
+      <el-form label-position="top">
+        <el-alert
+          title="重置后该用户所有终端原登录会话将立即失效，下次必须使用新密码登录。"
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px"
+        />
+        <el-form-item label="目标账号">
+          <el-input :model-value="`${resetTarget?.username} (${resetTarget?.nickname || '无昵称'})`" disabled />
+        </el-form-item>
+        <el-form-item label="新密码" required>
+          <div style="display: flex; gap: 8px; width: 100%">
+            <el-input
+              v-model="resetForm.newPassword"
+              type="password"
+              show-password
+              placeholder="8~32位，须含字母和数字"
+            />
+            <el-button @click="generateRandomPassword">随机生成</el-button>
+          </div>
+        </el-form-item>
+        <el-form-item label="重置原因（选填）">
+          <el-input
+            v-model="resetForm.reason"
+            type="textarea"
+            :rows="2"
+            maxlength="200"
+            show-word-limit
+            placeholder="例如：用户申诉找回密码"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="resetVisible = false">取消</el-button>
+        <el-button type="primary" :loading="resetting" @click="handleResetPassword">
+          确认重置
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
