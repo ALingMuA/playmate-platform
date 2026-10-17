@@ -104,6 +104,34 @@ export interface AvailabilityBatchResult {
   skippedDetails: string[]
 }
 
+/** 订单档期锁定占用信息（周看板） */
+export interface BookedSlot {
+  orderId: number
+  orderNo: string
+  companionUserId: number
+  customerUserId: number
+  customerNickname: string
+  serviceTitle: string
+  gameServer?: string
+  gameNickname?: string
+  startAt: string
+  endAt: string
+  orderStatus: string
+}
+
+/** 周日程全景概览数据 */
+export interface ScheduleOverview {
+  availabilities: Availability[]
+  bookedSlots: BookedSlot[]
+}
+
+/** 周日程批量变更 */
+export interface AvailabilityChange {
+  startAt: string
+  endAt: string
+  status: 'AVAILABLE' | 'UNAVAILABLE'
+}
+
 /** 收益概览（FR-P19） */
 export interface Earnings {
   balanceCents: number
@@ -217,6 +245,33 @@ export function createUnavailable(data: {
 
 export function deleteAvailability(id: number): Promise<void> {
   return request<void>({ url: `/companion/availabilities/${id}`, method: 'delete' })
+}
+
+/** 周日程全景概览（含可用档期 + 订单锁定区间） */
+export function getScheduleOverview(startAt?: string, endAt?: string): Promise<ScheduleOverview> {
+  return request<ScheduleOverview>({
+    url: '/companion/availabilities/overview',
+    method: 'get',
+    params: { startAt, endAt },
+  })
+}
+
+/** 一键切换整天状态（全天休息 或 全天可约） */
+export function toggleDayOff(data: { date: string; isOff: boolean; remark?: string }): Promise<void> {
+  return request<void>({
+    url: '/companion/availabilities/toggle-day-off',
+    method: 'post',
+    data,
+  })
+}
+
+/** 周日程批量保存：多个区间由后端在同一事务内处理 */
+export function applyAvailabilityChanges(changes: AvailabilityChange[]): Promise<void> {
+  return request<void>({
+    url: '/companion/availabilities/changes',
+    method: 'post',
+    data: { changes },
+  })
 }
 
 /** 批量创建可约档期：日期范围内每日同一时段或全天，冲突日期自动跳过并返回明细（FR-P10 日期范围设置） */

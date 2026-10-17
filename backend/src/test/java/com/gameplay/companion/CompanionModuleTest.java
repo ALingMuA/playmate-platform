@@ -448,6 +448,64 @@ class CompanionModuleTest {
                 .andExpect(jsonPath("$.data.length()").value(2));
     }
 
+    @Test
+    @DisplayName("档期管理：在已有可约时段中直接设置不可约，自动挖空切分且概览聚合正常")
+    void availability_punch_out_and_overview_flow() throws Exception {
+        String admin = adminToken();
+        String cToken = prepareCompanion(admin).path("token").asText();
+
+        String day = LocalDateTime.now().plusDays(2).format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+        // 1. 创建 10:00 - 22:00 可约
+        ObjectNode slot = objectMapper.createObjectNode()
+                .put("startAt", day + " 10:00:00")
+                .put("endAt", day + " 22:00:00");
+        mockMvc.perform(post("/api/companion/availabilities")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(slot.toString()))
+                .andExpect(status().isOk());
+
+        // 2. 在 10:00-22:00 之间直接设置 14:00-16:00 没空（Punch-out 挖空切分）
+        ObjectNode unavailPunch = objectMapper.createObjectNode()
+                .put("startAt", day + " 14:00:00")
+                .put("endAt", day + " 16:00:00")
+                .put("remark", "下午有考试");
+        mockMvc.perform(post("/api/companion/availabilities/unavailable")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(unavailPunch.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.availabilityStatus").value("UNAVAILABLE"));
+
+        // 3. 校验列表：自动切为 10-14 可约、16-22 可约、14-16 不可约（共 3 条）
+        mockMvc.perform(get("/api/companion/availabilities")
+                        .header("Authorization", bearer(cToken))
+                        .param("startAt", day + " 00:00:00")
+                        .param("endAt", day + " 23:59:59"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(3));
+
+        // 4. 测试周日程全景概览接口
+        mockMvc.perform(get("/api/companion/availabilities/overview")
+                        .header("Authorization", bearer(cToken))
+                        .param("startAt", day + " 00:00:00")
+                        .param("endAt", day + " 23:59:59"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.availabilities.length()").value(3))
+                .andExpect(jsonPath("$.data.bookedSlots").isArray());
+
+        // 5. 测试一键全天休息
+        ObjectNode toggleReq = objectMapper.createObjectNode()
+                .put("date", day)
+                .put("isOff", true)
+                .put("remark", "全天外出");
+        mockMvc.perform(post("/api/companion/availabilities/toggle-day-off")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toggleReq.toString()))
+                .andExpect(status().isOk());
+    }
+
     // ==================== FR-P10 周期模板与批量设置 ====================
 
     @Test
