@@ -156,7 +156,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'application', redirect: '/become-companion' },
       { path: 'profile', name: 'companion-profile', component: () => import('@/views/companion/CompanionProfileView.vue'), meta: { title: '我的陪玩主页', workbenchHome: true } },
       { path: 'services', name: 'companion-services', component: () => import('@/views/companion/ServiceManageView.vue'), meta: { title: '服务管理' } },
-      { path: 'schedule', name: 'companion-schedule', component: () => import('@/views/companion/ScheduleView.vue'), meta: { title: '档期管理' } },
+      { path: 'schedule', name: 'companion-schedule', component: () => import('@/views/companion/ScheduleView.vue'), meta: { title: '接单时间' } },
       { path: 'orders', name: 'companion-orders', component: () => import('@/views/companion/OrderFulfillView.vue'), meta: { title: '接单履约' } },
       { path: 'earnings', name: 'companion-earnings', component: () => import('@/views/companion/EarningsView.vue'), meta: { title: '收益' } },
     ],

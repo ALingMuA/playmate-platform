@@ -7,6 +7,7 @@ import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.companion.dto.AvailabilityBatchCreateRequest;
 import com.gameplay.companion.dto.AvailabilityBatchCreateView;
+import com.gameplay.companion.dto.AvailabilityChangeRequest;
 import com.gameplay.companion.dto.AvailabilityCreateRequest;
 import com.gameplay.companion.dto.AvailabilityView;
 import com.gameplay.companion.service.AvailabilityService;
@@ -51,6 +52,35 @@ public class CompanionAvailabilityController {
         return ApiResponse.ok(availabilityService.listMine(userId, startAt, endAt));
     }
 
+    /** 周日程全景概览（聚合可用档期 + 订单锁定区间） */
+    @GetMapping("/overview")
+    public ApiResponse<com.gameplay.companion.dto.ScheduleOverviewView> overview(
+            @RequestParam(required = false)
+            @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startAt,
+            @RequestParam(required = false)
+            @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endAt,
+            Authentication authentication) {
+        Long userId = currentUserId(authentication);
+        availabilityTemplateService.ensureUpToDate(userId);
+        return ApiResponse.ok(availabilityService.getScheduleOverview(userId, startAt, endAt));
+    }
+
+    public record ToggleDayOffRequest(
+            @org.springframework.format.annotation.DateTimeFormat(pattern = "yyyy-MM-dd")
+            java.time.LocalDate date,
+            boolean isOff,
+            String remark
+    ) {}
+
+    /** 一键切换整天状态（全天休息 或 全天可约） */
+    @PostMapping("/toggle-day-off")
+    public ApiResponse<Void> toggleDayOff(@RequestBody ToggleDayOffRequest request,
+                                          Authentication authentication) {
+        Long userId = currentUserId(authentication);
+        availabilityService.toggleDayOff(userId, request.date(), request.isOff(), request.remark());
+        return ApiResponse.ok();
+    }
+
     /** 新增可约时段（FR-P10） */
     @PostMapping
     public ApiResponse<AvailabilityView> create(@Valid @RequestBody AvailabilityCreateRequest request,
@@ -74,6 +104,14 @@ public class CompanionAvailabilityController {
             @Valid @RequestBody AvailabilityBatchCreateRequest request,
             Authentication authentication) {
         return ApiResponse.ok(availabilityService.createBatch(currentUserId(authentication), request));
+    }
+
+    /** 周日程批量保存：多个区间在同一事务内完成 */
+    @PostMapping("/changes")
+    public ApiResponse<Void> applyChanges(@Valid @RequestBody AvailabilityChangeRequest request,
+                                          Authentication authentication) {
+        availabilityService.applyChanges(currentUserId(authentication), request);
+        return ApiResponse.ok();
     }
 
     /** 删除档期 */
