@@ -45,19 +45,18 @@ const templatesLoading = ref(false)
 const rulesDrawerVisible = ref(false)
 const templateDialogVisible = ref(false)
 const templateSaving = ref(false)
-const editingTemplateId = ref<number | null>(null)
 const exceptionDialogVisible = ref(false)
 const exceptionSaving = ref(false)
 
 const WEEK_OPTIONS = WEEKDAY_LABELS.map((label, index) => ({ value: index + 1, label: '周' + label }))
-const templateForm = reactive({
-  templateName: '',
-  days: [] as number[],
-  allDay: false,
-  startTime: '19:00',
-  endTime: '23:00',
+const routineForm = reactive({
+  weekdays: [1, 2, 3, 4, 5] as number[],
+  weekends: [6, 7] as number[],
+  weekdayStart: '19:00',
+  weekdayEnd: '23:00',
+  weekendStart: '14:00',
+  weekendEnd: '22:00',
   effectiveFrom: dayjs().format('YYYY-MM-DD'),
-  effectiveUntil: '',
 })
 const exceptionForm = reactive({
   date: dayjs().format('YYYY-MM-DD'),
@@ -273,81 +272,90 @@ async function saveException() {
   }
 }
 
-function openTemplateDialog(existing?: AvailabilityTemplate) {
-  if (existing) {
-    editingTemplateId.value = existing.id
-    templateForm.templateName = existing.templateName
-    templateForm.days = existing.dayOfWeek.split(',').map(Number)
-    templateForm.allDay = existing.allDay
-    templateForm.startTime = existing.startTime ? existing.startTime.slice(0, 5) : '19:00'
-    templateForm.endTime = existing.endTime ? existing.endTime.slice(0, 5) : '23:00'
-    templateForm.effectiveFrom = existing.effectiveFrom
-    templateForm.effectiveUntil = existing.effectiveUntil || ''
-  } else {
-    editingTemplateId.value = null
-    templateForm.templateName = ''
-    templateForm.days = [1, 2, 3, 4, 5]
-    templateForm.allDay = false
-    templateForm.startTime = '19:00'
-    templateForm.endTime = '23:00'
-    templateForm.effectiveFrom = dayjs().format('YYYY-MM-DD')
-    templateForm.effectiveUntil = ''
-  }
+function templateForDays(days: number[], fallbackName?: string): AvailabilityTemplate | undefined {
+  const target = [...days].sort((left, right) => left - right).join(',')
+  return templates.value.find((template) => template.dayOfWeek.split(',').sort().join(',') === target)
+    || (fallbackName ? templates.value.find((template) => template.templateName === fallbackName) : undefined)
+}
+
+function openTemplateDialog(_existing?: AvailabilityTemplate) {
+  const weekdayTemplate = templateForDays([1, 2, 3, 4, 5], '工作日晚上')
+  const weekendTemplate = templateForDays([6, 7], '周末白天')
+  const weekdayDays = weekdayTemplate?.dayOfWeek.split(',').map(Number) || [1, 2, 3, 4, 5]
+  const weekendDays = weekendTemplate?.dayOfWeek.split(',').map(Number) || [6, 7]
+
+  routineForm.weekdays = weekdayDays
+  routineForm.weekends = weekendDays
+  routineForm.weekdayStart = weekdayTemplate?.startTime?.slice(0, 5) || '19:00'
+  routineForm.weekdayEnd = weekdayTemplate?.endTime?.slice(0, 5) || '23:00'
+  routineForm.weekendStart = weekendTemplate?.startTime?.slice(0, 5) || '14:00'
+  routineForm.weekendEnd = weekendTemplate?.endTime?.slice(0, 5) || '22:00'
+  routineForm.effectiveFrom = weekdayTemplate?.effectiveFrom || weekendTemplate?.effectiveFrom || dayjs().format('YYYY-MM-DD')
   templateDialogVisible.value = true
 }
 
-function applyPreset(preset: 'weekdayEvening' | 'weekendDay') {
-  if (preset === 'weekdayEvening') {
-    templateForm.templateName = '工作日晚上'
-    templateForm.days = [1, 2, 3, 4, 5]
-    templateForm.allDay = false
-    templateForm.startTime = '19:00'
-    templateForm.endTime = '23:00'
+function toggleRoutineDay(group: 'weekdays' | 'weekends', day: number) {
+  const days = routineForm[group]
+  const index = days.indexOf(day)
+  if (index >= 0) {
+    days.splice(index, 1)
   } else {
-    templateForm.templateName = '周末白天'
-    templateForm.days = [6, 7]
-    templateForm.allDay = false
-    templateForm.startTime = '10:00'
-    templateForm.endTime = '18:00'
+    days.push(day)
+    days.sort((left, right) => left - right)
   }
 }
 
-async function saveTemplate() {
-  if (!templateForm.templateName.trim()) {
-    ElMessage.warning('请填写作息名称')
-    return
-  }
-  if (!templateForm.days.length) {
-    ElMessage.warning('请至少选择一天')
-    return
-  }
-  if (!validateTimePair(templateForm.startTime, templateForm.endTime, templateForm.allDay)) return
-  if (templateForm.effectiveUntil && templateForm.effectiveUntil < templateForm.effectiveFrom) {
-    ElMessage.warning('结束日期不能早于开始日期')
+async function saveRoutine() {
+  if (routineForm.weekdays.length && !validateTimePair(routineForm.weekdayStart, routineForm.weekdayEnd, false)) return
+  if (routineForm.weekends.length && !validateTimePair(routineForm.weekendStart, routineForm.weekendEnd, false)) return
+  if (!routineForm.weekdays.length && !routineForm.weekends.length) {
+    ElMessage.warning('请至少保留一个可接单时段')
     return
   }
 
-  const payload = {
-    templateName: templateForm.templateName.trim(),
-    dayOfWeek: [...templateForm.days].sort((left, right) => left - right).join(','),
-    allDay: templateForm.allDay,
-    startTime: templateForm.allDay ? undefined : templateForm.startTime + ':00',
-    endTime: templateForm.allDay ? undefined : templateForm.endTime + ':00',
-    effectiveFrom: templateForm.effectiveFrom,
-    effectiveUntil: templateForm.effectiveUntil || undefined,
-  }
+  const groups = [
+    {
+      days: routineForm.weekdays,
+      template: templateForDays([1, 2, 3, 4, 5], '工作日晚上'),
+      templateName: '工作日晚上',
+      startTime: routineForm.weekdayStart,
+      endTime: routineForm.weekdayEnd,
+    },
+    {
+      days: routineForm.weekends,
+      template: templateForDays([6, 7], '周末白天'),
+      templateName: '周末白天',
+      startTime: routineForm.weekendStart,
+      endTime: routineForm.weekendEnd,
+    },
+  ]
 
   templateSaving.value = true
   try {
-    if (editingTemplateId.value) {
-      await updateAvailabilityTemplate(editingTemplateId.value, payload)
-      ElMessage.success('长期接单作息已更新')
-    } else {
-      await createAvailabilityTemplate(payload)
-      ElMessage.success('长期接单作息已设置')
+    for (const group of groups) {
+      if (!group.days.length) {
+        if (group.template) await deleteAvailabilityTemplate(group.template.id)
+        continue
+      }
+
+      const payload = {
+        templateName: group.templateName,
+        dayOfWeek: [...group.days].sort((left, right) => left - right).join(','),
+        allDay: false,
+        startTime: group.startTime + ':00',
+        endTime: group.endTime + ':00',
+        effectiveFrom: routineForm.effectiveFrom,
+        effectiveUntil: undefined,
+      }
+      if (group.template) {
+        await updateAvailabilityTemplate(group.template.id, payload)
+      } else {
+        await createAvailabilityTemplate(payload)
+      }
     }
     templateDialogVisible.value = false
     await Promise.all([load(), loadTemplates()])
+    ElMessage.success('长期作息已保存，之后无需每周重复设置')
   } catch {
     ElMessage.error('保存长期作息失败，请检查设置后重试')
   } finally {
@@ -403,7 +411,7 @@ onMounted(() => {
             <el-tag v-else type="info" effect="light" round>尚未设置</el-tag>
           </div>
         </div>
-        <el-button v-if="activeTemplates.length" @click="rulesDrawerVisible = true">编辑长期作息</el-button>
+        <el-button v-if="activeTemplates.length" @click="openTemplateDialog()">编辑长期作息</el-button>
         <el-button v-else type="primary" @click="openTemplateDialog()">设置长期作息</el-button>
       </div>
 
@@ -505,58 +513,62 @@ onMounted(() => {
       </div>
     </el-drawer>
 
-    <el-dialog v-model="templateDialogVisible" :title="editingTemplateId ? '编辑长期作息' : '设置长期作息'" width="540px">
-      <el-form :model="templateForm" label-width="88px">
-        <el-form-item label="快捷设置">
-          <el-button size="small" @click="applyPreset('weekdayEvening')">工作日晚上</el-button>
-          <el-button size="small" @click="applyPreset('weekendDay')">周末白天</el-button>
-        </el-form-item>
-        <el-form-item label="规则名称" required>
-          <el-input v-model="templateForm.templateName" maxlength="40" placeholder="如：工作日晚上" />
-        </el-form-item>
-        <el-form-item label="适用日期" required>
-          <el-checkbox-group v-model="templateForm.days">
-            <el-checkbox v-for="day in WEEK_OPTIONS" :key="day.value" :value="day.value">{{ day.label }}</el-checkbox>
-          </el-checkbox-group>
-        </el-form-item>
-        <el-form-item label="全天接单">
-          <el-switch v-model="templateForm.allDay" />
-        </el-form-item>
-        <template v-if="!templateForm.allDay">
-          <el-form-item label="开始时间" required>
-            <el-time-picker v-model="templateForm.startTime" value-format="HH:mm" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="结束时间" required>
-            <el-time-picker v-model="templateForm.endTime" value-format="HH:mm" style="width: 100%" />
-            <div v-if="templateForm.endTime < templateForm.startTime" class="form-tip">结束时间早于开始时间时，按跨天时段处理。</div>
-          </el-form-item>
-        </template>
-        <el-form-item label="生效开始" required>
-          <el-date-picker
-            v-model="templateForm.effectiveFrom"
-            type="date"
-            value-format="YYYY-MM-DD"
-            :disabled-date="(date: Date) => date.getTime() < dayjs().startOf('day').valueOf()"
-            style="width: 100%"
-          />
-        </el-form-item>
-        <el-form-item label="结束日期">
-          <el-date-picker
-            v-model="templateForm.effectiveUntil"
-            type="date"
-            value-format="YYYY-MM-DD"
-            :disabled-date="(date: Date) => date.getTime() < dayjs(templateForm.effectiveFrom).valueOf()"
-            placeholder="留空表示长期有效"
-            style="width: 100%"
-          />
-        </el-form-item>
-      </el-form>
-      <div class="form-tip">结束日期留空即长期有效；已有订单不会被作息修改覆盖。</div>
+    <el-dialog v-model="templateDialogVisible" class="routine-dialog" width="590px" :close-on-click-modal="false">
+      <template #header>
+        <div class="routine-dialog-heading">
+          <h3>编辑长期作息</h3>
+          <p>选择常规可接单的日期和时间，保存后会持续沿用</p>
+        </div>
+      </template>
+      <div class="routine-dialog-groups">
+        <section class="routine-group">
+          <h4>工作日时段</h4>
+          <div class="routine-week-buttons" role="group" aria-label="工作日选择">
+            <button
+              v-for="day in WEEK_OPTIONS"
+              :key="'weekday-' + day.value"
+              type="button"
+              class="routine-week-button"
+              :class="{ selected: routineForm.weekdays.includes(day.value) }"
+              :aria-pressed="routineForm.weekdays.includes(day.value)"
+              @click="toggleRoutineDay('weekdays', day.value)"
+            >
+              {{ day.label }}
+            </button>
+          </div>
+          <div class="routine-time-row">
+            <el-time-picker v-model="routineForm.weekdayStart" format="HH:mm" value-format="HH:mm" class="routine-time-picker" aria-label="工作日开始时间" />
+            <span>至</span>
+            <el-time-picker v-model="routineForm.weekdayEnd" format="HH:mm" value-format="HH:mm" class="routine-time-picker" aria-label="工作日结束时间" />
+          </div>
+        </section>
+
+        <section class="routine-group">
+          <h4>周末时段</h4>
+          <div class="routine-week-buttons" role="group" aria-label="周末选择">
+            <button
+              v-for="day in WEEK_OPTIONS"
+              :key="'weekend-' + day.value"
+              type="button"
+              class="routine-week-button"
+              :class="{ selected: routineForm.weekends.includes(day.value) }"
+              :aria-pressed="routineForm.weekends.includes(day.value)"
+              @click="toggleRoutineDay('weekends', day.value)"
+            >
+              {{ day.label }}
+            </button>
+          </div>
+          <div class="routine-time-row">
+            <el-time-picker v-model="routineForm.weekendStart" format="HH:mm" value-format="HH:mm" class="routine-time-picker" aria-label="周末开始时间" />
+            <span>至</span>
+            <el-time-picker v-model="routineForm.weekendEnd" format="HH:mm" value-format="HH:mm" class="routine-time-picker" aria-label="周末结束时间" />
+          </div>
+        </section>
+      </div>
+      <div class="routine-dialog-note">不设置结束日期即长期有效。已确认的订单不会被作息修改覆盖。</div>
       <template #footer>
         <el-button @click="templateDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="templateSaving" @click="saveTemplate">
-          {{ editingTemplateId ? '保存修改' : '保存长期作息' }}
-        </el-button>
+        <el-button type="primary" :loading="templateSaving" @click="saveRoutine">保存作息</el-button>
       </template>
     </el-dialog>
 
@@ -664,6 +676,23 @@ onMounted(() => {
 .drawer-rule-main strong { font-size: 13px; font-weight: 600; }
 .drawer-rule-main span { color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
 .form-tip { color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.routine-dialog :deep(.el-dialog) { overflow: hidden; border-radius: 14px; }
+.routine-dialog :deep(.el-dialog__header) { margin-right: 0; padding: 25px 22px 13px; }
+.routine-dialog :deep(.el-dialog__body) { padding: 0 22px 20px; }
+.routine-dialog :deep(.el-dialog__footer) { padding: 14px 22px 22px; border-top: 1px solid var(--border); }
+.routine-dialog-heading h3 { margin: 0; color: var(--foreground); font-size: 18px; font-weight: 600; line-height: 1.35; }
+.routine-dialog-heading p { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.routine-dialog-groups { display: flex; flex-direction: column; gap: 12px; }
+.routine-group { padding: 14px 13px 13px; border: 1px solid var(--border); border-radius: 9px; }
+.routine-group h4 { margin: 0 0 11px; color: var(--foreground); font-size: 13px; font-weight: 500; }
+.routine-week-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.routine-week-button { min-width: 38px; height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-secondary); background: transparent; font-size: 12px; cursor: pointer; transition: color .15s ease, border-color .15s ease, background-color .15s ease; }
+.routine-week-button:hover { border-color: var(--schedule-purple); color: var(--schedule-purple); }
+.routine-week-button.selected { border-color: var(--schedule-purple); color: var(--schedule-purple); background: var(--schedule-purple-soft); }
+.routine-time-row { display: flex; align-items: center; gap: 9px; margin-top: 12px; color: var(--text-secondary); font-size: 13px; }
+:deep(.routine-time-picker) { width: 90px !important; flex: 0 0 90px; }
+:deep(.routine-time-picker .el-input__wrapper) { min-height: 36px; padding: 1px 9px; box-shadow: 0 0 0 1px var(--border) inset; }
+.routine-dialog-note { margin-top: 13px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
 
 @media (max-width: 900px) {
   .page-heading, .preview-heading { align-items: flex-start; flex-direction: column; }
@@ -685,5 +714,12 @@ onMounted(() => {
   .routine-days { width: auto; flex: 0 0 auto; }
   .routine-time { flex-basis: calc(100% - 42px); flex-wrap: wrap; gap: 4px 10px; }
   .routine-validity { width: 100%; margin-left: 18px; }
+}
+@media (max-width: 560px) {
+  .routine-dialog { width: calc(100% - 24px) !important; }
+  .routine-dialog :deep(.el-dialog__header) { padding: 20px 17px 12px; }
+  .routine-dialog :deep(.el-dialog__body) { padding: 0 17px 17px; }
+  .routine-dialog :deep(.el-dialog__footer) { padding: 12px 17px 17px; }
+  :deep(.routine-time-picker) { width: 86px !important; flex-basis: 86px; }
 }
 </style>
