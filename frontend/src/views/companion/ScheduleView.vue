@@ -392,10 +392,6 @@ onMounted(() => {
         <h1>接单时间</h1>
         <p>设置一次长期作息，系统会持续安排后续时间；临时变化只调整对应日期。</p>
       </div>
-      <div class="heading-actions">
-        <el-button @click="rulesDrawerVisible = true">管理长期作息</el-button>
-        <el-button type="primary" @click="openExceptionDialog()">临时调整某一天</el-button>
-      </div>
     </header>
 
     <el-card class="routine-card" shadow="never">
@@ -406,19 +402,18 @@ onMounted(() => {
             <el-tag v-if="activeTemplates.length" type="success" effect="light" round>长期生效</el-tag>
             <el-tag v-else type="info" effect="light" round>尚未设置</el-tag>
           </div>
-          <p v-if="activeTemplates.length">规则持续沿用，已有订单会保留。</p>
-          <p v-else>添加常规可接单时间，之后不必每周重复设置。</p>
         </div>
-        <el-button v-if="activeTemplates.length" @click="rulesDrawerVisible = true">编辑作息</el-button>
+        <el-button v-if="activeTemplates.length" @click="rulesDrawerVisible = true">编辑长期作息</el-button>
         <el-button v-else type="primary" @click="openTemplateDialog()">设置长期作息</el-button>
       </div>
 
       <div v-if="activeTemplates.length" class="routine-list">
         <div v-for="template in activeTemplates" :key="template.id" class="routine-row">
           <span class="routine-dot"></span>
-          <div class="routine-main">
-            <strong>{{ template.templateName }}</strong>
-            <span>{{ templateDays(template.dayOfWeek) }} · {{ templateTime(template) }}</span>
+          <span class="routine-days">{{ templateDays(template.dayOfWeek) }}</span>
+          <div class="routine-time">
+            <strong>{{ templateTime(template) }}</strong>
+            <span>{{ template.templateName }}</span>
           </div>
           <span class="routine-validity">{{ templateValidity(template) }}</span>
         </div>
@@ -432,7 +427,7 @@ onMounted(() => {
     </el-card>
 
     <div class="exception-tip">
-      <div><strong>临时有事或想额外接单？</strong><span>修改某一天不会改变固定作息。</span></div>
+      <div class="exception-copy"><span class="exception-icon" aria-hidden="true">!</span><span><strong>临时有事或想额外接单？</strong><span>修改某一天不会改变固定作息。</span></span></div>
       <el-button type="primary" plain @click="openExceptionDialog()">调整某一天</el-button>
     </div>
 
@@ -450,12 +445,6 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="preview-legend">
-        <span><i class="legend-dot available"></i>可接单</span>
-        <span><i class="legend-dot booked"></i>已有订单</span>
-        <span><i class="legend-dot unavailable"></i>临时休息</span>
-      </div>
-
       <div class="day-list">
         <div v-for="item in dayPreviews" :key="item.day.format('YYYY-MM-DD')" class="day-row">
           <div class="day-date" :class="{ today: item.isToday }">
@@ -470,7 +459,7 @@ onMounted(() => {
                 :key="index + '-' + segment.start.format('HH:mm')"
                 :type="segment.kind === 'booked' ? 'warning' : 'success'"
                 effect="light"
-                class="time-segment"
+                :class="['time-segment', { booked: segment.kind === 'booked' }]"
               >
                 <strong>{{ formatSegmentRange(segment, item.day) }}</strong>
                 <span>{{ segmentLabel(segment) }}</span>
@@ -482,6 +471,12 @@ onMounted(() => {
             <el-button text type="primary" @click="openExceptionDialog(item.day)">调整这一天</el-button>
           </div>
         </div>
+      </div>
+
+      <div class="preview-legend">
+        <span><i class="legend-dot available"></i>按固定作息可约</span>
+        <span><i class="legend-dot booked"></i>已有订单</span>
+        <span><i class="legend-dot unavailable"></i>临时休息</span>
       </div>
     </section>
 
@@ -602,49 +597,63 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.availability-page { color: var(--foreground); }
-.page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
-.page-heading h1 { margin: 0; font-size: 24px; line-height: 1.25; }
+.availability-page {
+  --schedule-green: #2ca66f;
+  --schedule-green-soft: rgba(44, 166, 111, 0.12);
+  --schedule-purple: #7659c9;
+  --schedule-purple-soft: rgba(118, 89, 201, 0.12);
+  --schedule-orange: #a96a20;
+  --schedule-orange-soft: rgba(245, 158, 11, 0.12);
+  width: min(100%, 1000px);
+  margin: 0 auto;
+  color: var(--foreground);
+}
+
+.page-heading { display: flex; align-items: flex-end; gap: 18px; margin-bottom: 21px; }
+.page-heading h1 { margin: 0; font-size: 24px; font-weight: 500; line-height: 1.25; letter-spacing: -0.3px; }
 .page-heading p { margin: 6px 0 0; color: var(--text-secondary); }
-.heading-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.routine-card { border-radius: 12px; }
+.routine-card { overflow: hidden; border-radius: 12px; }
 .routine-card :deep(.el-card__body) { padding: 19px 21px 15px; }
-.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .section-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
-.section-title-row h2, .preview-heading h2 { margin: 0; font-size: 17px; font-weight: 600; }
-.section-heading p, .preview-heading p { margin: 6px 0 0; color: var(--text-secondary); font-size: 13px; }
-.routine-list { margin-top: 16px; border-top: 1px solid var(--border); }
-.routine-row { display: flex; align-items: center; gap: 12px; min-height: 58px; border-bottom: 1px solid var(--border); }
-.routine-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: #2ca66f; }
-.routine-main { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
-.routine-main strong { font-size: 14px; font-weight: 600; }
-.routine-main span, .routine-validity { color: var(--text-secondary); font-size: 12px; }
+.section-title-row h2, .preview-heading h2 { margin: 0; font-size: 16px; font-weight: 500; }
+.routine-list { margin-top: 15px; border-top: 1px solid var(--border); }
+.routine-row { display: flex; align-items: center; gap: 10px; min-height: 54px; border-bottom: 1px solid var(--border); }
+.routine-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--schedule-green); }
+.routine-days { width: 145px; flex: 0 0 145px; color: var(--text-secondary); font-size: 13px; }
+.routine-time { display: flex; min-width: 0; flex: 1; align-items: baseline; gap: 12px; }
+.routine-time strong { font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.routine-time span, .routine-validity { color: var(--text-secondary); font-size: 12px; }
 .routine-validity { white-space: nowrap; }
 .routine-footnote, .paused-note { margin-top: 12px; color: var(--text-secondary); font-size: 12px; }
 .paused-note { color: var(--brand-primary); }
-.exception-tip { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 13px 0 25px; padding: 12px 15px; border-radius: 9px; background: var(--muted); }
-.exception-tip > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 9px; }
-.exception-tip strong { font-size: 13px; font-weight: 600; }
-.exception-tip span { color: var(--text-secondary); font-size: 12px; }
+.exception-tip { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 13px 0 25px; padding: 12px 15px; border-radius: 9px; color: var(--schedule-orange); background: var(--schedule-orange-soft); }
+.exception-copy { display: flex; min-width: 0; align-items: center; gap: 9px; }
+.exception-copy > span:last-child { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 9px; }
+.exception-icon { display: grid; width: 17px; height: 17px; flex: 0 0 auto; place-items: center; border: 1px solid currentColor; border-radius: 50%; font-size: 11px; font-weight: 600; }
+.exception-tip strong { color: var(--foreground); font-size: 13px; font-weight: 500; }
+.exception-copy > span:last-child > span { color: var(--text-secondary); font-size: 12px; }
 .preview-section { min-width: 0; }
-.preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+.preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.preview-heading p { margin: 4px 0 0; color: var(--text-secondary); font-size: 12px; }
 .week-navigation { display: flex; align-items: center; gap: 7px; }
-.week-navigation strong { min-width: 150px; font-size: 13px; font-weight: 500; text-align: center; }
-.preview-legend { display: flex; flex-wrap: wrap; gap: 15px; margin: 12px 0 9px; color: var(--text-secondary); font-size: 12px; }
+.week-navigation strong { min-width: 150px; color: var(--text-secondary); font-size: 12px; font-weight: 400; text-align: center; font-variant-numeric: tabular-nums; }
+.preview-legend { display: flex; flex-wrap: wrap; gap: 17px; margin-top: 12px; color: var(--text-secondary); font-size: 12px; }
 .preview-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend-dot { width: 8px; height: 8px; border-radius: 3px; }
-.legend-dot.available { background: #2ca66f; }
-.legend-dot.booked { background: #7659c9; }
+.legend-dot.available { background: var(--schedule-green); }
+.legend-dot.booked { background: var(--schedule-purple); }
 .legend-dot.unavailable { background: #aab3c0; }
 .day-list { border-top: 1px solid var(--border); }
-.day-row { display: grid; grid-template-columns: 145px minmax(0, 1fr) 100px; align-items: center; gap: 12px; min-height: 65px; padding: 8px 2px; border-bottom: 1px solid var(--border); }
-.day-date { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.day-date strong { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.day-row { display: grid; grid-template-columns: 145px minmax(0, 1fr) 100px; align-items: center; gap: 14px; min-height: 63px; padding: 8px 2px; border-bottom: 1px solid var(--border); }
+.day-date { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.day-date strong { min-width: 30px; font-size: 13px; font-weight: 500; white-space: nowrap; }
 .day-date > span { color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
 .day-date.today strong { color: var(--brand-primary); }
 .day-content { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
-.time-segment { max-width: 100%; height: auto; min-height: 28px; padding-top: 5px; padding-bottom: 5px; }
-.time-segment strong { margin-right: 6px; font-variant-numeric: tabular-nums; }
+.time-segment { max-width: 100%; height: auto; min-height: 30px; padding: 0 10px; border: 0 !important; border-radius: 6px !important; color: var(--schedule-green) !important; background: var(--schedule-green-soft) !important; font-size: 12px; font-variant-numeric: tabular-nums; }
+.time-segment.booked { color: var(--schedule-purple) !important; background: var(--schedule-purple-soft) !important; }
+.time-segment strong { margin-right: 6px; font-weight: 500; }
 .time-segment span { font-size: 11px; }
 .day-action { text-align: right; white-space: nowrap; }
 .drawer-intro { margin-bottom: 14px; padding: 11px 12px; border-radius: 8px; color: var(--text-secondary); background: var(--muted); font-size: 12px; line-height: 1.6; }
@@ -658,12 +667,12 @@ onMounted(() => {
 
 @media (max-width: 900px) {
   .page-heading, .preview-heading { align-items: flex-start; flex-direction: column; }
-  .heading-actions { justify-content: flex-start; }
 }
 @media (max-width: 640px) {
   .routine-card :deep(.el-card__body) { padding: 15px; }
   .section-heading { align-items: flex-start; flex-direction: column; }
-  .routine-validity { margin-left: 21px; }
+  .routine-days { width: 120px; flex-basis: 120px; }
+  .routine-validity { margin-left: 18px; }
   .exception-tip { align-items: flex-start; flex-direction: column; }
   .preview-heading { gap: 12px; }
   .week-navigation { flex-wrap: wrap; }
@@ -673,6 +682,8 @@ onMounted(() => {
   .day-action { grid-column: 2; grid-row: 1; }
   .routine-row { align-items: flex-start; flex-wrap: wrap; padding: 11px 0; }
   .routine-dot { margin-top: 5px; }
-  .routine-validity { width: 100%; margin-left: 21px; }
+  .routine-days { width: auto; flex: 0 0 auto; }
+  .routine-time { flex-basis: calc(100% - 42px); flex-wrap: wrap; gap: 4px 10px; }
+  .routine-validity { width: 100%; margin-left: 18px; }
 }
 </style>
