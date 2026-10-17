@@ -38,6 +38,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -501,7 +503,10 @@ public class OrderService {
         return order;
     }
 
-    /** 档期校验：可约档期须完全覆盖预约区间；存在临时/有效订单占用则冲突（详细设计 7.1） */
+    /**
+     * 档期校验：可约档期合并后须完全覆盖预约区间（支持相邻多条拼接，
+     * 连续全天/周期生成档期可跨边界预约）；存在临时/有效订单占用则冲突（详细设计 7.1）。
+     */
     private void checkAvailabilityAndSlotConflict(Long companionUserId,
                                                   LocalDateTime startAt, LocalDateTime endAt) {
         List<CompanionAvailability> overlap = availabilityMapper.selectList(
@@ -509,16 +514,14 @@ public class OrderService {
                         .eq(CompanionAvailability::getCompanionUserId, companionUserId)
                         .lt(CompanionAvailability::getStartAt, endAt)
                         .gt(CompanionAvailability::getEndAt, startAt));
-        boolean covered = false;
+        List<LocalDateTime[]> availableRanges = new ArrayList<>();
         for (CompanionAvailability availability : overlap) {
             if (AvailabilityStatus.UNAVAILABLE.name().equals(availability.getAvailabilityStatus())) {
                 throw new BusinessException(ErrorCode.SLOT_CONFLICT, "预约时段与不可约时段重叠");
             }
-            if (!availability.getStartAt().isAfter(startAt) && !availability.getEndAt().isBefore(endAt)) {
-                covered = true;
-            }
+            availableRanges.add(new LocalDateTime[]{availability.getStartAt(), availability.getEndAt()});
         }
-        if (!covered) {
+        if (!coversByMergedRanges(availableRanges, startAt, endAt)) {
             throw new BusinessException(ErrorCode.SERVICE_NOT_AVAILABLE,
                     "预约时段不在陪玩师可约档期内");
         }
@@ -527,6 +530,28 @@ public class OrderService {
         if (!orderConflicts.isEmpty()) {
             throw new BusinessException(ErrorCode.SLOT_CONFLICT, "预约时段已被其他订单占用");
         }
+    }
+
+    /** 区间并集覆盖判定：排序合并重叠/相接的可约区间后，判断 [startAt, endAt] 是否被完全覆盖 */
+    private boolean coversByMergedRanges(List<LocalDateTime[]> ranges,
+                                         LocalDateTime startAt, LocalDateTime endAt) {
+        if (ranges.isEmpty()) {
+            return false;
+        }
+        ranges.sort(Comparator.comparing(r -> r[0]));
+        LocalDateTime cursor = startAt;
+        for (LocalDateTime[] range : ranges) {
+            if (range[0].isAfter(cursor)) {
+                return false;
+            }
+            if (range[1].isAfter(cursor)) {
+                cursor = range[1];
+            }
+            if (!cursor.isBefore(endAt)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String generateOrderNo() {
