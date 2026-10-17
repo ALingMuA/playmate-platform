@@ -126,7 +126,7 @@
 | **3. 维护陪玩主页** | `/companion/profile` | 维护展示昵称、个人简介、游戏认证资质（FR-P05）与接单服务状态（FR-P06） |
 | **4. 上架服务项目** | `/companion/services` | 新增/编辑具体服务项目后进入待审状态，过审后方可上架；标签仅展示**所选游戏关联标签 + 平台通用标签** |
 | **5. 服务项目审核** | `/admin/audit` → 服务项目 Tab | 管理员审核通过后陪玩师可自行切换上架状态，上架项目对前台用户公开可见（FR-M07） |
-| **6. 档期与履约交付** | `/companion/schedule`、`/companion/orders`、`/companion/earnings` | 灵活配置可约时间段、接单响应、完成履约确认、查看收益明细（FR-P10~P19） |
+| **6. 档期与履约交付** | `/companion/schedule`、`/companion/orders`、`/companion/earnings` | 单条新增（支持全天与跨天时段）、日期范围批量设置、长期周期模板（按周几+时段循环生成，滚动续期未来 28 天，设置一次长期生效）、接单响应、完成履约确认、查看收益明细（FR-P10~P19） |
 
 > [!NOTE]
 > - `/companion` 分区强制要求具备 `COMPANION` 角色权限，普通用户访问将触发 `meta.roleFallback` 自动兜底重定向至 `/become-companion` 引导入驻页。

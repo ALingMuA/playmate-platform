@@ -165,12 +165,32 @@ CREATE TABLE companion_availability (
   end_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '可约结束时间',
   availability_status VARCHAR(20) NOT NULL DEFAULT 'AVAILABLE' COMMENT '状态：AVAILABLE、UNAVAILABLE',
   source_type VARCHAR(20) NOT NULL DEFAULT 'MANUAL' COMMENT '来源：MANUAL、RECURRENCE',
+  template_id BIGINT NOT NULL DEFAULT 0 COMMENT '生成来源模板ID（0=手动创建）',
   remark VARCHAR(200) NOT NULL DEFAULT '' COMMENT '备注',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (id),
-  KEY idx_ca_companion_time (companion_user_id, start_at, end_at, availability_status)
+  KEY idx_ca_companion_time (companion_user_id, start_at, end_at, availability_status),
+  KEY idx_ca_template (template_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='陪玩师可约档期表';
+
+CREATE TABLE companion_availability_template (
+  id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  companion_user_id BIGINT NOT NULL DEFAULT 0 COMMENT '陪玩师用户ID',
+  template_name VARCHAR(50) NOT NULL DEFAULT '' COMMENT '模板名称',
+  day_of_week VARCHAR(20) NOT NULL DEFAULT '' COMMENT '生效周几集合，逗号分隔（1=周一..7=周日）',
+  all_day TINYINT NOT NULL DEFAULT 0 COMMENT '是否全天可约：0否，1是',
+  start_time TIME NULL DEFAULT NULL COMMENT '每日开始时间（all_day=0 时必填）',
+  end_time TIME NULL DEFAULT NULL COMMENT '每日结束时间（all_day=0 时必填；早于开始时间视为跨天）',
+  effective_from DATE NOT NULL COMMENT '生效开始日期',
+  effective_until DATE NULL DEFAULT NULL COMMENT '生效结束日期（NULL 表示长期有效）',
+  enabled TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用：0停用，1启用',
+  last_generated_until DATE NOT NULL COMMENT '已生成到的日期水位线（滚动续期使用）',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (id),
+  KEY idx_cat_companion_enabled (companion_user_id, enabled)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='陪玩师档期周期模板表';
 
 CREATE TABLE play_order (
   id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',

@@ -72,7 +72,36 @@ export interface Availability {
   endAt: string
   availabilityStatus: 'AVAILABLE' | 'UNAVAILABLE'
   sourceType: 'MANUAL' | 'RECURRENCE'
+  /** 生成来源模板ID（0=手动创建） */
+  templateId: number
   remark: string
+}
+
+/** 档期周期模板（FR-P10 周期设置） */
+export interface AvailabilityTemplate {
+  id: number
+  templateName: string
+  /** 生效周几集合，逗号分隔（1=周一..7=周日） */
+  dayOfWeek: string
+  allDay: boolean
+  /** "HH:mm:ss"（allDay=false 时有值） */
+  startTime?: string
+  endTime?: string
+  /** "yyyy-MM-dd" */
+  effectiveFrom: string
+  /** 生效结束日期，空表示长期有效 */
+  effectiveUntil?: string
+  enabled: boolean
+  lastGeneratedUntil: string
+  /** 展示用规则描述，如"周一至周五 19:00-23:00（10-17 起长期）" */
+  ruleText: string
+}
+
+/** 批量/周期生成结果 */
+export interface AvailabilityBatchResult {
+  createdCount: number
+  skippedCount: number
+  skippedDetails: string[]
 }
 
 /** 收益概览（FR-P19） */
@@ -188,6 +217,58 @@ export function createUnavailable(data: {
 
 export function deleteAvailability(id: number): Promise<void> {
   return request<void>({ url: `/companion/availabilities/${id}`, method: 'delete' })
+}
+
+/** 批量创建可约档期：日期范围内每日同一时段或全天，冲突日期自动跳过并返回明细（FR-P10 日期范围设置） */
+export function createAvailabilityBatch(data: {
+  startDate: string
+  endDate?: string
+  allDay: boolean
+  startTime?: string
+  endTime?: string
+  remark?: string
+}): Promise<AvailabilityBatchResult> {
+  return request<AvailabilityBatchResult>({ url: '/companion/availabilities/batch', method: 'post', data })
+}
+
+// ==================== 档期周期模板（FR-P10 周期设置：设置一次自动循环生效） ====================
+
+export function listAvailabilityTemplates(): Promise<AvailabilityTemplate[]> {
+  return request<AvailabilityTemplate[]>({ url: '/companion/availability-templates', method: 'get' })
+}
+
+export interface AvailabilityTemplatePayload {
+  templateName: string
+  dayOfWeek: string
+  allDay: boolean
+  startTime?: string
+  endTime?: string
+  effectiveFrom: string
+  effectiveUntil?: string
+}
+
+export function createAvailabilityTemplate(data: AvailabilityTemplatePayload): Promise<AvailabilityTemplate> {
+  return request<AvailabilityTemplate>({ url: '/companion/availability-templates', method: 'post', data })
+}
+
+export function updateAvailabilityTemplate(
+  id: number,
+  data: AvailabilityTemplatePayload,
+): Promise<AvailabilityTemplate> {
+  return request<AvailabilityTemplate>({ url: `/companion/availability-templates/${id}`, method: 'put', data })
+}
+
+/** 启用/停用模板：停用清理未来实例，启用重新生成 */
+export function toggleAvailabilityTemplate(id: number, enabled: boolean): Promise<AvailabilityTemplate> {
+  return request<AvailabilityTemplate>({
+    url: `/companion/availability-templates/${id}/status`,
+    method: 'put',
+    params: { enabled },
+  })
+}
+
+export function deleteAvailabilityTemplate(id: number): Promise<void> {
+  return request<void>({ url: `/companion/availability-templates/${id}`, method: 'delete' })
 }
 
 // ==================== 收益 ====================

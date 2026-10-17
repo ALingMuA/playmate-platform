@@ -5,9 +5,12 @@ import com.gameplay.auth.security.JwtPrincipal;
 import com.gameplay.common.api.ApiResponse;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
+import com.gameplay.companion.dto.AvailabilityBatchCreateRequest;
+import com.gameplay.companion.dto.AvailabilityBatchCreateView;
 import com.gameplay.companion.dto.AvailabilityCreateRequest;
 import com.gameplay.companion.dto.AvailabilityView;
 import com.gameplay.companion.service.AvailabilityService;
+import com.gameplay.companion.service.AvailabilityTemplateService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -33,8 +36,9 @@ import java.util.List;
 public class CompanionAvailabilityController {
 
     private final AvailabilityService availabilityService;
+    private final AvailabilityTemplateService availabilityTemplateService;
 
-    /** 我的档期列表（可按时间范围过滤） */
+    /** 我的档期列表（可按时间范围过滤；先触发周期模板滚动续期，保证未来窗口实例就绪） */
     @GetMapping
     public ApiResponse<List<AvailabilityView>> list(
             @RequestParam(required = false)
@@ -42,7 +46,9 @@ public class CompanionAvailabilityController {
             @RequestParam(required = false)
             @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endAt,
             Authentication authentication) {
-        return ApiResponse.ok(availabilityService.listMine(currentUserId(authentication), startAt, endAt));
+        Long userId = currentUserId(authentication);
+        availabilityTemplateService.ensureUpToDate(userId);
+        return ApiResponse.ok(availabilityService.listMine(userId, startAt, endAt));
     }
 
     /** 新增可约时段（FR-P10） */
@@ -57,6 +63,17 @@ public class CompanionAvailabilityController {
     public ApiResponse<AvailabilityView> createUnavailable(@Valid @RequestBody AvailabilityCreateRequest request,
                                                            Authentication authentication) {
         return ApiResponse.ok(availabilityService.createUnavailable(currentUserId(authentication), request));
+    }
+
+    /**
+     * 批量创建可约档期（FR-P10 日期范围设置）：日期范围内每日同一时段或全天，
+     * 与已有档期/订单占用冲突的日期自动跳过并返回明细。
+     */
+    @PostMapping("/batch")
+    public ApiResponse<AvailabilityBatchCreateView> createBatch(
+            @Valid @RequestBody AvailabilityBatchCreateRequest request,
+            Authentication authentication) {
+        return ApiResponse.ok(availabilityService.createBatch(currentUserId(authentication), request));
     }
 
     /** 删除档期 */
