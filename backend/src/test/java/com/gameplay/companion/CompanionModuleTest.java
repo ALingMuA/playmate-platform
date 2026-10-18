@@ -767,13 +767,13 @@ class CompanionModuleTest {
                                 .toString()))
                 .andExpect(status().isOk());
 
-        // 档期覆盖 [now-1h, now+5h]
+        // 档期覆盖 [now, now+5h]
         LocalDateTime now = LocalDateTime.now();
         mockMvc.perform(post("/api/companion/availabilities")
                         .header("Authorization", bearer(cToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.createObjectNode()
-                                .put("startAt", now.minusHours(1).format(FMT))
+                                .put("startAt", now.format(FMT))
                                 .put("endAt", now.plusHours(5).format(FMT))
                                 .toString()))
                 .andExpect(status().isOk());
@@ -894,7 +894,7 @@ class CompanionModuleTest {
                         .header("Authorization", bearer(cToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.createObjectNode()
-                                .put("startAt", now.minusHours(1).format(FMT))
+                                .put("startAt", now.format(FMT))
                                 .put("endAt", now.plusHours(5).format(FMT))
                                 .toString()))
                 .andExpect(status().isOk());
@@ -963,7 +963,7 @@ class CompanionModuleTest {
                         .header("Authorization", bearer(cToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.createObjectNode()
-                                .put("startAt", now.minusHours(1).format(FMT))
+                                .put("startAt", now.format(FMT))
                                 .put("endAt", now.plusHours(8).format(FMT))
                                 .toString()))
                 .andExpect(status().isOk());
@@ -1087,7 +1087,7 @@ class CompanionModuleTest {
                         .header("Authorization", bearer(cToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.createObjectNode()
-                                .put("startAt", now.minusHours(1).format(FMT))
+                                .put("startAt", now.format(FMT))
                                 .put("endAt", now.plusHours(5).format(FMT))
                                 .toString()))
                 .andExpect(status().isOk());

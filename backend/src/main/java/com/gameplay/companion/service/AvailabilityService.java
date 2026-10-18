@@ -6,6 +6,11 @@ import com.gameplay.auth.mapper.UserMapper;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.companion.domain.CompanionAvailability;
+import com.gameplay.companion.domain.CompanionAvailabilityTemplate;
+import com.gameplay.companion.dto.RestoreDayResult;
+import com.gameplay.companion.mapper.CompanionAvailabilityTemplateMapper;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import com.gameplay.companion.dto.AvailabilityBatchCreateRequest;
 import com.gameplay.companion.dto.AvailabilityBatchCreateView;
 import com.gameplay.companion.dto.AvailabilityChangeRequest;
@@ -52,9 +57,14 @@ public class AvailabilityService {
     private static final int MAX_GENERATE_DAYS = 366;
 
     private final CompanionAvailabilityMapper availabilityMapper;
+    private final CompanionAvailabilityTemplateMapper templateMapper;
     private final OrderTimeSlotMapper orderTimeSlotMapper;
     private final PlayOrderMapper playOrderMapper;
     private final UserMapper userMapper;
+
+    @Autowired
+    @Lazy
+    private AvailabilityTemplateService availabilityTemplateService;
 
     /** 我的档期列表（可按时间范围过滤） */
     public List<AvailabilityView> listMine(Long userId, LocalDateTime startAt, LocalDateTime endAt) {
@@ -78,6 +88,10 @@ public class AvailabilityService {
     @Transactional
     public AvailabilityView createAvailable(Long userId, AvailabilityCreateRequest req) {
         validateTime(req);
+        LocalDateTime now = LocalDateTime.now();
+        if (req.getEndAt().isBefore(now) || req.getStartAt().isBefore(now.minusMinutes(1))) {
+            throw new BusinessException(ErrorCode.AVAILABILITY_PAST_TIME, "不能添加过去时间的档期");
+        }
         LocalDateTime startAt = req.getStartAt();
         LocalDateTime endAt = req.getEndAt();
 
@@ -124,6 +138,10 @@ public class AvailabilityService {
     @Transactional
     public AvailabilityView createUnavailable(Long userId, AvailabilityCreateRequest req) {
         validateTime(req);
+        LocalDateTime now = LocalDateTime.now();
+        if (req.getEndAt().isBefore(now) || req.getStartAt().isBefore(now.minusMinutes(1))) {
+            throw new BusinessException(ErrorCode.AVAILABILITY_PAST_TIME, "不能添加过去时间的档期");
+        }
         LocalDateTime startAt = req.getStartAt();
         LocalDateTime endAt = req.getEndAt();
 
@@ -333,6 +351,7 @@ public class AvailabilityService {
      * 周日程全景视图（聚合可用档期 + 订单锁定区间）。
      */
     public ScheduleOverviewView getScheduleOverview(Long userId, LocalDateTime startAt, LocalDateTime endAt) {
+        availabilityTemplateService.ensureWindowThrottled(userId);
         List<AvailabilityView> availabilities = listMine(userId, startAt, endAt);
 
         LambdaQueryWrapper<PlayOrder> orderWrapper = new LambdaQueryWrapper<PlayOrder>()
@@ -367,7 +386,20 @@ public class AvailabilityService {
                 .build()
         ).toList();
 
+        List<CompanionAvailabilityTemplate> templates = templateMapper.selectList(
+                new LambdaQueryWrapper<CompanionAvailabilityTemplate>()
+                        .eq(CompanionAvailabilityTemplate::getCompanionUserId, userId)
+                        .eq(CompanionAvailabilityTemplate::getEnabled, 1));
+        String generatedUntil = templates.stream()
+                .map(CompanionAvailabilityTemplate::getLastGeneratedUntil)
+                .filter(java.util.Objects::nonNull)
+                .max(LocalDate::compareTo)
+                .map(LocalDate::toString)
+                .orElse(null);
+
         return ScheduleOverviewView.builder()
+                .serverNow(LocalDateTime.now())
+                .generatedUntil(generatedUntil)
                 .availabilities(availabilities)
                 .bookedSlots(bookedSlots)
                 .build();
@@ -377,17 +409,144 @@ public class AvailabilityService {
      * 一键切换全天状态（全天休息 或 全天可约）。
      */
     @Transactional
-    public void toggleDayOff(Long userId, LocalDate date, boolean isOff, String remark) {
-        LocalDateTime dayStart = date.atStartOfDay();
+    public void toggleDayOff(Long userId, LocalDate date, Boolean isOff, String remark) {
+        if (date == null || date.isBefore(LocalDate.now())) {
+            throw new BusinessException(ErrorCode.AVAILABILITY_PAST_TIME);
+        }
+        if (isOff == null) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "请指定是否休息");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime dayStart = date.isEqual(LocalDate.now()) ? now : date.atStartOfDay();
         LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
         AvailabilityCreateRequest req = new AvailabilityCreateRequest();
         req.setStartAt(dayStart);
         req.setEndAt(dayEnd);
-        req.setRemark(remark != null && !remark.isBlank() ? remark : (isOff ? "全天休息" : "全天可约"));
-        if (isOff) {
+        req.setRemark(remark != null && !remark.isBlank() ? remark : (Boolean.TRUE.equals(isOff) ? "全天休息" : "全天可约"));
+        if (Boolean.TRUE.equals(isOff)) {
             createUnavailable(userId, req);
         } else {
             createAvailable(userId, req);
+        }
+    }
+
+    /**
+     * 恢复按作息（FR-P10 单日撤销）：清除该日所有 MANUAL 记录与未锁定的模板生成实例，
+     * 调 ensureWindow 重新生成，恢复默认作息。
+     */
+    @Transactional
+    public RestoreDayResult restoreDay(Long userId, LocalDate date) {
+        if (date == null || date.isBefore(LocalDate.now())) {
+            throw new BusinessException(ErrorCode.AVAILABILITY_PAST_TIME, "不能恢复已经过去的日期");
+        }
+        LocalDateTime dayStart = date.atStartOfDay();
+        LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
+
+        // 1. 查找该日重叠的手动调整记录（template_id = 0 或 NULL，或 source_type = MANUAL）
+        List<CompanionAvailability> manualRecords = availabilityMapper.selectList(
+                new LambdaQueryWrapper<CompanionAvailability>()
+                        .eq(CompanionAvailability::getCompanionUserId, userId)
+                        .and(w -> w.eq(CompanionAvailability::getTemplateId, 0L)
+                                .or().isNull(CompanionAvailability::getTemplateId)
+                                .or().eq(CompanionAvailability::getSourceType, "MANUAL"))
+                        .lt(CompanionAvailability::getStartAt, dayEnd)
+                        .gt(CompanionAvailability::getEndAt, dayStart));
+
+        // 跨天手动记录暂不支持一键恢复
+        for (CompanionAvailability m : manualRecords) {
+            if (m.getStartAt().isBefore(dayStart) || m.getEndAt().isAfter(dayEnd)) {
+                throw new BusinessException(ErrorCode.AVAILABILITY_TIME_INVALID, "跨天单日调整暂不支持一键恢复，请手动删除");
+            }
+        }
+
+        // 2. 检查待删除的手动记录是否有有效订单锁定
+        for (CompanionAvailability m : manualRecords) {
+            if (hasOrderConflict(userId, m.getStartAt(), m.getEndAt())) {
+                throw new BusinessException(ErrorCode.AVAILABILITY_RESTORE_CONFLICT, "当天手动档期已被有效订单锁定，无法恢复作息");
+            }
+        }
+
+        // 3. 查找该日所有档期记录：清除手动调整与未被订单锁定的模板实例
+        List<CompanionAvailability> dayRecords = availabilityMapper.selectList(
+                new LambdaQueryWrapper<CompanionAvailability>()
+                        .eq(CompanionAvailability::getCompanionUserId, userId)
+                        .ge(CompanionAvailability::getStartAt, dayStart)
+                        .lt(CompanionAvailability::getStartAt, dayEnd));
+
+        int removedManual = 0;
+        int removedGenerated = 0;
+        for (CompanionAvailability r : dayRecords) {
+            boolean isManual = (r.getTemplateId() == null || r.getTemplateId() == 0L || "MANUAL".equalsIgnoreCase(r.getSourceType()));
+            if (isManual) {
+                availabilityMapper.deleteById(r.getId());
+                removedManual++;
+            } else {
+                // 模板实例：已被订单锁定的保留，未被订单锁定的删除重建
+                if (!hasOrderConflict(userId, r.getStartAt(), r.getEndAt())) {
+                    availabilityMapper.deleteById(r.getId());
+                    removedGenerated++;
+                }
+            }
+        }
+
+        // 4. 调用 ensureWindow 重新生成该日缺失的常规作息
+        availabilityTemplateService.ensureWindow(userId);
+
+        // 5. 统计重新生成的数量
+        Long count = availabilityMapper.selectCount(
+                new LambdaQueryWrapper<CompanionAvailability>()
+                        .eq(CompanionAvailability::getCompanionUserId, userId)
+                        .ge(CompanionAvailability::getStartAt, dayStart)
+                        .lt(CompanionAvailability::getStartAt, dayEnd));
+        int regenerated = count != null ? count.intValue() : 0;
+
+        return RestoreDayResult.builder()
+                .removedManual(removedManual)
+                .removedGenerated(removedGenerated)
+                .regenerated(regenerated)
+                .skipped(Collections.emptyList())
+                .build();
+    }
+
+    public boolean existsGenerated(Long templateId, LocalDateTime startAt) {
+        return availabilityMapper.selectCount(new LambdaQueryWrapper<CompanionAvailability>()
+                .eq(CompanionAvailability::getTemplateId, templateId)
+                .eq(CompanionAvailability::getStartAt, startAt)) > 0;
+    }
+
+    public boolean hasUnavailableOverlap(Long userId, LocalDateTime startAt, LocalDateTime endAt) {
+        return availabilityMapper.selectCount(new LambdaQueryWrapper<CompanionAvailability>()
+                .eq(CompanionAvailability::getCompanionUserId, userId)
+                .eq(CompanionAvailability::getAvailabilityStatus, AvailabilityStatus.UNAVAILABLE.name())
+                .lt(CompanionAvailability::getStartAt, endAt)
+                .gt(CompanionAvailability::getEndAt, startAt)) > 0;
+    }
+
+    public boolean hasAvailableOverlap(Long userId, LocalDateTime startAt, LocalDateTime endAt) {
+        return availabilityMapper.selectCount(new LambdaQueryWrapper<CompanionAvailability>()
+                .eq(CompanionAvailability::getCompanionUserId, userId)
+                .eq(CompanionAvailability::getAvailabilityStatus, AvailabilityStatus.AVAILABLE.name())
+                .lt(CompanionAvailability::getStartAt, endAt)
+                .gt(CompanionAvailability::getEndAt, startAt)) > 0;
+    }
+
+    public boolean hasOrderConflict(Long userId, LocalDateTime startAt, LocalDateTime endAt) {
+        return !orderTimeSlotMapper.selectConflictSlotsForUpdate(userId, startAt, endAt).isEmpty();
+    }
+
+    public void insertRecurrenceSafe(Long userId, Long templateId, LocalDateTime startAt, LocalDateTime endAt, String remark) {
+        try {
+            CompanionAvailability availability = new CompanionAvailability();
+            availability.setCompanionUserId(userId);
+            availability.setStartAt(startAt);
+            availability.setEndAt(endAt);
+            availability.setAvailabilityStatus(AvailabilityStatus.AVAILABLE.name());
+            availability.setSourceType("RECURRENCE");
+            availability.setTemplateId(templateId);
+            availability.setRemark(remark == null ? "" : remark);
+            availabilityMapper.insert(availability);
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            // 唯一键冲突安全忽略
         }
     }
 

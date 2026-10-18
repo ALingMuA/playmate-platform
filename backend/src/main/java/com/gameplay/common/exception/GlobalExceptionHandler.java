@@ -11,6 +11,9 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+
 /**
  * 全局异常处理：统一捕获业务异常、参数校验异常与未知异常，
  * 返回 {@code code/message/data} 结构，不暴露堆栈、SQL 或密钥信息。
@@ -23,6 +26,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException e) {
         ErrorCode ec = e.getErrorCode();
+        ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        String path = (attrs != null && attrs.getRequest() != null) ? attrs.getRequest().getRequestURI() : "";
+        log.warn("业务异常 code={} message={} path={}", ec.getCode(), e.getMessage(), path);
         return ResponseEntity.status(ec.getHttpStatus())
                 .body(ApiResponse.error(ec.getCode(), e.getMessage()));
     }

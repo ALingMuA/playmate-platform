@@ -170,7 +170,7 @@ class CouponAndActivityFlowIntegrationTest {
                         .header("Authorization", bearer(newToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.createObjectNode()
-                                .put("startAt", now.minusHours(1).format(FMT))
+                                .put("startAt", now.format(FMT))
                                 .put("endAt", now.plusHours(12).format(FMT))
                                 .toString()))
                 .andExpect(status().isOk());

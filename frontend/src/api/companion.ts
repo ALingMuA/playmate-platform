@@ -123,6 +123,16 @@ export interface BookedSlot {
 export interface ScheduleOverview {
   availabilities: Availability[]
   bookedSlots: BookedSlot[]
+  serverNow?: string
+  generatedUntil?: string
+}
+
+/** 单日恢复常规作息结果（FR-P11） */
+export interface RestoreDayResult {
+  removedManual: number
+  removedGenerated: number
+  regenerated: number
+  skipped?: string[]
 }
 
 /** 周日程批量变更 */
@@ -262,6 +272,15 @@ export function toggleDayOff(data: { date: string; isOff: boolean; remark?: stri
     url: '/companion/availabilities/toggle-day-off',
     method: 'post',
     data,
+  })
+}
+
+/** 单日恢复常规作息（FR-P11） */
+export function restoreDay(date: string): Promise<RestoreDayResult> {
+  return request<RestoreDayResult>({
+    url: '/companion/availabilities/restore-day',
+    method: 'post',
+    data: { date },
   })
 }
 
