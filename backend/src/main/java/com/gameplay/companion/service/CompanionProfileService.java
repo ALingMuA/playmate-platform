@@ -4,12 +4,15 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gameplay.auth.entity.User;
+import com.gameplay.auth.mapper.UserMapper;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.companion.domain.CompanionProfile;
 import com.gameplay.companion.dto.GameCapabilityDto;
 import com.gameplay.companion.dto.ProfileUpdateRequest;
 import com.gameplay.companion.dto.ProfileView;
+import com.gameplay.companion.dto.PublicCompanionProfileView;
 import com.gameplay.companion.enums.CompanionServiceStatus;
 import com.gameplay.companion.mapper.CompanionProfileMapper;
 import lombok.RequiredArgsConstructor;
@@ -27,12 +30,39 @@ import java.util.List;
 public class CompanionProfileService {
 
     private final CompanionProfileMapper profileMapper;
+    private final UserMapper userMapper;
     private final ObjectMapper objectMapper;
 
     /** 我的陪玩主页 */
     public ProfileView getMyProfile(Long userId) {
         CompanionProfile profile = requireProfile(userId);
         return toView(profile);
+    }
+
+    /** 查询游客可见的陪玩师主页白名单资料。 */
+    public PublicCompanionProfileView getPublicProfile(Long userId) {
+        CompanionProfile profile = getByUserId(userId);
+        User user = userMapper.selectOne(new LambdaQueryWrapper<User>()
+                .eq(User::getId, userId)
+                .eq(User::getAccountStatus, "ENABLED"));
+        if (profile == null || user == null
+                || !"APPROVED".equals(profile.getCertificationStatus())) {
+            throw new BusinessException(ErrorCode.COMPANION_PROFILE_NOT_FOUND);
+        }
+
+        return PublicCompanionProfileView.builder()
+                .userId(profile.getUserId())
+                .displayName(profile.getDisplayName())
+                .avatarUrl(user.getAvatarUrl())
+                .profileIntro(profile.getProfileIntro())
+                .serviceStatus(profile.getServiceStatus())
+                .ratingAvg(profile.getRatingAvg())
+                .ratingCount(profile.getRatingCount())
+                .completedOrderCount(profile.getCompletedOrderCount())
+                .capabilities(fromJson(profile.getCapabilityJson(),
+                        new TypeReference<List<GameCapabilityDto>>() {}))
+                .certificationStatus(profile.getCertificationStatus())
+                .build();
     }
 
     /** 更新主页（FR-P05）：展示名、简介、认证能力 */

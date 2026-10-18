@@ -17,6 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -356,6 +358,85 @@ class CompanionModuleTest {
                                 .put("serviceStatus", "SUSPENDED")
                                 .toString()))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("公开主页资料：匿名读取已通过资格且仅返回白名单字段")
+    void public_profile_anonymous_and_whitelisted() throws Exception {
+        JsonNode companion = prepareCompanion(adminToken());
+        long userId = companion.path("userId").asLong();
+        String token = companion.path("token").asText();
+
+        mockMvc.perform(put("/api/accounts/profile")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("avatarUrl", "https://cdn.example.test/avatar.png")
+                                .toString()))
+                .andExpect(status().isOk());
+        mockMvc.perform(put("/api/companion/profile")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("displayName", "公开展示名")
+                                .put("profileIntro", "公开简介")
+                                .set("capabilities", objectMapper.createArrayNode()
+                                        .add(objectMapper.createObjectNode()
+                                                .put("gameId", firstGameId())
+                                                .put("gameName", "王者荣耀")
+                                                .put("server", "微信区")
+                                                .put("rank", "最强王者")))
+                                .toString()))
+                .andExpect(status().isOk());
+
+        MvcResult result = mockMvc.perform(get("/api/companion-profiles/{userId}", userId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.userId").value(userId))
+                .andExpect(jsonPath("$.data.displayName").value("公开展示名"))
+                .andExpect(jsonPath("$.data.avatarUrl").value("https://cdn.example.test/avatar.png"))
+                .andExpect(jsonPath("$.data.profileIntro").value("公开简介"))
+                .andExpect(jsonPath("$.data.certificationStatus").value("APPROVED"))
+                .andExpect(jsonPath("$.data.capabilities[0].rank").value("最强王者"))
+                .andReturn();
+
+        Set<String> fields = new HashSet<>();
+        objectMapper.readTree(result.getResponse().getContentAsString())
+                .path("data").fieldNames().forEachRemaining(fields::add);
+        assertThat(fields).containsExactlyInAnyOrder("userId", "displayName", "avatarUrl", "profileIntro",
+                "serviceStatus", "ratingAvg", "ratingCount", "completedOrderCount", "capabilities",
+                "certificationStatus");
+
+        // 公开策略只授予精确 GET；匿名写请求仍由全局认证规则拒绝。
+        mockMvc.perform(put("/api/companion-profiles/{userId}", userId))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_TOKEN_MISSING"));
+    }
+
+    @Test
+    @DisplayName("公开主页资料：资格暂停、账号禁用、逻辑删除或资料不存在均返回统一 404")
+    void public_profile_hides_ineligible_accounts() throws Exception {
+        JsonNode companion = prepareCompanion(adminToken());
+        long userId = companion.path("userId").asLong();
+
+        jdbcTemplate.update("UPDATE companion_profile SET certification_status = 'SUSPENDED' WHERE user_id = ?",
+                userId);
+        expectPublicProfileNotFound(userId);
+
+        jdbcTemplate.update("UPDATE companion_profile SET certification_status = 'APPROVED' WHERE user_id = ?",
+                userId);
+        jdbcTemplate.update("UPDATE `user` SET account_status = 'DISABLED' WHERE id = ?", userId);
+        expectPublicProfileNotFound(userId);
+
+        jdbcTemplate.update("UPDATE `user` SET account_status = 'ENABLED', deleted = 1 WHERE id = ?", userId);
+        expectPublicProfileNotFound(userId);
+
+        expectPublicProfileNotFound(Long.MAX_VALUE);
+    }
+
+    private void expectPublicProfileNotFound(long userId) throws Exception {
+        mockMvc.perform(get("/api/companion-profiles/{userId}", userId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("COMPANION_PROFILE_NOT_FOUND"));
     }
 
     // ==================== FR-P07~P09 服务项目 ====================
