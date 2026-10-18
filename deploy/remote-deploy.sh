@@ -30,6 +30,10 @@ rm -rf "$APP_DIR/frontend.new"
 mkdir -p "$APP_DIR/frontend.new"
 tar -xzf "$STAGE/frontend.tar.gz" -C "$APP_DIR/frontend.new"
 [ -f "$APP_DIR/frontend.new/index.html" ] || die "前端包内缺少 index.html"
+# 平滑升级：保留老版本的 assets 文件，避免旧页面未刷新用户点击动态路由时 ChunkLoadError
+if [ -d "$APP_DIR/frontend/assets" ]; then
+  cp -n -r "$APP_DIR/frontend/assets"/* "$APP_DIR/frontend.new/assets/" 2>/dev/null || true
+fi
 cp "$STAGE/$JAR" "$APP_DIR/$JAR.new"
 echo "前端文件数: $(find "$APP_DIR/frontend.new" -type f | wc -l)"
 
