@@ -30,7 +30,7 @@ $jar = Join-Path $repo 'backend\target\gameplay-backend-0.1.0-SNAPSHOT.jar'
 $dist = Join-Path $repo 'frontend\dist'
 $remote = '/tmp/gameplay-deploy'
 
-$sshOpts = @('-i', $SshKey, '-o', 'StrictHostKeyChecking=no', '-o', 'BatchMode=yes')
+$sshOpts = @('-i', $SshKey, '-o', 'StrictHostKeyChecking=no', '-o', 'BatchMode=yes', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-o', 'ConnectTimeout=10')
 $target = "root@$Server"
 
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -86,8 +86,19 @@ foreach ($item in $items) {
 }
 # 注意：必须写成 ${target}，否则 PowerShell 会把 "$target:" 当成作用域变量引用而报错
 $scpArgs = @($sshOpts + @('-r', '-q') + ($items | ForEach-Object { $_.FullName }) + @("${target}:$remote/"))
-& scp @scpArgs
-if ($LASTEXITCODE -ne 0) { throw 'scp 上传失败' }
+$maxRetries = 3
+$uploaded = $false
+for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+  Write-Host "    正在上传暂存包 (尝试 $attempt/$maxRetries)..."
+  & scp @scpArgs
+  if ($LASTEXITCODE -eq 0) {
+    $uploaded = $true
+    break
+  }
+  Write-Warning "第 $attempt 次 scp 上传失败，将在 2 秒后重试..."
+  Start-Sleep -Seconds 2
+}
+if (-not $uploaded) { throw 'scp 上传失败（已达到最大重试次数）' }
 
 Step '执行远端部署'
 & ssh @sshOpts $target "bash $remote/remote-deploy.sh"
