@@ -16,6 +16,7 @@ const router = useRouter()
 
 const companionUserId = computed(() => Number(route.query.companionUserId))
 const presetServiceId = computed(() => Number(route.query.serviceId))
+const presetStartAt = computed(() => typeof route.query.startAt === 'string' ? route.query.startAt : '')
 
 const services = ref<BookableService[]>([])
 const loading = ref(true)
@@ -86,6 +87,12 @@ onMounted(async () => {
     } else if (services.value.length) {
       form.serviceId = services.value[0].id
     }
+    if (presetStartAt.value) {
+      const parsedStart = dayjs(presetStartAt.value)
+      if (parsedStart.isValid() && parsedStart.isAfter(dayjs())) {
+        form.appointmentStart = parsedStart.format('YYYY-MM-DD HH:mm:ss')
+      }
+    }
   } finally {
     loading.value = false
   }
@@ -128,6 +135,7 @@ onMounted(async () => {
                 type="datetime"
                 placeholder="选择预约开始时间"
                 :disabled-date="(d: Date) => d.getTime() < Date.now() - 86400000"
+                value-format="YYYY-MM-DD HH:mm:ss"
                 style="width: 100%"
               />
             </div>

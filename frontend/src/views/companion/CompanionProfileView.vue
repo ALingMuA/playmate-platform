@@ -238,6 +238,7 @@ async function handleStatus(value: string | number | boolean | undefined) {
 
         <el-form-item>
           <el-button type="primary" :loading="saving" @click="handleSave">保存主页资料</el-button>
+          <el-button v-if="profile" @click="router.push(`/companions/${profile.userId}`)">预览用户端展示效果</el-button>
           <el-button @click="router.push('/companion/services')">去管理服务项目</el-button>
         </el-form-item>
       </el-form>
