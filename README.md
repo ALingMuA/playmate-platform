@@ -236,6 +236,23 @@ mvn test
 | `GET` | `/api/service-types` | 获取平台已启用的服务类型（如排位上分、语音连麦等） |
 | `GET` | `/api/tags?gameId=` | 查询可用标签列表（指定游戏时自动附带平台通用标签） |
 
+### 陪玩师档期与作息管理 `/api/companion`（FR-P10 / FR-P11）
+
+提供常规作息模板配置、按日幂等滚动续期（未来 28 天）、单日例外微调与一键撤销恢复全套能力：
+
+| HTTP 方法 | 请求路径 | 接口说明 |
+|:---:|---|---|
+| `GET` | `/api/companion/availabilities/overview` | 获取周日程三态全景（可约/已约/休息）及未来滚动水位 |
+| `POST` | `/api/companion/availabilities` | 新增单日临时可约/加档时段（支持跨天，防录入过去时间） |
+| `DELETE` | `/api/companion/availabilities/{id}` | 删除单日临时档期（已被有效订单锁定则拒绝） |
+| `POST` | `/api/companion/availabilities/toggle-day-off` | 快捷切换全天休息（自动挖空可约，保留订单防护） |
+| `POST` | `/api/companion/availabilities/restore-day` | 单日撤销恢复常规作息（清除手动例外，重建模板实例，订单冲突返回 409） |
+| `GET` | `/api/companion/availability-templates` | 查询陪玩师所有长期作息模板（支持多规则、启停状态） |
+| `POST` | `/api/companion/availability-templates` | 新建作息规则（支持任意星期、全天/跨天时段、生效区间） |
+| `PUT` | `/api/companion/availability-templates/{id}` | 更新作息规则（支持历史模板编辑不报 422、清空截止日期） |
+| `PUT` | `/api/companion/availability-templates/{id}/status` | 暂停或启用单条作息规则 |
+| `DELETE` | `/api/companion/availability-templates/{id}` | 删除作息规则并清理未来未被订单占用的实例 |
+
 ---
 
 ## 📌 开发与架构约定

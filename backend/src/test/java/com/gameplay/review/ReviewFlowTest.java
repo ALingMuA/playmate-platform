@@ -87,6 +87,7 @@ class ReviewFlowTest {
         String token = loginAndGetToken(username, PASSWORD);
         return objectMapper.createObjectNode()
                 .put("id", id)
+                .put("username", username)
                 .put("token", token);
     }
 
@@ -195,7 +196,7 @@ class ReviewFlowTest {
                 .put("description", "集成测试服务")
                 .put("priceCents", 6000)
                 .put("minDurationMinutes", 60);
-        serviceBody.set("tagIds", objectMapper.createArrayNode().add(6));
+        serviceBody.set("tagIds", objectMapper.createArrayNode());
         MvcResult created = mockMvc.perform(post("/api/companion/services")
                         .header("Authorization", "Bearer " + companionToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -247,20 +248,22 @@ class ReviewFlowTest {
         JsonNode companion = registerAndLogin();
         recharge(buyer.path("id").asLong(), 100_000L);
         approveCompanionApplication(companion.path("token").asText(), gameId);
+        // 审核通过后重新登录以获取包含 COMPANION 角色的 JWT
+        String companionToken = loginAndGetToken(companion.path("username").asText(), PASSWORD);
         // 审核通过后默认休息中，需设为可接单（FR-P06）
         mockMvc.perform(put("/api/companion/profile/service-status")
-                        .header("Authorization", "Bearer " + companion.path("token").asText())
+                        .header("Authorization", "Bearer " + companionToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"serviceStatus\":\"AVAILABLE\"}"))
                 .andExpect(status().isOk())
                 .andReturn();
-        long serviceId = setupService(companion.path("token").asText(), gameId, serviceTypeId);
-        setupAvailability(companion.path("token").asText());
+        long serviceId = setupService(companionToken, gameId, serviceTypeId);
+        setupAvailability(companionToken);
         return objectMapper.createObjectNode()
                 .put("buyerId", buyer.path("id").asLong())
                 .put("buyerToken", buyer.path("token").asText())
                 .put("companionId", companion.path("id").asLong())
-                .put("companionToken", companion.path("token").asText())
+                .put("companionToken", companionToken)
                 .put("serviceId", serviceId);
     }
 
