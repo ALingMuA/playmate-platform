@@ -3,6 +3,8 @@ package com.gameplay.companion;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.gameplay.companion.domain.CompanionService;
+import com.gameplay.companion.mapper.CompanionServiceMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +55,9 @@ class CompanionModuleTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private CompanionServiceMapper companionServiceMapper;
 
     private String uniqueUser() {
         return "cmp" + System.currentTimeMillis() + "_" + SEQ.incrementAndGet();
@@ -396,6 +401,7 @@ class CompanionModuleTest {
                 .andExpect(jsonPath("$.data.avatarUrl").value("https://cdn.example.test/avatar.png"))
                 .andExpect(jsonPath("$.data.profileIntro").value("公开简介"))
                 .andExpect(jsonPath("$.data.certificationStatus").value("APPROVED"))
+                .andExpect(jsonPath("$.data.startingPriceCents").value((Object) null))
                 .andExpect(jsonPath("$.data.capabilities[0].rank").value("最强王者"))
                 .andReturn();
 
@@ -403,8 +409,8 @@ class CompanionModuleTest {
         objectMapper.readTree(result.getResponse().getContentAsString())
                 .path("data").fieldNames().forEachRemaining(fields::add);
         assertThat(fields).containsExactlyInAnyOrder("userId", "displayName", "avatarUrl", "profileIntro",
-                "serviceStatus", "ratingAvg", "ratingCount", "completedOrderCount", "capabilities",
-                "certificationStatus");
+                "serviceStatus", "startingPriceCents", "ratingAvg", "ratingCount", "completedOrderCount",
+                "capabilities", "certificationStatus");
 
         // 公开策略只授予精确 GET；匿名写请求仍由全局认证规则拒绝。
         mockMvc.perform(put("/api/companion-profiles/{userId}", userId))
@@ -437,6 +443,123 @@ class CompanionModuleTest {
         mockMvc.perform(get("/api/companion-profiles/{userId}", userId))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("COMPANION_PROFILE_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("公开主页起价：取符合公开条件服务中的最低价，排除无效服务和停用游戏")
+    void public_profile_starting_price_uses_bookable_services() throws Exception {
+        JsonNode companion = prepareCompanion(adminToken());
+        long companionUserId = companion.path("userId").asLong();
+        long enabledGameId = firstGameId();
+        long serviceTypeId = firstServiceTypeId();
+        String disabledGameName = uniqueUser() + "_disabled_game";
+        jdbcTemplate.update("INSERT INTO game (game_name, enabled) VALUES (?, 0)", disabledGameName);
+        Long disabledGameId = jdbcTemplate.queryForObject(
+                "SELECT id FROM game WHERE game_name = ?", Long.class, disabledGameName);
+        assertThat(disabledGameId).isNotNull();
+
+        MvcResult withoutServices = mockMvc.perform(get("/api/companion-profiles/{userId}", companionUserId))
+                .andExpect(status().isOk())
+                .andReturn();
+        assertThat(objectMapper.readTree(withoutServices.getResponse().getContentAsString())
+                .path("data").path("startingPriceCents").isNull()).isTrue();
+
+        insertPriceTestService(companionUserId, enabledGameId, serviceTypeId,
+                8_800L, "APPROVED", "ON_SHELF", 0);
+        insertPriceTestService(companionUserId, enabledGameId, serviceTypeId,
+                2_500L, "APPROVED", "ON_SHELF", 0);
+        insertPriceTestService(companionUserId, enabledGameId, serviceTypeId,
+                500L, "PENDING", "ON_SHELF", 0);
+        insertPriceTestService(companionUserId, enabledGameId, serviceTypeId,
+                600L, "APPROVED", "OFF_SHELF", 0);
+        insertPriceTestService(companionUserId, disabledGameId, serviceTypeId,
+                700L, "APPROVED", "ON_SHELF", 0);
+        insertPriceTestService(companionUserId, enabledGameId, serviceTypeId,
+                400L, "APPROVED", "ON_SHELF", 1);
+
+        Long expectedStartingPrice = jdbcTemplate.queryForObject("""
+                SELECT MIN(cs.price_cents)
+                FROM companion_service cs
+                INNER JOIN game g ON g.id = cs.game_id
+                WHERE cs.companion_user_id = ?
+                  AND cs.audit_status = 'APPROVED'
+                  AND cs.service_status = 'ON_SHELF'
+                  AND cs.deleted = 0
+                  AND g.enabled = 1
+                """, Long.class, companionUserId);
+        assertThat(expectedStartingPrice).isEqualTo(2_500L);
+        assertThat(companionServiceMapper.selectStartingPriceCents(companionUserId)).isEqualTo(2_500L);
+
+        mockMvc.perform(get("/api/companion-profiles/{userId}", companionUserId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.startingPriceCents").value(2_500));
+    }
+
+    private void insertPriceTestService(long companionUserId, long gameId, long serviceTypeId,
+                                        long priceCents, String auditStatus, String serviceStatus, int deleted) {
+        CompanionService service = new CompanionService();
+        service.setCompanionUserId(companionUserId);
+        service.setGameId(gameId);
+        service.setServiceTypeId(serviceTypeId);
+        service.setTitle("起价测试服务");
+        service.setDescription("集成测试数据");
+        service.setTagIdsJson("[]");
+        service.setPriceCents(priceCents);
+        service.setMinDurationMinutes(60);
+        service.setAuditStatus(auditStatus);
+        service.setServiceStatus(serviceStatus);
+        service.setAuditBy(0L);
+        service.setAuditReason("");
+        service.setDeleted(deleted);
+        companionServiceMapper.insert(service);
+    }
+
+    @Test
+    @DisplayName("公开档期：匿名仅能读取未来七日可约摘要，不包含备注和管理字段")
+    void public_availabilities_only_expose_future_available_summary() throws Exception {
+        JsonNode companion = prepareCompanion(adminToken());
+        long companionUserId = companion.path("userId").asLong();
+        jdbcTemplate.update("UPDATE companion_profile SET service_status = 'AVAILABLE' WHERE user_id = ?", companionUserId);
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime availableStart = now.plusDays(2).withNano(0);
+        insertPublicAvailability(companionUserId, availableStart, availableStart.plusHours(1), "AVAILABLE", "private note");
+        LocalDateTime unavailableStart = now.plusDays(3).withNano(0);
+        insertPublicAvailability(companionUserId, unavailableStart, unavailableStart.plusHours(1), "UNAVAILABLE", "hidden note");
+        LocalDateTime outsideRangeStart = now.plusDays(9).withNano(0);
+        insertPublicAvailability(companionUserId, outsideRangeStart, outsideRangeStart.plusHours(1), "AVAILABLE", "outside range");
+        LocalDateTime expiredStart = now.minusDays(1).withNano(0);
+        insertPublicAvailability(companionUserId, expiredStart, expiredStart.plusHours(1), "AVAILABLE", "expired");
+
+        MvcResult result = mockMvc.perform(get("/api/companion-profiles/{userId}/availabilities", companionUserId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].startAt").value(
+                        availableStart.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))))
+                .andExpect(jsonPath("$.data[0].endAt").exists())
+                .andReturn();
+
+        JsonNode schedule = objectMapper.readTree(result.getResponse().getContentAsString()).path("data").get(0);
+        Set<String> fields = new HashSet<>();
+        schedule.fieldNames().forEachRemaining(fields::add);
+        assertThat(fields).containsExactlyInAnyOrder("startAt", "endAt");
+
+        mockMvc.perform(get("/api/companion-profiles/{userId}/availabilities", companionUserId)
+                        .param("days", "8"))
+                .andExpect(status().isBadRequest());
+
+        jdbcTemplate.update("UPDATE companion_profile SET service_status = 'BUSY' WHERE user_id = ?", companionUserId);
+        mockMvc.perform(get("/api/companion-profiles/{userId}/availabilities", companionUserId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(0));
+    }
+
+    private void insertPublicAvailability(long companionUserId, LocalDateTime startAt, LocalDateTime endAt,
+                                          String status, String remark) {
+        jdbcTemplate.update("""
+                INSERT INTO companion_availability
+                  (companion_user_id, start_at, end_at, availability_status, source_type, remark)
+                VALUES (?, ?, ?, ?, 'MANUAL', ?)
+                """, companionUserId, startAt, endAt, status, remark);
     }
 
     // ==================== FR-P07~P09 服务项目 ====================

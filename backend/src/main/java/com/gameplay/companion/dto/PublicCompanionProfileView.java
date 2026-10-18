@@ -20,6 +20,8 @@ public class PublicCompanionProfileView {
     private String avatarUrl;
     private String profileIntro;
     private String serviceStatus;
+    /** 最低在架可预约服务价格（分）；没有符合条件的服务时为 null。 */
+    private Long startingPriceCents;
     private BigDecimal ratingAvg;
     private Integer ratingCount;
     private Integer completedOrderCount;

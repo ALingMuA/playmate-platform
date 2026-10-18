@@ -266,12 +266,32 @@ class AdminModuleTest {
         companionProfileMapper.insert(profile);
 
         String token = registerAndGetToken();
+        String anotherUserToken = registerAndGetToken();
+
+        // 未收藏时返回 false；匿名请求仍要求认证。
+        mockMvc.perform(get("/api/favorites/{companionUserId}/status", companionUserId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(false));
+        mockMvc.perform(get("/api/favorites/{companionUserId}/status", companionUserId))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_TOKEN_MISSING"));
 
         // 收藏
         mockMvc.perform(post("/api/favorites/" + companionUserId)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"));
+
+        // 状态只按认证用户隔离，不能读到其他用户的收藏。
+        mockMvc.perform(get("/api/favorites/{companionUserId}/status", companionUserId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(true));
+        mockMvc.perform(get("/api/favorites/{companionUserId}/status", companionUserId)
+                        .header("Authorization", "Bearer " + anotherUserToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(false));
 
         // 重复收藏 409
         mockMvc.perform(post("/api/favorites/" + companionUserId)
@@ -293,6 +313,10 @@ class AdminModuleTest {
         mockMvc.perform(get("/api/favorites")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(jsonPath("$.data.total").value(0));
+        mockMvc.perform(get("/api/favorites/{companionUserId}/status", companionUserId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(false));
     }
 
     // ==================== 数据概览与操作日志 ====================
