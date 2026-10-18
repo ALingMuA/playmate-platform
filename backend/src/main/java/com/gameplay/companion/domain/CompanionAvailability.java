@@ -1,6 +1,8 @@
 package com.gameplay.companion.domain;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -33,12 +35,17 @@ public class CompanionAvailability {
     /** 来源：MANUAL、RECURRENCE */
     private String sourceType;
 
+    /** 生成来源模板ID（0=手动创建） */
+    private Long templateId;
+
     /** 备注 */
     private String remark;
 
     /** 创建时间 */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private LocalDateTime createdAt;
 
     /** 更新时间 */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private LocalDateTime updatedAt;
 }

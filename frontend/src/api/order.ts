@@ -14,6 +14,11 @@ export interface Order {
   serviceTypeNameSnapshot: string
   unitPriceCents: number
   durationMinutes: number
+  originalAmountCents?: number
+  discountAmountCents?: number
+  couponId?: number
+  couponNameSnapshot?: string
+  settlementAmountCents?: number
   totalAmountCents: number
   gameServer: string
   gameNickname: string
@@ -58,6 +63,7 @@ export function createOrder(data: {
   gameNickname?: string
   userRemark?: string
   appointmentStartAt: string
+  couponId?: number
 }): Promise<Order> {
   return request<Order>({ url: '/play-orders', method: 'post', data })
 }

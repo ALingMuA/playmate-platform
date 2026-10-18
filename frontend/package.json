@@ -24,7 +24,11 @@
     "vue-tsc": "^2.2.0"
   },
   "allowScripts": {
-    "esbuild@0.25.12": true,
+    "esbuild@0.25.0": true,
     "vue-demi@0.14.10": true
-  }
+  },
+  "onlyBuiltDependencies": [
+    "esbuild",
+    "vue-demi"
+  ]
 }

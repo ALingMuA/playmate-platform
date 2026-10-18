@@ -152,8 +152,12 @@ onMounted(load)
               {{ fmtTime(row.appointmentStartAt) }} - {{ fmtTime(row.appointmentEndAt) }}（{{ row.durationMinutes }}分钟）
             </div>
             <div v-if="row.closedReason" class="order-meta text-destructive">关闭原因：{{ row.closedReason }}</div>
+          <div class="order-price-wrap" style="text-align: right">
+            <div v-if="row.discountAmountCents && row.discountAmountCents > 0" style="font-size: 0.75rem; color: #ef4444; margin-bottom: 2px">
+              券省 {{ fmtMoney(row.discountAmountCents) }}
+            </div>
+            <div class="order-price">{{ fmtMoney(row.totalAmountCents) }}</div>
           </div>
-          <div class="order-price">{{ fmtMoney(row.totalAmountCents) }}</div>
         </div>
         <div class="order-actions" @click.stop>
           <button v-if="row.orderStatus === 'PENDING_PAYMENT'" class="btn btn-primary btn-sm"

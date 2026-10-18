@@ -50,7 +50,22 @@ public class PlayOrder {
     /** 预约时长，单位分钟 */
     private Integer durationMinutes;
 
-    /** 订单总金额，单位分 */
+    /** 服务原价，单位分 */
+    private Long originalAmountCents;
+
+    /** 优惠抵扣金额，单位分 */
+    private Long discountAmountCents;
+
+    /** 使用的用户优惠券ID */
+    private Long couponId;
+
+    /** 优惠券名称快照 */
+    private String couponNameSnapshot;
+
+    /** 陪玩师结算金额，单位分 */
+    private Long settlementAmountCents;
+
+    /** 实付总金额，单位分 */
     private Long totalAmountCents;
 
     /** 游戏区服 */

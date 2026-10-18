@@ -127,7 +127,7 @@
 | **3. 维护陪玩主页** | `/companion/profile` | 维护展示昵称、个人简介、游戏认证资质（FR-P05）与接单服务状态（FR-P06） |
 | **4. 上架服务项目** | `/companion/services` | 新增/编辑具体服务项目后进入待审状态，过审后方可上架；标签仅展示**所选游戏关联标签 + 平台通用标签** |
 | **5. 服务项目审核** | `/admin/audit` → 服务项目 Tab | 管理员审核通过后陪玩师可自行切换上架状态，上架项目对前台用户公开可见（FR-M07） |
-| **6. 档期与履约交付** | `/companion/schedule`、`/companion/orders`、`/companion/earnings` | 灵活配置可约时间段、接单响应、完成履约确认、查看收益明细（FR-P10~P19） |
+| **6. 档期与履约交付** | `/companion/schedule`、`/companion/orders`、`/companion/earnings` | 单条新增（支持全天与跨天时段）、日期范围批量设置、长期周期模板（按周几+时段循环生成，滚动续期未来 28 天，设置一次长期生效）、接单响应、完成履约确认、查看收益明细（FR-P10~P19） |
 
 > [!NOTE]
 > - `/companion` 分区强制要求具备 `COMPANION` 角色权限，普通用户访问将触发 `meta.roleFallback` 自动兜底重定向至 `/become-companion` 引导入驻页。
@@ -236,6 +236,23 @@ mvn test
 | `GET` | `/api/games/{id}` | 获取指定游戏详情及规格介绍 |
 | `GET` | `/api/service-types` | 获取平台已启用的服务类型（如排位上分、语音连麦等） |
 | `GET` | `/api/tags?gameId=` | 查询可用标签列表（指定游戏时自动附带平台通用标签） |
+
+### 陪玩师档期与作息管理 `/api/companion`（FR-P10 / FR-P11）
+
+提供常规作息模板配置、按日幂等滚动续期（未来 28 天）、单日例外微调与一键撤销恢复全套能力：
+
+| HTTP 方法 | 请求路径 | 接口说明 |
+|:---:|---|---|
+| `GET` | `/api/companion/availabilities/overview` | 获取周日程三态全景（可约/已约/休息）及未来滚动水位 |
+| `POST` | `/api/companion/availabilities` | 新增单日临时可约/加档时段（支持跨天，防录入过去时间） |
+| `DELETE` | `/api/companion/availabilities/{id}` | 删除单日临时档期（已被有效订单锁定则拒绝） |
+| `POST` | `/api/companion/availabilities/toggle-day-off` | 快捷切换全天休息（自动挖空可约，保留订单防护） |
+| `POST` | `/api/companion/availabilities/restore-day` | 单日撤销恢复常规作息（清除手动例外，重建模板实例，订单冲突返回 409） |
+| `GET` | `/api/companion/availability-templates` | 查询陪玩师所有长期作息模板（支持多规则、启停状态） |
+| `POST` | `/api/companion/availability-templates` | 新建作息规则（支持任意星期、全天/跨天时段、生效区间） |
+| `PUT` | `/api/companion/availability-templates/{id}` | 更新作息规则（支持历史模板编辑不报 422、清空截止日期） |
+| `PUT` | `/api/companion/availability-templates/{id}/status` | 暂停或启用单条作息规则 |
+| `DELETE` | `/api/companion/availability-templates/{id}` | 删除作息规则并清理未来未被订单占用的实例 |
 
 ---
 
