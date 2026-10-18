@@ -27,6 +27,13 @@ public class FavoriteController {
 
     private final FavoriteService favoriteService;
 
+    /** 查询当前用户是否收藏指定陪玩师。 */
+    @GetMapping("/{companionUserId}/status")
+    public ApiResponse<Boolean> isFavorited(@PathVariable Long companionUserId,
+                                            Authentication authentication) {
+        return ApiResponse.ok(favoriteService.isFavorited(currentUserId(authentication), companionUserId));
+    }
+
     /** 收藏陪玩师 */
     @PostMapping("/{companionUserId}")
     public ApiResponse<Void> add(@PathVariable Long companionUserId, Authentication authentication) {

@@ -19,9 +19,9 @@ SELECT u.id, r.id FROM `user` u JOIN `role` r ON r.role_code = 'ADMIN' WHERE u.u
 -- 3. 目录基础数据（FR-U01/FR-M10~M12 演示数据，概要设计"首批游戏"：王者荣耀、英雄联盟、和平精英）
 -- 3.1 游戏
 INSERT IGNORE INTO game (game_name, game_icon_url, game_intro, sort_no, enabled) VALUES
-  ('王者荣耀', '', '5v5 公平竞技 MOBA 手游，开黑上分首选', 1, 1),
-  ('英雄联盟', '', '经典端游 MOBA，团队配合与操作细节并重', 2, 1),
-  ('和平精英', '', '百人战术竞技射击手游，吃鸡必备', 3, 1);
+  ('王者荣耀', '/images/games/wzry.jpg', '5v5 公平竞技 MOBA 手游，开黑上分首选', 1, 1),
+  ('英雄联盟', '/images/games/lol.jpg', '经典端游 MOBA，团队配合与操作细节并重', 2, 1),
+  ('和平精英', '/images/games/hpjy.jpg', '百人战术竞技射击手游，吃鸡必备', 3, 1);
 
 -- 3.2 服务类型
 INSERT IGNORE INTO service_type (type_name, type_code, description, sort_no, enabled) VALUES
@@ -70,3 +70,16 @@ INSERT IGNORE INTO ai_knowledge_base (category, title, keywords, standard_answer
   ('取消规则', '申请退款办理说明', '退款说明,退款流程,申请退款,退款要求', '未接单订单可直接在订单页面取消并全额退款。对于已接单或进行中的订单争议，根据平台安全规则，AI 客服不具备直接扣划资金或承诺退款的权限，请在订单详情页点击“发起投诉”提交凭证，或在当前对话中回复“转人工”，由客服与管理员核实后为您办理退款。', 80, 1, 1),
   ('评价投诉', '订单服务评价规则', '评价,评分,打分,好评,差评,写评价,星级', '在订单进入【已完成】状态后，您可以在订单详情页面点击“评价服务”。您可以根据本次陪玩体验给出 1~5 星的评分、勾选印象标签（如“技术流”、“幽默风趣”等）并留下真实评语。评价将直接计入陪玩师的平均评分并展示在主页。', 75, 1, 1),
   ('评价投诉', '遇到违规或纠纷如何投诉', '投诉流程,举报,维权,纠纷,态度差,挂机,未按时,投诉仲裁', '如果在服务过程中遇到陪玩师挂机、迟到缺席、态度恶劣或技术与认证严重不符的情况，请在订单页面点击“发起投诉”。请选择投诉类型、详细描述问题并上传聊天或战绩截图等证据。平台管理员将在后台进行审核与仲裁，并视情节支持全额或部分退款。', 75, 1, 1);
+
+-- 5. 优惠券模板初始种子数据
+INSERT IGNORE INTO coupon_template (id, name, coupon_type, threshold_cents, discount_cents, discount_rate_bp, max_discount_cents, scope_type, scope_id, total_quantity, claimed_quantity, per_user_limit, valid_from, valid_until, publish_status, created_by, published_by, published_at) VALUES
+  (1, '新人专享无门槛20元券', 'FIXED', 0, 2000, 10000, 0, 'ALL', 0, 1000, 0, 1, '2026-01-01 00:00:00', '2027-12-31 23:59:59', 'PUBLISHED', 1, 1, NOW()),
+  (2, '开黑狂欢满100减30券', 'FIXED', 10000, 3000, 10000, 0, 'ALL', 0, 500, 0, 2, '2026-01-01 00:00:00', '2027-12-31 23:59:59', 'PUBLISHED', 1, 1, NOW()),
+  (3, '周末特惠8.5折通用券', 'DISCOUNT', 5000, 0, 8500, 5000, 'ALL', 0, 300, 0, 1, '2026-01-01 00:00:00', '2027-12-31 23:59:59', 'PUBLISHED', 1, 1, NOW());
+
+-- 6. 平台运营活动初始种子数据
+INSERT IGNORE INTO platform_activity (id, title, subtitle, description, bg_gradient, icon, tag, tag_color, action_type, action_route, coupon_template_id, sort_order, status, start_time, end_time, created_by) VALUES
+  (1, '新人专享福利', '首单立减 20 元', '注册即领新人专属无门槛优惠券，首次预约陪玩服务立减20元，大神陪你畅快开黑！', 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', '🎁', '限时活动', '#ff6b6b', 'COUPON_CLAIM', '', 1, 1, 'PUBLISHED', '2026-01-01 00:00:00', '2027-12-31 23:59:59', 1),
+  (2, '周末狂欢满减', '满 100 立减 30 元', '组队开黑立享优惠，多款热门游戏大神在线接单，畅享激情竞技！', 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)', '🏆', '每周活动', '#ffa726', 'COUPON_CLAIM', '', 2, 2, 'PUBLISHED', '2026-01-01 00:00:00', '2027-12-31 23:59:59', 1),
+  (3, '陪玩师招募计划', '入驻即享流量扶持', '平台正在火热招募游戏陪玩师，灵活工作时间，丰厚收入回报，快来加入我们！', 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)', '🌟', '长期有效', '#26c6da', 'PAGE_NAV', '/become-companion', NULL, 3, 'PUBLISHED', '2026-01-01 00:00:00', '2027-12-31 23:59:59', 1),
+  (4, '限时8.5折特惠', '折上折更实惠', '全场优质陪玩服务畅享 8.5 折特惠，最高立省 50 元！', 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)', '💰', '进行中', '#66bb6a', 'COUPON_CLAIM', '', 3, 4, 'PUBLISHED', '2026-01-01 00:00:00', '2027-12-31 23:59:59', 1);

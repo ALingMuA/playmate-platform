@@ -1,229 +1,250 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import dayjs from 'dayjs'
-import {
-  createAvailability,
-  createUnavailable,
-  deleteAvailability,
-  listAvailabilities,
-  type Availability,
-} from '@/api/companion'
+import { computed, onMounted, ref } from 'vue'
+import { useSchedule } from '@/composables/useSchedule'
+import TodayStatusBar from '@/components/schedule/TodayStatusBar.vue'
+import RoutineCard from '@/components/schedule/RoutineCard.vue'
+import WeekBoard from '@/components/schedule/WeekBoard.vue'
+import TemplateManageDrawer from '@/components/schedule/TemplateManageDrawer.vue'
+import TemplateEditorDialog from '@/components/schedule/TemplateEditorDialog.vue'
+import DayExceptionDialog from '@/components/schedule/DayExceptionDialog.vue'
+import type { AvailabilityTemplate, AvailabilityTemplatePayload } from '@/api/companion'
+import type { DaySchedule, VisualSegment } from '@/utils/schedule'
 
-const items = ref<Availability[]>([])
-const loading = ref(false)
-const weekStart = ref(dayjs().startOf('week').add(1, 'day')) // 周一
-const weekDays = computed(() => Array.from({ length: 7 }, (_, i) => weekStart.value.add(i, 'day')))
+const {
+  loading,
+  templatesLoading,
+  saving,
+  templates,
+  serverNow,
+  generatedUntil,
+  weekTitle,
+  daySchedules,
+  canPrev,
+  canNext,
+  isCurrentWeek,
+  refresh,
+  prevWeek,
+  nextWeek,
+  jumpToToday,
+  setDayOff,
+  restoreSingleDay,
+  addSlot,
+  addUnavailable,
+  removeSlot,
+  saveTemplate,
+  toggleTemplate,
+  removeTemplate,
+} = useSchedule()
 
-const dialogVisible = ref(false)
-const mode = ref<'AVAILABLE' | 'UNAVAILABLE'>('AVAILABLE')
-const saving = ref(false)
-const form = reactive({
-  date: '',
-  startTime: '10:00',
-  endTime: '22:00',
-  remark: '',
+// 弹窗与抽屉状态
+const manageDrawerVisible = ref(false)
+const editorDialogVisible = ref(false)
+const exceptionDialogVisible = ref(false)
+const selectedDayDate = ref<string>('')
+const editingTemplate = ref<AvailabilityTemplate | undefined>(undefined)
+
+onMounted(() => {
+  refresh()
 })
 
-async function load() {
-  loading.value = true
-  try {
-    const startAt = weekStart.value.format('YYYY-MM-DD 00:00:00')
-    const endAt = weekStart.value.add(7, 'day').format('YYYY-MM-DD 00:00:00')
-    items.value = await listAvailabilities(startAt, endAt)
-  } finally {
-    loading.value = false
+const serverNowText = computed(() => {
+  return serverNow.value.format('YYYY-MM-DD HH:mm')
+})
+
+const todaySchedule = computed<DaySchedule | undefined>(() => {
+  return daySchedules.value.find((d) => d.isToday)
+})
+
+const selectedDaySchedule = computed<DaySchedule | undefined>(() => {
+  if (!selectedDayDate.value) return undefined
+  return daySchedules.value.find((d) => d.date === selectedDayDate.value)
+})
+
+const hasActiveRoutine = computed(() => {
+  return templates.value.some((t) => t.enabled)
+})
+
+// 抽屉与模板编辑
+function handleOpenManage() {
+  manageDrawerVisible.value = true
+}
+
+function handleCreateRoutine() {
+  editingTemplate.value = undefined
+  editorDialogVisible.value = true
+}
+
+function handleEditTemplate(tpl: AvailabilityTemplate) {
+  editingTemplate.value = tpl
+  editorDialogVisible.value = true
+}
+
+async function handleSubmitTemplate(payload: AvailabilityTemplatePayload, id?: number) {
+  const success = await saveTemplate(payload, id)
+  if (success) {
+    editorDialogVisible.value = false
   }
 }
 
-function openCreate(type: 'AVAILABLE' | 'UNAVAILABLE') {
-  mode.value = type
-  form.date = dayjs().format('YYYY-MM-DD')
-  form.startTime = '10:00'
-  form.endTime = '22:00'
-  form.remark = ''
-  dialogVisible.value = true
+async function handleDeleteTemplate(id: number) {
+  await removeTemplate(id)
 }
 
-async function handleCreate() {
-  if (!form.date || !form.startTime || !form.endTime) {
-    ElMessage.warning('请选择日期与时间范围')
-    return
-  }
-  if (form.startTime >= form.endTime) {
-    ElMessage.warning('结束时间必须晚于开始时间')
-    return
-  }
-  const payload = {
-    startAt: dayjs(form.date + ' ' + form.startTime + ':00').format('YYYY-MM-DD HH:mm:ss'),
-    endAt: dayjs(form.date + ' ' + form.endTime + ':00').format('YYYY-MM-DD HH:mm:ss'),
-    remark: form.remark || undefined,
-  }
-  saving.value = true
-  try {
-    if (mode.value === 'AVAILABLE') {
-      await createAvailability(payload)
-      ElMessage.success('可约时段已添加')
-    } else {
-      await createUnavailable(payload)
-      ElMessage.success('临时不可约时段已设置')
-    }
-    dialogVisible.value = false
-    await load()
-  } finally {
-    saving.value = false
+// 单日微调弹窗
+function handleEditDay(dateStr: string) {
+  selectedDayDate.value = dateStr
+  exceptionDialogVisible.value = true
+}
+
+function handleSegmentClick(seg: VisualSegment) {
+  // 点击片段提取日期并打开对应日期调整弹窗
+  const dateStr = seg.id.split('_')[0]
+  if (dateStr) {
+    handleEditDay(dateStr)
   }
 }
 
-async function handleDelete(item: Availability) {
-  await ElMessageBox.confirm('确定删除该档期记录？', '删除确认', { type: 'warning' })
-  await deleteAvailability(item.id)
-  ElMessage.success('已删除')
-  await load()
+async function handleToggleDayOff(dateStr: string, isOff: boolean) {
+  await setDayOff(dateStr, isOff)
 }
 
-function itemsOf(day: dayjs.Dayjs): Availability[] {
-  const dayStr = day.format('YYYY-MM-DD')
-  return items.value.filter((i) => i.startAt.startsWith(dayStr))
+async function handleRestoreDay(dateStr: string) {
+  await restoreSingleDay(dateStr)
 }
 
-function fmt(time: string): string {
-  return time.length >= 16 ? time.slice(11, 16) : time
+async function handleAddAvailable(startAt: string, endAt: string, remark?: string) {
+  await addSlot(startAt, endAt, remark)
 }
 
-function prevWeek() {
-  weekStart.value = weekStart.value.subtract(7, 'day')
-  load()
-}
-function nextWeek() {
-  weekStart.value = weekStart.value.add(7, 'day')
-  load()
-}
-function thisWeek() {
-  weekStart.value = dayjs().startOf('week').add(1, 'day')
-  load()
+async function handleAddUnavailable(startAt: string, endAt: string, remark?: string) {
+  await addUnavailable(startAt, endAt, remark)
 }
 
-onMounted(load)
+async function handleDeleteSlot(id: number) {
+  await removeSlot(id)
+}
 </script>
 
 <template>
   <div class="schedule-view">
-    <div class="toolbar">
-      <el-button type="primary" @click="openCreate('AVAILABLE')">新增可约时段</el-button>
-      <el-button type="warning" @click="openCreate('UNAVAILABLE')">设置临时不可约</el-button>
-      <div class="week-nav">
-        <el-button text @click="prevWeek">‹ 上一周</el-button>
-        <el-button text @click="thisWeek">本周</el-button>
-        <el-button text @click="nextWeek">下一周 ›</el-button>
-        <span class="week-range">
-          {{ weekStart.format('YYYY-MM-DD') }} ~ {{ weekStart.add(6, 'day').format('YYYY-MM-DD') }}
-        </span>
+    <div class="page-header">
+      <div class="header-titles">
+        <h2 class="title">接单时间设置</h2>
+        <p class="subtitle">
+          配置常规接单作息后，系统将自动每日滚动补齐未来 28 天接单时间。若临时有变动，直接在看板对应日期微调或请假即可。
+        </p>
+      </div>
+      <div class="header-actions">
+        <el-button :loading="loading || templatesLoading" @click="refresh">
+          刷新日程
+        </el-button>
       </div>
     </div>
 
-    <div v-loading="loading" class="week-scroll">
-      <div class="week-grid">
-        <el-card
-          v-for="day in weekDays"
-          :key="day.format('YYYY-MM-DD')"
-          shadow="hover"
-          class="day-card"
-          :class="{ today: day.isSame(dayjs(), 'day') }"
-        >
-          <template #header>
-            <div class="day-header">
-              <b>{{ ['日', '一', '二', '三', '四', '五', '六'][day.day()] }}</b>
-              <span>{{ day.format('MM-DD') }}</span>
-            </div>
-          </template>
-          <div class="slot-list">
-            <div v-for="item in itemsOf(day)" :key="item.id" class="slot-item">
-              <el-tag size="small" :type="item.availabilityStatus === 'AVAILABLE' ? 'success' : 'danger'">
-                {{ item.availabilityStatus === 'AVAILABLE' ? '可约' : '不可约' }}
-              </el-tag>
-              <span class="slot-time">{{ fmt(item.startAt) }} - {{ fmt(item.endAt) }}</span>
-              <el-button size="small" text type="danger" @click="handleDelete(item)">删</el-button>
-              <div v-if="item.remark" class="slot-remark">{{ item.remark }}</div>
-            </div>
-            <el-empty v-if="itemsOf(day).length === 0" description="无档期" :image-size="40" />
-          </div>
-        </el-card>
-      </div>
+    <!-- 1. 今日状态快捷条 -->
+    <TodayStatusBar
+      :today-schedule="todaySchedule"
+      :server-now-text="serverNowText"
+      :has-active-routine="hasActiveRoutine"
+      :saving="saving"
+      @toggle-today-rest="handleToggleDayOff(todaySchedule?.date || '', $event)"
+      @restore-today="handleRestoreDay(todaySchedule?.date || '')"
+    />
+
+    <!-- 2. 常规作息卡片 -->
+    <RoutineCard
+      :templates="templates"
+      :loading="templatesLoading || saving"
+      @open-manage="handleOpenManage"
+      @create-routine="handleCreateRoutine"
+      @edit-template="handleEditTemplate"
+      @delete-template="handleDeleteTemplate"
+      @toggle-status="toggleTemplate"
+    />
+
+    <!-- 3. 周日程 7 天全景看板 -->
+    <div v-loading="loading">
+      <WeekBoard
+        :week-title="weekTitle"
+        :day-schedules="daySchedules"
+        :can-prev="canPrev"
+        :can-next="canNext"
+        :is-current-week="isCurrentWeek"
+        :has-active-routine="hasActiveRoutine"
+        :generated-until="generatedUntil"
+        @prev-week="prevWeek"
+        @next-week="nextWeek"
+        @jump-today="jumpToToday"
+        @toggle-off="handleToggleDayOff"
+        @edit-day="handleEditDay"
+        @restore-day="handleRestoreDay"
+        @segment-click="handleSegmentClick"
+      />
     </div>
 
-    <el-dialog v-model="dialogVisible" :title="mode === 'AVAILABLE' ? '新增可约时段' : '设置临时不可约'" width="440px">
-      <el-form :model="form" label-width="90px">
-        <el-form-item label="日期" required>
-          <el-date-picker v-model="form.date" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="开始时间" required>
-          <el-time-picker v-model="form.startTime" value-format="HH:mm" placeholder="开始时间" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="结束时间" required>
-          <el-time-picker v-model="form.endTime" value-format="HH:mm" placeholder="结束时间" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="form.remark" maxlength="200" placeholder="选填，如：晚上有课" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="handleCreate">确定</el-button>
-      </template>
-    </el-dialog>
+    <!-- 4. 常规作息管理抽屉 -->
+    <TemplateManageDrawer
+      v-model="manageDrawerVisible"
+      :templates="templates"
+      :loading="saving || templatesLoading"
+      @edit-template="handleEditTemplate"
+      @create-template="handleCreateRoutine"
+      @toggle-status="toggleTemplate"
+      @delete-template="handleDeleteTemplate"
+    />
+
+    <!-- 5. 常规作息规则编辑弹窗 -->
+    <TemplateEditorDialog
+      v-model="editorDialogVisible"
+      :template="editingTemplate"
+      :saving="saving"
+      @submit="handleSubmitTemplate"
+    />
+
+    <!-- 6. 单日微调/加档/请假弹窗 -->
+    <DayExceptionDialog
+      v-model="exceptionDialogVisible"
+      :day-schedule="selectedDaySchedule"
+      :saving="saving"
+      @toggle-day-off="handleToggleDayOff"
+      @restore-day="handleRestoreDay"
+      @add-available="handleAddAvailable"
+      @add-unavailable="handleAddUnavailable"
+      @delete-slot="handleDeleteSlot"
+    />
   </div>
 </template>
 
 <style scoped>
-.toolbar {
+.schedule-view {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.page-header {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-.week-nav {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.week-range {
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-/* 周视图：桌面 7 列等宽，小屏横向滚动（每列固定最小宽度保证可读） */
-.week-scroll {
-  overflow-x: auto;
-  min-height: 200px;
-  padding-bottom: 4px;
-}
-.week-grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(140px, 1fr));
-  gap: 12px;
-}
-.day-card.today {
-  border-color: var(--brand-primary);
-  box-shadow: 0 0 0 1px var(--brand-primary);
-}
-.day-header {
-  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
+  margin-bottom: 20px;
+  gap: 16px;
 }
-.slot-list {
-  min-height: 120px;
+
+.header-titles .title {
+  margin: 0 0 6px 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
 }
-.slot-item {
-  margin-bottom: 8px;
+
+.header-titles .subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
 }
-.slot-time {
-  font-size: 12px;
-  margin-left: 4px;
-}
-.slot-remark {
-  font-size: 12px;
-  color: #909399;
+
+.header-actions {
+  flex-shrink: 0;
 }
 </style>

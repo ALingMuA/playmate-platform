@@ -26,6 +26,11 @@ public class OrderView {
     private String serviceTypeNameSnapshot;
     private Long unitPriceCents;
     private Integer durationMinutes;
+    private Long originalAmountCents;
+    private Long discountAmountCents;
+    private Long couponId;
+    private String couponNameSnapshot;
+    private Long settlementAmountCents;
     private Long totalAmountCents;
     private String gameServer;
     private String gameNickname;

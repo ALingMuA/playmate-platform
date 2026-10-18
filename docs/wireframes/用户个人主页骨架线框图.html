@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>用户个人主页统一骨架线框图 - 游戏陪玩系统</title>
+<style>
+:root {
+  --color-background-primary: #ffffff;
+  --color-background-secondary: #f5f5f2;
+  --color-background-tertiary: #eff0ea;
+  --color-background-info: #e6f1fb;
+  --color-background-success: #eaf3de;
+  --color-text-primary: #1f1e1b;
+  --color-text-secondary: #69685f;
+  --color-text-tertiary: #92917f;
+  --color-text-info: #0c447c;
+  --color-text-success: #27500a;
+  --color-border-tertiary: rgba(31, 30, 27, 0.15);
+  --color-border-secondary: rgba(31, 30, 27, 0.3);
+  --color-border-info: rgba(55, 138, 221, 0.4);
+  --color-border-success: rgba(99, 153, 34, 0.45);
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 32px 20px 48px;
+  background: var(--color-background-tertiary);
+  font-family: var(--font-sans);
+  color: var(--color-text-primary);
+  line-height: 1.6;
+}
+.page { max-width: 680px; margin: 0 auto; }
+.doc-header { margin: 0 0 20px; }
+.doc-header h1 { font-size: 18px; font-weight: 600; margin: 0 0 6px; }
+.doc-header p { font-size: 12px; color: var(--color-text-secondary); margin: 0; }
+@media print {
+  body { background: #ffffff; padding: 0; }
+}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.wf{font-family:var(--font-sans);max-width:640px;margin:0 auto;border:0.5px solid var(--color-border-tertiary);border-radius:12px;background:var(--color-background-primary);overflow:hidden}
+.lbl{font-size:11px;color:var(--color-text-tertiary)}
+.chip{font-size:11px;padding:1px 8px;border-radius:99px;border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);background:var(--color-background-primary)}
+.bar{height:7px;border-radius:4px;background:var(--color-background-tertiary)}
+.tab{padding:4px 10px;border-radius:6px;font-size:12px;color:var(--color-text-secondary)}
+.tab.on{background:var(--color-background-info);color:var(--color-text-info);font-weight:500}
+.m{background:var(--color-background-secondary);border-radius:8px;padding:10px 12px}
+.mv{font-size:15px;font-weight:500;margin-top:2px}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="doc-header">
+    <h1>用户个人主页统一骨架线框图</h1>
+    <p>配套《用户主页与陪玩主页优化设计方案》第 4 节 · 路由 /profile（本人视角）· 2026-10-18</p>
+  </header>
+  <h2 class="sr-only">用户个人主页骨架线框图：Hero 身份区叠加陪玩身份卡，七个内容 Tab 与概览双栏布局</h2>
+  <div class="wf">
+    <div style="background:var(--color-background-info);padding:16px 20px 12px">
+      <div style="display:flex;gap:14px;align-items:center">
+        <div style="width:52px;height:52px;border-radius:50%;background:var(--color-background-primary);display:flex;align-items:center;justify-content:center;font-weight:500;font-size:16px;color:var(--color-text-info);flex:none">杨</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span style="font-weight:500;font-size:15px">杨翌豪</span>
+            <span class="chip">陪玩师</span>
+            <span class="chip" style="color:var(--color-text-success);border-color:var(--color-border-success)">账号正常</span>
+          </div>
+          <div class="bar" style="width:190px;margin-top:8px"></div>
+          <div class="bar" style="width:130px;margin-top:6px"></div>
+        </div>
+        <div style="display:flex;gap:6px;flex:none">
+          <span class="chip">编辑资料</span>
+          <span class="chip">账号安全</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <div class="m" style="flex:1"><div class="lbl">已完成订单</div><div class="mv">12</div></div>
+        <div class="m" style="flex:1"><div class="lbl">我的评价</div><div class="mv">8</div></div>
+        <div class="m" style="flex:1"><div class="lbl">收藏陪玩师</div><div class="mv">5</div></div>
+        <div class="m" style="flex:1"><div class="lbl">注册天数</div><div class="mv">320</div></div>
+      </div>
+      <div style="margin-top:8px;display:flex;align-items:center;gap:8px;background:var(--color-background-primary);border-radius:8px;padding:7px 12px">
+        <span style="width:8px;height:8px;border-radius:50%;background:var(--color-text-success);flex:none"></span>
+        <span style="font-weight:500;font-size:12px">陪玩身份卡（陪玩师叠加）</span>
+        <span class="lbl">展示名「小虎」· 评分 4.9 · 完成 356 单</span>
+        <span class="chip" style="margin-left:auto">预览公开主页</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:4px;padding:8px 20px;border-bottom:0.5px solid var(--color-border-tertiary);align-items:center;flex-wrap:wrap">
+      <span class="tab on">概览</span><span class="tab">订单</span><span class="tab">评价</span><span class="tab">收藏</span><span class="tab">钱包</span><span class="tab">设置</span><span class="tab" style="color:var(--color-text-info)">我的陪玩主页</span>
+      <span class="lbl" style="margin-left:auto">Tab 懒加载 · URL hash 同步 · 滚动吸顶</span>
+    </div>
+    <div style="display:flex;gap:10px;padding:12px 20px 16px">
+      <div style="flex:1.6;display:flex;flex-direction:column;gap:10px;min-width:0">
+        <div class="m">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:500">陪玩成长卡（五态进度）</span><span class="chip" style="color:var(--color-text-success);border-color:var(--color-border-success)">满格</span></div>
+          <div style="display:flex;gap:3px;margin-top:8px">
+            <span style="flex:1;height:14px;border-radius:3px;background:#B5D4F4"></span>
+            <span style="flex:1;height:14px;border-radius:3px;background:#B5D4F4"></span>
+            <span style="flex:1;height:14px;border-radius:3px;background:#B5D4F4"></span>
+            <span style="flex:1;height:14px;border-radius:3px;background:#B5D4F4"></span>
+            <span style="flex:1;height:14px;border-radius:3px;background:#378ADD"></span>
+          </div>
+          <div class="lbl" style="margin-top:5px">提交申请 → 平台审核 → 维护主页 → 上架服务 → 开始接单</div>
+        </div>
+        <div class="m">
+          <div style="font-weight:500">近期订单时间线（最近 5 条）</div>
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;gap:8px;align-items:center"><span style="width:7px;height:7px;border-radius:50%;background:#378ADD;flex:none"></span><span class="bar" style="flex:1"></span><span class="chip">已完成</span></div>
+            <div style="display:flex;gap:8px;align-items:center"><span style="width:7px;height:7px;border-radius:50%;background:#EF9F27;flex:none"></span><span class="bar" style="flex:1"></span><span class="chip">进行中</span></div>
+            <div style="display:flex;gap:8px;align-items:center"><span style="width:7px;height:7px;border-radius:50%;background:#B4B2A9;flex:none"></span><span class="bar" style="flex:1"></span><span class="chip">待评价</span></div>
+          </div>
+        </div>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;gap:10px;min-width:0">
+        <div class="m">
+          <div style="font-weight:500">钱包概览</div>
+          <div style="display:flex;gap:6px;margin-top:8px">
+            <div style="flex:1;background:var(--color-background-primary);border-radius:6px;padding:6px"><div class="lbl">余额</div><div style="font-size:13px;font-weight:500">¥128.50</div></div>
+            <div style="flex:1;background:var(--color-background-primary);border-radius:6px;padding:6px"><div class="lbl">累计收入</div><div style="font-size:13px;font-weight:500">¥2,360</div></div>
+          </div>
+        </div>
+        <div class="m">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:500">收藏的陪玩师</span><span class="lbl">查看全部</span></div>
+          <div style="display:flex;gap:6px;margin-top:8px;align-items:center">
+            <div style="width:46px;background:var(--color-background-primary);border-radius:6px;padding:6px 4px;text-align:center"><div style="width:22px;height:22px;border-radius:50%;background:#B5D4F4;margin:0 auto"></div><div class="lbl" style="margin-top:3px">小虎</div></div>
+            <div style="width:46px;background:var(--color-background-primary);border-radius:6px;padding:6px 4px;text-align:center"><div style="width:22px;height:22px;border-radius:50%;background:#AFA9EC;margin:0 auto"></div><div class="lbl" style="margin-top:3px">阿豪</div></div>
+            <span class="lbl">→ 横滑</span>
+          </div>
+        </div>
+        <div class="m">
+          <div style="font-weight:500">资料完整度引导</div>
+          <div class="lbl" style="margin-top:6px">头像 · 简介 · 手机 · 邮箱，缺失项一键补全</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -55,11 +55,13 @@ public class SecurityConfig {
                         // 目录与公开浏览接口：游戏、服务类型、标签、可预约服务（游客可浏览，概要设计 8.x 分组）
                         .requestMatchers("/api/games/**", "/api/service-types/**", "/api/tags/**",
                                 "/api/companion-services/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/companion-profiles/**").permitAll()
                         // 评价展示与文件读取公开（URL 含 UUID 不可枚举；上传仍需登录）
                         .requestMatchers("/api/reviews/companion/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/files/**").permitAll()
                         // 公告查看公开（仅已发布，FR-A08）
                         .requestMatchers(HttpMethod.GET, "/api/announcements/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/activities/**").permitAll()
                         // WebSocket 客服端点：握手拦截器自行完成 JWT 鉴权（详细设计 7.3）
                         .requestMatchers("/ws/cs").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()

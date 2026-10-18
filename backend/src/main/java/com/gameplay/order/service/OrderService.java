@@ -30,6 +30,7 @@ import com.gameplay.order.mapper.OrderStatusHistoryMapper;
 import com.gameplay.order.mapper.OrderTimeSlotMapper;
 import com.gameplay.order.mapper.PlayOrderMapper;
 import com.gameplay.wallet.service.WalletService;
+import com.gameplay.coupon.service.CouponService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -66,6 +69,7 @@ public class OrderService {
     private final CompanionAvailabilityMapper availabilityMapper;
     private final UserMapper userMapper;
     private final WalletService walletService;
+    private final CouponService couponService;
 
     // ==================== 用户端 ====================
 
@@ -114,10 +118,23 @@ public class OrderService {
         checkAvailabilityAndSlotConflict(req.getCompanionUserId(), startAt, endAt);
 
         // 6. 金额计算（按分钟比例计费，向上取整到分）
-        long totalAmount = service.getPriceCents() * req.getDurationMinutes() / 60L;
+        long originalAmount = service.getPriceCents() * req.getDurationMinutes() / 60L;
         if (service.getPriceCents() * req.getDurationMinutes() % 60L != 0) {
-            totalAmount += 1;
+            originalAmount += 1;
         }
+
+        // 优惠券核算
+        long discountAmount = 0L;
+        String couponNameSnapshot = "";
+        Long couponId = null;
+        if (req.getCouponId() != null && req.getCouponId() > 0) {
+            var preview = couponService.preview(userId, service.getId(), req.getDurationMinutes(), req.getCouponId());
+            discountAmount = preview.getDiscountAmountCents() == null ? 0L : preview.getDiscountAmountCents();
+            couponNameSnapshot = preview.getCouponName() == null ? "" : preview.getCouponName();
+            couponId = req.getCouponId();
+        }
+        long totalAmount = Math.max(0, originalAmount - discountAmount);
+        long settlementAmount = originalAmount; // 平台承担补贴，陪玩师结算等于原价
 
         // 7. 落库
         PlayOrder order = new PlayOrder();
@@ -131,6 +148,11 @@ public class OrderService {
         order.setCompanionNameSnapshot(profile.getDisplayName());
         order.setUnitPriceCents(service.getPriceCents());
         order.setDurationMinutes(req.getDurationMinutes());
+        order.setOriginalAmountCents(originalAmount);
+        order.setDiscountAmountCents(discountAmount);
+        order.setCouponId(couponId);
+        order.setCouponNameSnapshot(couponNameSnapshot);
+        order.setSettlementAmountCents(settlementAmount);
         order.setTotalAmountCents(totalAmount);
         order.setGameServer(req.getGameServer() == null ? "" : req.getGameServer());
         order.setGameNickname(req.getGameNickname() == null ? "" : req.getGameNickname());
@@ -142,6 +164,11 @@ public class OrderService {
         order.setClosedReason("");
         order.setVersion(0);
         orderMapper.insert(order);
+
+        // 锁定使用的优惠券
+        if (couponId != null && couponId > 0) {
+            couponService.lockForOrder(userId, couponId, order.getId(), originalAmount, service);
+        }
 
         // 临时档期占用（支付后转有效）
         OrderTimeSlot slot = new OrderTimeSlot();
@@ -175,6 +202,7 @@ public class OrderService {
             throw new BusinessException(ErrorCode.ORDER_PAYMENT_EXPIRED);
         }
         walletService.pay(order, userId);
+        couponService.useForOrder(order.getId());
         transition(order, OrderStatus.WAITING_ACCEPTANCE, userId, "USER", "PAY", "模拟支付成功");
         order.setAcceptExpireAt(LocalDateTime.now().plusMinutes(ACCEPT_EXPIRE_MINUTES));
         orderMapper.updateById(order);
@@ -290,6 +318,8 @@ public class OrderService {
         String reasonText = reason == null || reason.isBlank() ? "用户取消订单" : reason;
         if (paid) {
             walletService.refund(order, reasonText, userId);
+        } else {
+            couponService.releaseFromOrder(order.getId());
         }
         transition(order, OrderStatus.CLOSED, userId, "USER", "CANCEL", reasonText);
         order.setClosedReason(reasonText);
@@ -346,6 +376,7 @@ public class OrderService {
         if (order == null || !OrderStatus.PENDING_PAYMENT.name().equals(order.getOrderStatus())) {
             return;
         }
+        couponService.releaseFromOrder(order.getId());
         transition(order, OrderStatus.CLOSED, 0L, "SYSTEM", "CLOSE_EXPIRED_PAYMENT", "支付超时自动关闭");
         order.setClosedReason("支付超时自动关闭");
         orderMapper.updateById(order);
@@ -472,7 +503,10 @@ public class OrderService {
         return order;
     }
 
-    /** 档期校验：可约档期须完全覆盖预约区间；存在临时/有效订单占用则冲突（详细设计 7.1） */
+    /**
+     * 档期校验：可约档期合并后须完全覆盖预约区间（支持相邻多条拼接，
+     * 连续全天/周期生成档期可跨边界预约）；存在临时/有效订单占用则冲突（详细设计 7.1）。
+     */
     private void checkAvailabilityAndSlotConflict(Long companionUserId,
                                                   LocalDateTime startAt, LocalDateTime endAt) {
         List<CompanionAvailability> overlap = availabilityMapper.selectList(
@@ -480,16 +514,14 @@ public class OrderService {
                         .eq(CompanionAvailability::getCompanionUserId, companionUserId)
                         .lt(CompanionAvailability::getStartAt, endAt)
                         .gt(CompanionAvailability::getEndAt, startAt));
-        boolean covered = false;
+        List<LocalDateTime[]> availableRanges = new ArrayList<>();
         for (CompanionAvailability availability : overlap) {
             if (AvailabilityStatus.UNAVAILABLE.name().equals(availability.getAvailabilityStatus())) {
                 throw new BusinessException(ErrorCode.SLOT_CONFLICT, "预约时段与不可约时段重叠");
             }
-            if (!availability.getStartAt().isAfter(startAt) && !availability.getEndAt().isBefore(endAt)) {
-                covered = true;
-            }
+            availableRanges.add(new LocalDateTime[]{availability.getStartAt(), availability.getEndAt()});
         }
-        if (!covered) {
+        if (!coversByMergedRanges(availableRanges, startAt, endAt)) {
             throw new BusinessException(ErrorCode.SERVICE_NOT_AVAILABLE,
                     "预约时段不在陪玩师可约档期内");
         }
@@ -498,6 +530,28 @@ public class OrderService {
         if (!orderConflicts.isEmpty()) {
             throw new BusinessException(ErrorCode.SLOT_CONFLICT, "预约时段已被其他订单占用");
         }
+    }
+
+    /** 区间并集覆盖判定：排序合并重叠/相接的可约区间后，判断 [startAt, endAt] 是否被完全覆盖 */
+    private boolean coversByMergedRanges(List<LocalDateTime[]> ranges,
+                                         LocalDateTime startAt, LocalDateTime endAt) {
+        if (ranges.isEmpty()) {
+            return false;
+        }
+        ranges.sort(Comparator.comparing(r -> r[0]));
+        LocalDateTime cursor = startAt;
+        for (LocalDateTime[] range : ranges) {
+            if (range[0].isAfter(cursor)) {
+                return false;
+            }
+            if (range[1].isAfter(cursor)) {
+                cursor = range[1];
+            }
+            if (!cursor.isBefore(endAt)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String generateOrderNo() {
@@ -562,6 +616,11 @@ public class OrderService {
                 .serviceTypeNameSnapshot(order.getServiceTypeNameSnapshot())
                 .unitPriceCents(order.getUnitPriceCents())
                 .durationMinutes(order.getDurationMinutes())
+                .originalAmountCents(order.getOriginalAmountCents())
+                .discountAmountCents(order.getDiscountAmountCents())
+                .couponId(order.getCouponId())
+                .couponNameSnapshot(order.getCouponNameSnapshot())
+                .settlementAmountCents(order.getSettlementAmountCents())
                 .totalAmountCents(order.getTotalAmountCents())
                 .gameServer(order.getGameServer())
                 .gameNickname(order.getGameNickname())

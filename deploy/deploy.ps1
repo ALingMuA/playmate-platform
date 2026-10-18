@@ -57,6 +57,11 @@ New-Item -ItemType Directory -Path $staging -Force | Out-Null
 Copy-Item $jar (Join-Path $staging 'gameplay-backend.jar') -Force
 Copy-Item (Join-Path $repo 'sql\schema.sql') $staging -Force
 Copy-Item (Join-Path $repo 'sql\data.sql') $staging -Force
+if (Test-Path (Join-Path $repo 'sql\migrations')) {
+  $stagingMigrations = Join-Path $staging 'migrations'
+  if (Test-Path $stagingMigrations) { Remove-Item $stagingMigrations -Recurse -Force }
+  Copy-Item (Join-Path $repo 'sql\migrations') $stagingMigrations -Recurse -Force
+}
 foreach ($f in 'gameplay.service', 'application-prod.yml', 'nginx-gamemate.conf') {
   Copy-Item (Join-Path $PSScriptRoot $f) $staging -Force
 }
@@ -71,10 +76,16 @@ if ($LASTEXITCODE -ne 0) { throw 'tar 打包失败' }
 
 Step "上传到 $target 的 $remote"
 & ssh @sshOpts $target "rm -rf $remote && mkdir -p $remote"
-$files = Get-ChildItem $staging -File
-foreach ($f in $files) { Write-Host "    $($f.Name) ($([math]::Round($f.Length/1KB)) KB)" }
+$items = Get-ChildItem $staging
+foreach ($item in $items) {
+  if ($item.PSIsContainer) {
+    Write-Host "    $($item.Name)/ (目录)"
+  } else {
+    Write-Host "    $($item.Name) ($([math]::Round($item.Length/1KB)) KB)"
+  }
+}
 # 注意：必须写成 ${target}，否则 PowerShell 会把 "$target:" 当成作用域变量引用而报错
-$scpArgs = @($sshOpts + @('-q') + ($files | ForEach-Object { $_.FullName }) + @("${target}:$remote/"))
+$scpArgs = @($sshOpts + @('-r', '-q') + ($items | ForEach-Object { $_.FullName }) + @("${target}:$remote/"))
 & scp @scpArgs
 if ($LASTEXITCODE -ne 0) { throw 'scp 上传失败' }
 

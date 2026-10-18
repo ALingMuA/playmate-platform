@@ -87,9 +87,17 @@ onMounted(async () => {
                   <template v-if="order.gameServer"> · {{ order.gameServer }}</template>
                 </div>
                 <div class="order-meta">订单号：{{ order.orderNo }}</div>
+                <div v-if="order.discountAmountCents && order.discountAmountCents > 0" class="order-meta" style="color: #ef4444">
+                  优惠券：{{ order.couponNameSnapshot || '平台优惠券' }}（-{{ fmtMoney(order.discountAmountCents) }}）
+                </div>
               </div>
-              <div class="order-price" style="font-size: 1.5rem; color: var(--destructive)">
-                {{ fmtMoney(order.totalAmountCents) }}
+              <div class="order-price-wrap" style="text-align: right">
+                <div v-if="order.discountAmountCents && order.discountAmountCents > 0" style="font-size: 0.875rem; text-decoration: line-through; color: var(--muted-foreground)">
+                  原价 {{ fmtMoney(order.originalAmountCents || order.totalAmountCents) }}
+                </div>
+                <div class="order-price" style="font-size: 1.5rem; color: var(--destructive)">
+                  {{ fmtMoney(order.totalAmountCents) }}
+                </div>
               </div>
             </div>
           </div>

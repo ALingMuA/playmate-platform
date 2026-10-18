@@ -12,6 +12,8 @@ const menus = [
   { path: '/admin/reviews', label: '评价管理' },
   { path: '/admin/complaints', label: '投诉管理' },
   { path: '/admin/announcements', label: '公告管理' },
+  { path: '/admin/activities', label: '活动管理' },
+  { path: '/admin/coupons', label: '优惠券管理' },
   { path: '/admin/ai-knowledge', label: 'AI 知识库' },
   { path: '/admin/ai-settings', label: 'AI 接口配置' },
   { path: '/admin/cs-accounts', label: '客服账号' },

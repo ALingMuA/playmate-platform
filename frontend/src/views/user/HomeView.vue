@@ -8,86 +8,61 @@ import { onMounted, onUnmounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { publicAnnouncements, type AnnouncementView } from '@/api/admin'
 import { listBookableServices, type BookableService } from '@/api/order'
+import { publicActivities, type ActivityView } from '@/api/activity'
 
 const router = useRouter()
 
 /** 平台公告（仅已发布，FR-A08） */
 const announcements = ref<AnnouncementView[]>([])
-const expanded = ref<Record<number, boolean>>({})
 
 /** 推荐可预约服务 */
 const recommended = ref<BookableService[]>([])
 
 /** 活动展示数据 */
-interface ActivityItem {
-  id: number
-  title: string
-  subtitle: string
-  description: string
-  bgGradient: string
-  icon: string
-  tag: string
-  tagColor: string
-  actionText: string
-  actionRoute: string
-}
-
-const activities: ActivityItem[] = [
+const defaultActivities: ActivityView[] = [
   {
     id: 1,
     title: '新人专享福利',
-    subtitle: '首单立减 50%',
-    description: '注册即送新人优惠券，首次预约陪玩服务享半价优惠，大神陪你畅快开黑！',
+    subtitle: '首单立减优惠券免费领',
+    description: '注册即送新人优惠券，首次预约陪玩服务享专属优惠，大神陪你畅快开黑！',
+    bannerImage: '',
     bgGradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
     icon: '🎁',
     tag: '限时活动',
     tagColor: '#ff6b6b',
-    actionText: '立即领取',
+    actionType: 'COMPANION_LIST',
     actionRoute: '/companions',
+    sortOrder: 1,
+    status: 'PUBLISHED',
+    createdBy: 1,
+    createdAt: '',
   },
   {
     id: 2,
     title: '周末狂欢赛',
     subtitle: '组队开黑赢大奖',
     description: '每周六日参与组队活动，完成指定游戏任务即可赢取积分奖励和限定称号！',
+    bannerImage: '',
     bgGradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
     icon: '🏆',
     tag: '每周活动',
     tagColor: '#ffa726',
-    actionText: '查看详情',
-    actionRoute: '/games',
-  },
-  {
-    id: 3,
-    title: '陪玩师招募计划',
-    subtitle: '月入过万不是梦',
-    description: '平台正在火热招募游戏陪玩师，灵活工作时间，丰厚收入回报，快来加入我们！',
-    bgGradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
-    icon: '🌟',
-    tag: '长期有效',
-    tagColor: '#26c6da',
-    actionText: '立即申请',
-    actionRoute: '/companion/apply',
-  },
-  {
-    id: 4,
-    title: '好评返现活动',
-    subtitle: '评价有礼 最高返 20 元',
-    description: '完成订单后发表真实评价，即可获得现金红包奖励，评价越详细奖励越多！',
-    bgGradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
-    icon: '💰',
-    tag: '进行中',
-    tagColor: '#66bb6a',
-    actionText: '了解更多',
-    actionRoute: '/orders',
+    actionType: 'PAGE_NAV',
+    actionRoute: '/activities',
+    sortOrder: 2,
+    status: 'PUBLISHED',
+    createdBy: 1,
+    createdAt: '',
   },
 ]
+
+const activities = ref<ActivityView[]>(defaultActivities)
 
 /** 轮播控制 */
 const currentSlide = ref(0)
 let autoPlayTimer: ReturnType<typeof setInterval> | null = null
 
-const totalSlides = computed(() => activities.length)
+const totalSlides = computed(() => activities.value.length || 1)
 
 function goToSlide(index: number) {
   currentSlide.value = index
@@ -95,11 +70,15 @@ function goToSlide(index: number) {
 }
 
 function nextSlide() {
-  currentSlide.value = (currentSlide.value + 1) % totalSlides.value
+  if (totalSlides.value > 0) {
+    currentSlide.value = (currentSlide.value + 1) % totalSlides.value
+  }
 }
 
 function prevSlide() {
-  currentSlide.value = (currentSlide.value - 1 + totalSlides.value) % totalSlides.value
+  if (totalSlides.value > 0) {
+    currentSlide.value = (currentSlide.value - 1 + totalSlides.value) % totalSlides.value
+  }
   resetAutoPlay()
 }
 
@@ -114,6 +93,22 @@ function resetAutoPlay() {
   startAutoPlay()
 }
 
+function handleSlideAction(item: ActivityView) {
+  if (item.actionRoute) {
+    if (item.actionRoute.startsWith('http')) {
+      window.open(item.actionRoute, '_blank')
+    } else {
+      router.push(item.actionRoute)
+    }
+    return
+  }
+  if (item.actionType === 'COMPANION_LIST') {
+    router.push('/companions')
+    return
+  }
+  router.push(`/activities/${item.id}`)
+}
+
 function fmtTime(t?: string): string {
   if (!t) return ''
   return t.length >= 16 ? t.slice(0, 16) : t
@@ -125,6 +120,14 @@ function fmtPrice(cents: number): string {
 
 onMounted(async () => {
   startAutoPlay()
+  try {
+    const actList = await publicActivities()
+    if (actList && actList.length > 0) {
+      activities.value = actList
+    }
+  } catch {
+    // 降级使用默认活动
+  }
   try {
     const result = await publicAnnouncements(1, 5)
     announcements.value = result.records
@@ -157,7 +160,15 @@ onUnmounted(() => {
               :key="item.id"
               class="carousel-slide"
               :class="{ active: currentSlide === index }"
-              :style="{ background: item.bgGradient }"
+              :style="item.bannerImage ? {
+                backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.65)), url(${item.bannerImage})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat'
+              } : {
+                background: item.bgGradient || 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)'
+              }"
+              @click="handleSlideAction(item)"
             >
               <div class="slide-content">
                 <div class="slide-text">
@@ -165,25 +176,28 @@ onUnmounted(() => {
                   <h2 class="slide-title">{{ item.title }}</h2>
                   <p class="slide-subtitle">{{ item.subtitle }}</p>
                   <p class="slide-desc">{{ item.description }}</p>
-                  <button class="btn btn-lg slide-btn" @click="router.push(item.actionRoute)">
-                    {{ item.actionText }}
-                  </button>
                 </div>
                 <div class="slide-icon">{{ item.icon }}</div>
               </div>
             </div>
           </div>
-          <!-- 左右箭头 -->
-          <button class="carousel-arrow carousel-arrow-left" @click="prevSlide">‹</button>
-          <button class="carousel-arrow carousel-arrow-right" @click="nextSlide(); resetAutoPlay()">›</button>
+
+          <!-- 左右切换热区与小箭头 -->
+          <div class="carousel-side-zone left-zone" @click.stop="prevSlide">
+            <button class="carousel-arrow carousel-arrow-left" aria-label="上一张">‹</button>
+          </div>
+          <div class="carousel-side-zone right-zone" @click.stop="nextSlide(); resetAutoPlay()">
+            <button class="carousel-arrow carousel-arrow-right" aria-label="下一张">›</button>
+          </div>
+
           <!-- 指示器 -->
-          <div class="carousel-indicators">
+          <div class="carousel-indicators" @click.stop>
             <button
               v-for="(_, index) in activities"
               :key="index"
               class="indicator-dot"
               :class="{ active: currentSlide === index }"
-              @click="goToSlide(index)"
+              @click.stop="goToSlide(index)"
             />
           </div>
         </div>
@@ -195,13 +209,15 @@ onUnmounted(() => {
       <section v-if="announcements.length" class="section" style="padding-bottom: 0">
         <div class="card">
           <div class="card-body">
-            <div class="card-title mb-2">📢 平台公告</div>
+            <div class="card-title mb-2" style="display: flex; justify-content: space-between; align-items: center;">
+              <span>📢 平台公告</span>
+              <span style="font-size: 0.875rem; cursor: pointer; color: var(--primary); font-weight: normal;" @click="router.push('/announcements')">更多公告 →</span>
+            </div>
             <div v-for="a in announcements" :key="a.id" class="announce-item">
-              <div class="announce-title-row" @click="expanded[a.id] = !expanded[a.id]">
+              <div class="announce-title-row" @click="router.push(`/announcements/${a.id}`)">
                 <span class="announce-title">{{ a.title }}</span>
                 <span class="announce-time">{{ fmtTime(a.publishedAt) }}</span>
               </div>
-              <div v-if="expanded[a.id]" class="announce-content">{{ a.content }}</div>
             </div>
           </div>
         </div>
@@ -265,6 +281,7 @@ onUnmounted(() => {
   opacity: 0;
   transition: opacity 0.6s ease;
   pointer-events: none;
+  cursor: pointer;
 }
 
 .carousel-slide.active {
@@ -279,6 +296,7 @@ onUnmounted(() => {
   height: 100%;
   padding: 48px 56px;
   color: #fff;
+  user-select: none;
 }
 
 .slide-text {
@@ -318,22 +336,6 @@ onUnmounted(() => {
   max-width: 420px;
 }
 
-.slide-btn {
-  margin-top: 24px;
-  background: rgba(255, 255, 255, 0.2);
-  color: #fff;
-  border: 2px solid rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(4px);
-  font-weight: 700;
-  transition: background 0.2s, border-color 0.2s, transform 0.15s;
-}
-
-.slide-btn:hover {
-  background: rgba(255, 255, 255, 0.35);
-  border-color: #fff;
-  transform: translateY(-1px);
-}
-
 .slide-icon {
   font-size: 120px;
   line-height: 1;
@@ -342,68 +344,89 @@ onUnmounted(() => {
   user-select: none;
 }
 
-/* 箭头 */
-.carousel-arrow {
+/* 侧边切换热区与小箭头 */
+.carousel-side-zone {
   position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 44px;
-  height: 44px;
+  top: 0;
+  bottom: 0;
+  width: 64px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.carousel-side-zone.left-zone {
+  left: 0;
+  justify-content: flex-start;
+  padding-left: 14px;
+}
+
+.carousel-side-zone.right-zone {
+  right: 0;
+  justify-content: flex-end;
+  padding-right: 14px;
+}
+
+.carousel-arrow {
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(4px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.25);
   color: #fff;
-  font-size: 24px;
+  font-size: 16px;
+  line-height: 1;
   display: grid;
   place-items: center;
-  cursor: pointer;
-  transition: background 0.2s;
-  z-index: 2;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 0.25s ease, transform 0.25s ease, background 0.2s ease;
+  pointer-events: none;
 }
 
-.carousel-arrow:hover {
-  background: rgba(255, 255, 255, 0.35);
+.carousel-side-zone:hover .carousel-arrow {
+  opacity: 0.95;
+  transform: scale(1);
+  background: rgba(0, 0, 0, 0.55);
 }
 
-.carousel-arrow-left {
-  left: 16px;
-}
-
-.carousel-arrow-right {
-  right: 16px;
+.carousel-side-zone:active .carousel-arrow {
+  transform: scale(0.92);
 }
 
 /* 指示器 */
 .carousel-indicators {
   position: absolute;
-  bottom: 16px;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 8px;
-  z-index: 2;
+  align-items: center;
+  gap: 6px;
+  z-index: 5;
 }
 
 .indicator-dot {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.6);
-  background: transparent;
+  border: none;
+  background: rgba(255, 255, 255, 0.4);
   cursor: pointer;
   padding: 0;
-  transition: background 0.2s, border-color 0.2s, transform 0.2s;
+  transition: all 0.25s ease;
 }
 
 .indicator-dot.active {
   background: #fff;
-  border-color: #fff;
-  transform: scale(1.2);
+  transform: scale(1.25);
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.6);
 }
 
 .indicator-dot:hover:not(.active) {
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.75);
 }
 
 /* ===== 公告 ===== */
