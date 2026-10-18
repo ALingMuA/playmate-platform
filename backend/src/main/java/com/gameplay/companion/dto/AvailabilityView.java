@@ -30,6 +30,9 @@ public class AvailabilityView {
     /** 来源：MANUAL、RECURRENCE */
     private String sourceType;
 
+    /** 生成来源模板ID（0=手动创建） */
+    private Long templateId;
+
     /** 备注 */
     private String remark;
 }

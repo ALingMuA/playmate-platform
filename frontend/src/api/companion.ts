@@ -40,6 +40,29 @@ export interface CompanionProfile {
   updatedAt?: string
 }
 
+/** 陪玩师公开主页资料。仅包含游客可见字段，与本人工作台资料接口分离。 */
+export interface PublicCompanionProfile {
+  userId: number
+  displayName: string
+  avatarUrl: string | null
+  profileIntro: string | null
+  serviceStatus: 'AVAILABLE' | 'BUSY' | 'RESTING' | 'SUSPENDED'
+  /** 符合公开可预约条件服务的最低价，单位分；无可预约服务时为空。 */
+  startingPriceCents: number | null
+  ratingAvg: number | null
+  ratingCount: number
+  completedOrderCount: number
+  capabilities: GameCapability[]
+  /** 平台陪玩资格状态，不代表每项能力证明均已审核通过。 */
+  certificationStatus: 'APPROVED' | 'SUSPENDED'
+}
+
+/** 公开档期摘要，不包含本人管理页备注与来源字段。 */
+export interface PublicAvailability {
+  startAt: string
+  endAt: string
+}
+
 /** 服务项目（FR-P07~P09） */
 export interface CompanionService {
   id: number
@@ -72,7 +95,74 @@ export interface Availability {
   endAt: string
   availabilityStatus: 'AVAILABLE' | 'UNAVAILABLE'
   sourceType: 'MANUAL' | 'RECURRENCE'
+  /** 生成来源模板ID（0=手动创建） */
+  templateId: number
   remark: string
+}
+
+/** 档期周期模板（FR-P10 周期设置） */
+export interface AvailabilityTemplate {
+  id: number
+  templateName: string
+  /** 生效周几集合，逗号分隔（1=周一..7=周日） */
+  dayOfWeek: string
+  allDay: boolean
+  /** "HH:mm:ss"（allDay=false 时有值） */
+  startTime?: string
+  endTime?: string
+  /** "yyyy-MM-dd" */
+  effectiveFrom: string
+  /** 生效结束日期，空表示长期有效 */
+  effectiveUntil?: string
+  enabled: boolean
+  lastGeneratedUntil: string
+  /** 展示用规则描述，如"周一至周五 19:00-23:00（10-17 起长期）" */
+  ruleText: string
+}
+
+/** 批量/周期生成结果 */
+export interface AvailabilityBatchResult {
+  createdCount: number
+  skippedCount: number
+  skippedDetails: string[]
+}
+
+/** 订单档期锁定占用信息（周看板） */
+export interface BookedSlot {
+  orderId: number
+  orderNo: string
+  companionUserId: number
+  customerUserId: number
+  customerNickname: string
+  serviceTitle: string
+  gameServer?: string
+  gameNickname?: string
+  startAt: string
+  endAt: string
+  orderStatus: string
+}
+
+/** 周日程全景概览数据 */
+export interface ScheduleOverview {
+  availabilities: Availability[]
+  bookedSlots: BookedSlot[]
+  serverNow?: string
+  generatedUntil?: string
+}
+
+/** 单日恢复常规作息结果（FR-P11） */
+export interface RestoreDayResult {
+  removedManual: number
+  removedGenerated: number
+  regenerated: number
+  skipped?: string[]
+}
+
+/** 周日程批量变更 */
+export interface AvailabilityChange {
+  startAt: string
+  endAt: string
+  status: 'AVAILABLE' | 'UNAVAILABLE'
 }
 
 /** 收益概览（FR-P19） */
@@ -106,6 +196,19 @@ export function myApplications(): Promise<Application[]> {
 export function myProfile(silentError = false): Promise<CompanionProfile> {
   // silentError：非陪玩师调用会返回 403 COMPANION_NOT_APPROVED，属正常的"状态探测"结果
   return request<CompanionProfile>({ url: '/companion/profile', method: 'get', silentError })
+}
+
+/** 读取游客可见的陪玩师资料，不复用受角色保护的本人资料接口。 */
+export function getPublicCompanionProfile(userId: number): Promise<PublicCompanionProfile> {
+  return request<PublicCompanionProfile>({ url: `/companion-profiles/${userId}`, method: 'get' })
+}
+
+export function listPublicAvailabilities(userId: number, days = 7): Promise<PublicAvailability[]> {
+  return request<PublicAvailability[]>({
+    url: `/companion-profiles/${userId}/availabilities`,
+    method: 'get',
+    params: { days },
+  })
 }
 
 export function updateProfile(data: {
@@ -188,6 +291,94 @@ export function createUnavailable(data: {
 
 export function deleteAvailability(id: number): Promise<void> {
   return request<void>({ url: `/companion/availabilities/${id}`, method: 'delete' })
+}
+
+/** 周日程全景概览（含可用档期 + 订单锁定区间） */
+export function getScheduleOverview(startAt?: string, endAt?: string): Promise<ScheduleOverview> {
+  return request<ScheduleOverview>({
+    url: '/companion/availabilities/overview',
+    method: 'get',
+    params: { startAt, endAt },
+  })
+}
+
+/** 一键切换整天状态（全天休息 或 全天可约） */
+export function toggleDayOff(data: { date: string; isOff: boolean; remark?: string }): Promise<void> {
+  return request<void>({
+    url: '/companion/availabilities/toggle-day-off',
+    method: 'post',
+    data,
+  })
+}
+
+/** 单日恢复常规作息（FR-P11） */
+export function restoreDay(date: string): Promise<RestoreDayResult> {
+  return request<RestoreDayResult>({
+    url: '/companion/availabilities/restore-day',
+    method: 'post',
+    data: { date },
+  })
+}
+
+/** 周日程批量保存：多个区间由后端在同一事务内处理 */
+export function applyAvailabilityChanges(changes: AvailabilityChange[]): Promise<void> {
+  return request<void>({
+    url: '/companion/availabilities/changes',
+    method: 'post',
+    data: { changes },
+  })
+}
+
+/** 批量创建可约档期：日期范围内每日同一时段或全天，冲突日期自动跳过并返回明细（FR-P10 日期范围设置） */
+export function createAvailabilityBatch(data: {
+  startDate: string
+  endDate?: string
+  allDay: boolean
+  startTime?: string
+  endTime?: string
+  remark?: string
+}): Promise<AvailabilityBatchResult> {
+  return request<AvailabilityBatchResult>({ url: '/companion/availabilities/batch', method: 'post', data })
+}
+
+// ==================== 档期周期模板（FR-P10 周期设置：设置一次自动循环生效） ====================
+
+export function listAvailabilityTemplates(): Promise<AvailabilityTemplate[]> {
+  return request<AvailabilityTemplate[]>({ url: '/companion/availability-templates', method: 'get' })
+}
+
+export interface AvailabilityTemplatePayload {
+  templateName: string
+  dayOfWeek: string
+  allDay: boolean
+  startTime?: string
+  endTime?: string
+  effectiveFrom: string
+  effectiveUntil?: string
+}
+
+export function createAvailabilityTemplate(data: AvailabilityTemplatePayload): Promise<AvailabilityTemplate> {
+  return request<AvailabilityTemplate>({ url: '/companion/availability-templates', method: 'post', data })
+}
+
+export function updateAvailabilityTemplate(
+  id: number,
+  data: AvailabilityTemplatePayload,
+): Promise<AvailabilityTemplate> {
+  return request<AvailabilityTemplate>({ url: `/companion/availability-templates/${id}`, method: 'put', data })
+}
+
+/** 启用/停用模板：停用清理未来实例，启用重新生成 */
+export function toggleAvailabilityTemplate(id: number, enabled: boolean): Promise<AvailabilityTemplate> {
+  return request<AvailabilityTemplate>({
+    url: `/companion/availability-templates/${id}/status`,
+    method: 'put',
+    params: { enabled },
+  })
+}
+
+export function deleteAvailabilityTemplate(id: number): Promise<void> {
+  return request<void>({ url: `/companion/availability-templates/${id}`, method: 'delete' })
 }
 
 // ==================== 收益 ====================

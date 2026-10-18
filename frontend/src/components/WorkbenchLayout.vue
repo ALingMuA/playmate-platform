@@ -48,7 +48,7 @@ const canGoBack = computed(() => !route.meta.workbenchHome)
 const menuIcons: Record<string, Component> = {
   '我的陪玩主页': UserFilled,
   '服务管理': Service,
-  '档期管理': Tickets,
+  '接单时间': Tickets,
   '接单履约': Collection,
   '收益': Money,
   '会话队列': ChatDotRound,

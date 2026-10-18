@@ -63,6 +63,19 @@ export function adminSetUserStatus(id: number, accountStatus: string, reason?: s
   })
 }
 
+/** 重置用户密码 */
+export function adminResetUserPassword(
+  id: number,
+  newPassword: string,
+  reason?: string,
+): Promise<UserAdminView> {
+  return request<UserAdminView>({
+    url: `/admin/users/${id}/password`,
+    method: 'put',
+    data: { newPassword, reason },
+  })
+}
+
 // ==================== 公告管理（FR-M13） ====================
 
 /** 公告视图 */
@@ -214,5 +227,12 @@ export function publicAnnouncements(page = 1, size = 10): Promise<PageResult<Ann
     url: '/announcements',
     method: 'get',
     params: { page, size },
+  })
+}
+
+export function publicAnnouncementDetail(id: number): Promise<AnnouncementView> {
+  return request<AnnouncementView>({
+    url: `/announcements/${id}`,
+    method: 'get',
   })
 }

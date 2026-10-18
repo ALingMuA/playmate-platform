@@ -178,8 +178,16 @@ onMounted(load)
                 <span class="text-muted">时长</span>
                 <span>{{ order.durationMinutes }} 分钟</span>
               </div>
+              <div v-if="order.discountAmountCents && order.discountAmountCents > 0" class="flex justify-between mt-1">
+                <span class="text-muted">原价</span>
+                <span>{{ fmtMoney(order.originalAmountCents || order.totalAmountCents) }}</span>
+              </div>
+              <div v-if="order.discountAmountCents && order.discountAmountCents > 0" class="flex justify-between mt-1" style="color: #ef4444">
+                <span>{{ order.couponNameSnapshot || '优惠券抵扣' }}</span>
+                <span>- {{ fmtMoney(order.discountAmountCents) }}</span>
+              </div>
               <div class="flex justify-between items-center mt-2" style="border-top: 1px solid var(--border); padding-top: 10px">
-                <span>应付金额</span>
+                <span>实付金额</span>
                 <span class="companion-price" style="font-size: 1.5rem">{{ fmtMoney(order.totalAmountCents) }}</span>
               </div>
             </div>

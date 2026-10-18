@@ -2,6 +2,7 @@ package com.gameplay.admin.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.gameplay.admin.dto.UserAdminView;
+import com.gameplay.admin.dto.UserResetPasswordRequest;
 import com.gameplay.admin.dto.UserStatusUpdateRequest;
 import com.gameplay.admin.service.AdminUserService;
 import com.gameplay.auth.security.JwtPrincipal;
@@ -46,6 +47,14 @@ public class AdminUserController {
                                                 @Valid @RequestBody UserStatusUpdateRequest request,
                                                 Authentication authentication) {
         return ApiResponse.ok(adminUserService.setStatus(id, request));
+    }
+
+    /** 重置用户密码 */
+    @PutMapping("/{id}/password")
+    public ApiResponse<UserAdminView> resetPassword(@PathVariable Long id,
+                                                    @Valid @RequestBody UserResetPasswordRequest request,
+                                                    Authentication authentication) {
+        return ApiResponse.ok(adminUserService.resetPassword(currentAdminId(authentication), id, request));
     }
 
     private Long currentAdminId(Authentication authentication) {

@@ -26,6 +26,13 @@ public class FavoriteService {
     private final FavoriteMapper favoriteMapper;
     private final CompanionProfileMapper companionProfileMapper;
 
+    /** 查询指定用户对单个陪玩师的收藏状态。 */
+    public boolean isFavorited(Long userId, Long companionUserId) {
+        return favoriteMapper.selectCount(new LambdaQueryWrapper<Favorite>()
+                .eq(Favorite::getUserId, userId)
+                .eq(Favorite::getCompanionUserId, companionUserId)) > 0;
+    }
+
     /** 收藏陪玩师（FR-U06）：仅审核通过的陪玩师可收藏 */
     @Transactional
     public void add(Long userId, Long companionUserId) {

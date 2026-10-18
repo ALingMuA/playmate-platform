@@ -152,7 +152,7 @@ class OrderModuleTest {
         String newToken = relogin(companion.path("user").path("username").asText());
         long companionUserId = companion.path("user").path("id").asLong();
 
-        // 接单状态 + 档期 [now-1h, now+5h]
+        // 接单状态 + 档期 [now, now+5h]
         mockMvc.perform(put("/api/companion/profile/service-status")
                         .header("Authorization", bearer(newToken))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -163,7 +163,7 @@ class OrderModuleTest {
                         .header("Authorization", bearer(newToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.createObjectNode()
-                                .put("startAt", now.minusHours(1).format(FMT))
+                                .put("startAt", now.format(FMT))
                                 .put("endAt", now.plusHours(5).format(FMT))
                                 .toString()))
                 .andExpect(status().isOk());

@@ -12,6 +12,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { Game, ServiceType } from '@/api/catalog'
+import { uploadFile } from '@/api/file'
 import {
   TAG_CATEGORIES,
   adminCreateGame,
@@ -38,7 +39,30 @@ const gameOptions = ref<Game[]>([])
 
 const games = ref<Game[]>([])
 const gameLoading = ref(false)
+const uploadingGameIcon = ref(false)
 const gameQuery = reactive({ keyword: '', enabled: undefined as number | undefined })
+
+async function handleGameIconUpload(file: File) {
+  if (!file.type.startsWith('image/')) {
+    ElMessage.warning('请选择图片文件（JPG/PNG/WEBP/GIF）')
+    return false
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    ElMessage.warning('图片大小不能超过 5MB')
+    return false
+  }
+  uploadingGameIcon.value = true
+  try {
+    const res = await uploadFile(file, 'game')
+    gameForm.gameIconUrl = res.url
+    ElMessage.success('封面图上传成功')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '封面图上传失败')
+  } finally {
+    uploadingGameIcon.value = false
+  }
+  return false
+}
 
 async function loadGames() {
   gameLoading.value = true
@@ -332,6 +356,23 @@ async function handleDelete(kind: 'game' | 'type' | 'tag', row: Game | ServiceTy
         </div>
 
         <el-table :data="games" v-loading="gameLoading" border stripe>
+          <el-table-column label="封面图" width="110" align="center">
+            <template #default="{ row }">
+              <el-image
+                v-if="row.gameIconUrl"
+                :src="row.gameIconUrl"
+                class="table-game-thumb"
+                fit="cover"
+                :preview-src-list="[row.gameIconUrl]"
+                preview-teleported
+              >
+                <template #error>
+                  <div class="table-thumb-fallback">{{ row.gameName?.charAt(0) || '游' }}</div>
+                </template>
+              </el-image>
+              <div v-else class="table-thumb-fallback">{{ row.gameName?.charAt(0) || '游' }}</div>
+            </template>
+          </el-table-column>
           <el-table-column prop="gameName" label="游戏名称" min-width="140" />
           <el-table-column prop="gameIntro" label="简介" min-width="220" show-overflow-tooltip />
           <el-table-column prop="sortNo" label="排序" width="80" />
@@ -471,8 +512,58 @@ async function handleDelete(kind: 'game' | 'type' | 'tag', row: Game | ServiceTy
         <el-form-item label="游戏名称" required>
           <el-input v-model="gameForm.gameName" maxlength="50" show-word-limit placeholder="如：云顶之弈" />
         </el-form-item>
-        <el-form-item label="图标地址">
-          <el-input v-model="gameForm.gameIconUrl" maxlength="500" placeholder="图片 URL，选填" />
+        <el-form-item label="游戏封面">
+          <div class="game-uploader-container">
+            <div v-if="gameForm.gameIconUrl" class="game-preview-box">
+              <el-image
+                :src="gameForm.gameIconUrl"
+                class="game-cover-img"
+                fit="cover"
+                :preview-src-list="[gameForm.gameIconUrl]"
+              >
+                <template #error>
+                  <div class="image-error-fallback">图片加载失败</div>
+                </template>
+              </el-image>
+              <div class="game-actions-mask">
+                <el-upload
+                  :show-file-list="false"
+                  accept="image/*"
+                  :before-upload="handleGameIconUpload"
+                  :disabled="uploadingGameIcon"
+                >
+                  <el-button size="small" type="primary">更换图片</el-button>
+                </el-upload>
+                <el-button size="small" type="danger" @click="gameForm.gameIconUrl = ''">移除图片</el-button>
+              </div>
+            </div>
+            <div v-else class="game-upload-empty">
+              <el-upload
+                :show-file-list="false"
+                accept="image/*"
+                :before-upload="handleGameIconUpload"
+                :disabled="uploadingGameIcon"
+              >
+                <div class="game-dropzone" :class="{ 'is-loading': uploadingGameIcon }">
+                  <span v-if="uploadingGameIcon">⏳ 封面上传中...</span>
+                  <span v-else>📷 点击上传游戏封面图</span>
+                </div>
+              </el-upload>
+            </div>
+            <div class="game-url-input-row">
+              <el-input
+                v-model="gameForm.gameIconUrl"
+                placeholder="或输入/粘贴图片地址（如 /images/games/wzry.jpg）"
+                clearable
+                size="small"
+              >
+                <template #prepend>图片路径</template>
+              </el-input>
+            </div>
+            <div class="text-xs text-muted mt-1">
+              支持 JPG/PNG/WEBP/GIF，建议比例 16:9 或横版封面，大小不超过 5MB
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="简介">
           <el-input v-model="gameForm.gameIntro" type="textarea" :rows="2" maxlength="500" show-word-limit />
@@ -544,5 +635,96 @@ async function handleDelete(kind: 'game' | 'type' | 'tag', row: Game | ServiceTy
 }
 .hint {
   margin-bottom: 12px;
+}
+.game-uploader-container {
+  width: 100%;
+}
+.game-preview-box {
+  position: relative;
+  width: 100%;
+  max-width: 320px;
+  height: 180px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--muted);
+  margin-bottom: 8px;
+}
+.game-cover-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.image-error-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  background: var(--muted);
+}
+.game-actions-mask {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 8px 12px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.game-upload-empty {
+  margin-bottom: 8px;
+}
+.game-dropzone {
+  width: 100%;
+  max-width: 320px;
+  height: 120px;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+  background: var(--card);
+}
+.game-dropzone:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--secondary);
+}
+.game-dropzone.is-loading {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.game-url-input-row {
+  margin-top: 6px;
+}
+.table-game-thumb {
+  width: 64px;
+  height: 36px;
+  border-radius: 4px;
+  overflow: hidden;
+  display: inline-block;
+  vertical-align: middle;
+}
+.table-thumb-fallback {
+  width: 64px;
+  height: 36px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, var(--secondary), #bfdbfe);
+  color: var(--primary);
+  font-weight: 700;
+  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
 }
 </style>
