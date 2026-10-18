@@ -15,6 +15,7 @@ import com.gameplay.companion.dto.ProfileView;
 import com.gameplay.companion.dto.PublicCompanionProfileView;
 import com.gameplay.companion.enums.CompanionServiceStatus;
 import com.gameplay.companion.mapper.CompanionProfileMapper;
+import com.gameplay.companion.mapper.CompanionServiceMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +31,7 @@ import java.util.List;
 public class CompanionProfileService {
 
     private final CompanionProfileMapper profileMapper;
+    private final CompanionServiceMapper serviceMapper;
     private final UserMapper userMapper;
     private final ObjectMapper objectMapper;
 
@@ -56,6 +58,7 @@ public class CompanionProfileService {
                 .avatarUrl(user.getAvatarUrl())
                 .profileIntro(profile.getProfileIntro())
                 .serviceStatus(profile.getServiceStatus())
+                .startingPriceCents(serviceMapper.selectStartingPriceCents(userId))
                 .ratingAvg(profile.getRatingAvg())
                 .ratingCount(profile.getRatingCount())
                 .completedOrderCount(profile.getCompletedOrderCount())
