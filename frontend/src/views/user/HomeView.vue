@@ -233,7 +233,7 @@ onUnmounted(() => {
           <div v-for="s in recommended" :key="s.id" class="companion-card"
             @click="router.push({ path: '/booking', query: { companionUserId: String(s.companionUserId), serviceId: String(s.id) } })">
             <div class="companion-header">
-              <div class="companion-avatar">🎮</div>
+              <div class="companion-avatar" @click.stop="router.push(`/companions/${s.companionUserId}`)" title="点击查看陪玩主页">🎮</div>
               <div class="companion-meta">
                 <div class="companion-name">{{ s.title }}</div>
                 <div class="companion-level">{{ s.gameName }} · {{ s.serviceTypeName }}</div>
@@ -248,7 +248,10 @@ onUnmounted(() => {
             </div>
             <div class="companion-footer">
               <div class="companion-price">{{ fmtPrice(s.priceCents) }}<span>/小时</span></div>
-              <button class="btn btn-primary btn-sm">立即预约</button>
+              <div class="companion-actions">
+                <button class="btn btn-outline btn-sm" @click.stop="router.push(`/companions/${s.companionUserId}`)">查看主页</button>
+                <button class="btn btn-primary btn-sm" @click.stop="router.push({ path: '/booking', query: { companionUserId: String(s.companionUserId), serviceId: String(s.id) } })">立即预约</button>
+              </div>
             </div>
           </div>
         </div>

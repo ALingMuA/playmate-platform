@@ -141,10 +141,21 @@ onMounted(load)
               <div class="card-body">
                 <h3 class="card-title mb-2">服务信息</h3>
                 <div class="order-body">
-                  <div class="order-thumb">🎮</div>
+                  <div class="order-thumb" style="cursor: pointer" title="点击查看陪玩主页" @click="order.companionUserId && router.push(`/companions/${order.companionUserId}`)">🎮</div>
                   <div class="order-info">
                     <div class="order-title">{{ order.serviceTitleSnapshot }}</div>
-                    <div class="order-meta">陪玩师：{{ order.companionNameSnapshot }}</div>
+                    <div class="order-meta" style="display: flex; align-items: center; gap: 8px;">
+                      <span>陪玩师：{{ order.companionNameSnapshot }}</span>
+                      <button
+                        v-if="order.companionUserId"
+                        type="button"
+                        class="btn btn-ghost btn-sm"
+                        style="padding: 2px 8px; font-size: 0.75rem; height: auto;"
+                        @click="router.push(`/companions/${order.companionUserId}`)"
+                      >
+                        查看主页 →
+                      </button>
+                    </div>
                     <div class="order-meta">
                       预约：{{ fmtTime(order.appointmentStartAt) }} - {{ fmtTime(order.appointmentEndAt) }}（{{ order.durationMinutes }}分钟）
                     </div>

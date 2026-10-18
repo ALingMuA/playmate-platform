@@ -792,6 +792,12 @@ textarea.form-control {
   font-weight: 500;
 }
 
+.companion-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ==================== Filter bar ==================== */
 
 .filter-bar {

@@ -351,7 +351,11 @@ watch(() => route.params.userId, (value) => {
             </div>
 
             <div class="hero-copy">
-              <div class="eyebrow">陪玩师主页</div>
+              <div class="eyebrow">
+                <router-link to="/companions" class="hero-back-link">‹ 返回找陪玩</router-link>
+                <span class="hero-eyebrow-sep">/</span>
+                <span>陪玩师主页</span>
+              </div>
               <h1 id="companion-name">{{ profile.displayName || '陪玩师' }}</h1>
               <div class="hero-badges">
                 <span class="status-pill" :class="`status-${profile.serviceStatus.toLowerCase()}`">
@@ -771,6 +775,22 @@ watch(() => route.params.userId, (value) => {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.14em;
+  display: flex;
+  align-items: center;
+}
+.hero-back-link {
+  color: #6381a8;
+  text-decoration: none;
+  font-weight: 700;
+  transition: color 0.15s;
+}
+.hero-back-link:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+.hero-eyebrow-sep {
+  margin: 0 6px;
+  color: #cbd5e1;
 }
 .hero-copy h1 { margin-top: 4px; font-size: clamp(25px, 3vw, 34px); line-height: 1.25; overflow-wrap: anywhere; }
 .hero-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }

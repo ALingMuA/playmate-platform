@@ -16,13 +16,14 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const activeMenu = computed(() => {
+  if (route.path === '/companions') return '/companions'
   if (route.path.startsWith('/orders')) return '/orders'
   if (route.path.startsWith('/profile')) return '/profile'
-  if (route.path.startsWith('/companions')) return '/companions'
-  if (route.path.startsWith('/games')) return '/games'
+  if (route.path === '/games') return '/games'
   if (route.path.startsWith('/activities')) return '/activities'
   if (route.path.startsWith('/support')) return '/support'
-  return '/'
+  if (route.path === '/') return '/'
+  return ''
 })
 
 const isLoggedIn = computed(() => userStore.isLoggedIn)

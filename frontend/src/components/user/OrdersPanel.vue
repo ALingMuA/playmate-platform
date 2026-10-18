@@ -144,10 +144,21 @@ onMounted(load)
           </span>
         </div>
         <div class="order-body">
-          <div class="order-thumb">🎮</div>
+          <div class="order-thumb" style="cursor: pointer" title="点击查看陪玩主页" @click.stop="row.companionUserId && router.push(`/companions/${row.companionUserId}`)">🎮</div>
           <div class="order-info">
             <div class="order-title">{{ row.serviceTitleSnapshot }}</div>
-            <div class="order-meta">陪玩师：{{ row.companionNameSnapshot }}</div>
+            <div class="order-meta" style="display: flex; align-items: center; gap: 8px;">
+              <span>陪玩师：{{ row.companionNameSnapshot }}</span>
+              <button
+                v-if="row.companionUserId"
+                type="button"
+                class="btn btn-ghost btn-sm"
+                style="padding: 1px 6px; font-size: 0.75rem; height: auto;"
+                @click.stop="router.push(`/companions/${row.companionUserId}`)"
+              >
+                主页 →
+              </button>
+            </div>
             <div class="order-meta">
               {{ fmtTime(row.appointmentStartAt) }} - {{ fmtTime(row.appointmentEndAt) }}（{{ row.durationMinutes }}分钟）
             </div>
@@ -182,6 +193,9 @@ onMounted(load)
             v-if="['WAITING_CONFIRMATION', 'COMPLETED', 'AFTER_SALES'].includes(row.orderStatus)"
             class="btn btn-destructive btn-sm" @click="router.push(`/complaint/${row.id}`)">
             投诉
+          </button>
+          <button v-if="row.companionUserId" class="btn btn-outline btn-sm" @click="router.push(`/companions/${row.companionUserId}`)">
+            陪玩主页
           </button>
           <button class="btn btn-ghost btn-sm" @click="goDetail(row)">详情</button>
         </div>
