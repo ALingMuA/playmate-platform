@@ -40,6 +40,29 @@ export interface CompanionProfile {
   updatedAt?: string
 }
 
+/** 陪玩师公开主页资料。仅包含游客可见字段，与本人工作台资料接口分离。 */
+export interface PublicCompanionProfile {
+  userId: number
+  displayName: string
+  avatarUrl: string | null
+  profileIntro: string | null
+  serviceStatus: 'AVAILABLE' | 'BUSY' | 'RESTING' | 'SUSPENDED'
+  /** 符合公开可预约条件服务的最低价，单位分；无可预约服务时为空。 */
+  startingPriceCents: number | null
+  ratingAvg: number | null
+  ratingCount: number
+  completedOrderCount: number
+  capabilities: GameCapability[]
+  /** 平台陪玩资格状态，不代表每项能力证明均已审核通过。 */
+  certificationStatus: 'APPROVED' | 'SUSPENDED'
+}
+
+/** 公开档期摘要，不包含本人管理页备注与来源字段。 */
+export interface PublicAvailability {
+  startAt: string
+  endAt: string
+}
+
 /** 服务项目（FR-P07~P09） */
 export interface CompanionService {
   id: number
@@ -106,6 +129,19 @@ export function myApplications(): Promise<Application[]> {
 export function myProfile(silentError = false): Promise<CompanionProfile> {
   // silentError：非陪玩师调用会返回 403 COMPANION_NOT_APPROVED，属正常的"状态探测"结果
   return request<CompanionProfile>({ url: '/companion/profile', method: 'get', silentError })
+}
+
+/** 读取游客可见的陪玩师资料，不复用受角色保护的本人资料接口。 */
+export function getPublicCompanionProfile(userId: number): Promise<PublicCompanionProfile> {
+  return request<PublicCompanionProfile>({ url: `/companion-profiles/${userId}`, method: 'get' })
+}
+
+export function listPublicAvailabilities(userId: number, days = 7): Promise<PublicAvailability[]> {
+  return request<PublicAvailability[]>({
+    url: `/companion-profiles/${userId}/availabilities`,
+    method: 'get',
+    params: { days },
+  })
 }
 
 export function updateProfile(data: {
