@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>陪玩师公开主页布局线框图 - 游戏陪玩系统</title>
+<style>
+:root {
+  --color-background-primary: #ffffff;
+  --color-background-secondary: #f5f5f2;
+  --color-background-tertiary: #eff0ea;
+  --color-background-info: #e6f1fb;
+  --color-background-success: #eaf3de;
+  --color-text-primary: #1f1e1b;
+  --color-text-secondary: #69685f;
+  --color-text-tertiary: #92917f;
+  --color-text-info: #0c447c;
+  --color-text-success: #27500a;
+  --color-border-tertiary: rgba(31, 30, 27, 0.15);
+  --color-border-secondary: rgba(31, 30, 27, 0.3);
+  --color-border-info: rgba(55, 138, 221, 0.4);
+  --color-border-success: rgba(99, 153, 34, 0.45);
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 32px 20px 48px;
+  background: var(--color-background-tertiary);
+  font-family: var(--font-sans);
+  color: var(--color-text-primary);
+  line-height: 1.6;
+}
+.page { max-width: 680px; margin: 0 auto; }
+.doc-header { margin: 0 0 20px; }
+.doc-header h1 { font-size: 18px; font-weight: 600; margin: 0 0 6px; }
+.doc-header p { font-size: 12px; color: var(--color-text-secondary); margin: 0; }
+@media print {
+  body { background: #ffffff; padding: 0; }
+}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.wf{font-family:var(--font-sans);max-width:640px;margin:0 auto;border:0.5px solid var(--color-border-tertiary);border-radius:12px;background:var(--color-background-primary);overflow:hidden}
+.lbl{font-size:11px;color:var(--color-text-tertiary)}
+.chip{font-size:11px;padding:1px 8px;border-radius:99px;border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);background:var(--color-background-primary)}
+.bar{height:7px;border-radius:4px;background:var(--color-background-tertiary)}
+.tab{padding:4px 10px;border-radius:6px;font-size:12px;color:var(--color-text-secondary)}
+.tab.on{background:var(--color-background-info);color:var(--color-text-info);font-weight:500}
+.m{background:var(--color-background-secondary);border-radius:8px;padding:10px 12px}
+.mv{font-size:15px;font-weight:500;margin-top:2px}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="doc-header">
+    <h1>陪玩师公开主页布局线框图</h1>
+    <p>配套《用户主页与陪玩主页优化设计方案》第 5 节 · 路由 /companions/:userId（访客视角，游客可访问）· 2026-10-18</p>
+  </header>
+  <h2 class="sr-only">陪玩师公开主页线框图：Hero 身份区含接单状态灯与预约按钮，左侧能力认证侧栏，右侧服务与评价 Tab</h2>
+  <div class="wf">
+    <div style="background:var(--color-background-info);padding:16px 20px 12px">
+      <div style="display:flex;gap:14px;align-items:center">
+        <div style="width:48px;height:48px;border-radius:12px;background:var(--color-background-primary);border:0.5px solid var(--color-border-info);display:flex;align-items:center;justify-content:center;font-weight:500;font-size:15px;color:var(--color-text-info);flex:none">虎</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span style="font-weight:500;font-size:15px">小虎</span>
+            <span class="chip" style="background:#185FA5;color:#ffffff;border-color:#185FA5">已认证</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--color-text-success)"><span style="width:8px;height:8px;border-radius:50%;background:var(--color-text-success)"></span>可接单</span>
+          </div>
+          <div class="bar" style="width:230px;margin-top:8px"></div>
+          <div class="bar" style="width:160px;margin-top:6px"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;flex:none">
+          <span style="font-size:12px;font-weight:500;color:#ffffff;background:#378ADD;border-radius:6px;padding:5px 14px;text-align:center">立即预约</span>
+          <span class="chip" style="text-align:center">关注</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <div class="m" style="flex:1"><div class="lbl">评分</div><div class="mv">4.9</div></div>
+        <div class="m" style="flex:1"><div class="lbl">完成订单</div><div class="mv">356</div></div>
+        <div class="m" style="flex:1"><div class="lbl">在架服务</div><div class="mv">6</div></div>
+        <div class="m" style="flex:1"><div class="lbl">价格起点</div><div class="mv">¥30</div></div>
+      </div>
+      <div class="lbl" style="margin-top:8px">本人访问时 [立即预约][关注] 替换为 [编辑主页] → /companion/profile；游客点关注引导登录</div>
+    </div>
+    <div style="display:flex;gap:4px;padding:8px 20px;border-bottom:0.5px solid var(--color-border-tertiary);align-items:center">
+      <span class="tab">主页</span><span class="tab on">服务</span><span class="tab">评价</span>
+      <span class="lbl" style="margin-left:auto">游客可访问 · 无任何管理入口外露</span>
+    </div>
+    <div style="display:flex;gap:10px;padding:12px 20px 16px">
+      <div style="width:168px;flex:none;display:flex;flex-direction:column;gap:10px">
+        <div class="m">
+          <div style="font-weight:500">能力认证（段位证明）</div>
+          <div style="margin-top:8px;background:var(--color-background-primary);border-radius:6px;padding:8px">
+            <div style="font-size:12px;font-weight:500">英雄联盟</div>
+            <div class="lbl" style="margin-top:3px">微信区 · <span style="color:#854F0B;background:#FAEEDA;padding:0 6px;border-radius:99px">最强王者</span></div>
+            <div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap"><span class="chip" style="padding:0 6px">打野</span><span class="chip" style="padding:0 6px">中单</span></div>
+          </div>
+          <div style="margin-top:6px;background:var(--color-background-primary);border-radius:6px;padding:8px">
+            <div style="font-size:12px;font-weight:500">王者荣耀</div>
+            <div class="lbl" style="margin-top:3px">QQ 区 · 荣耀王者</div>
+          </div>
+        </div>
+        <div class="m">
+          <div style="font-weight:500">未来 7 天档期</div>
+          <div style="display:flex;gap:3px;margin-top:8px;align-items:flex-end">
+            <span style="flex:1;height:22px;border-radius:3px;background:#97C459"></span>
+            <span style="flex:1;height:14px;border-radius:3px;background:#D3D1C7"></span>
+            <span style="flex:1;height:26px;border-radius:3px;background:#97C459"></span>
+            <span style="flex:1;height:12px;border-radius:3px;background:#D3D1C7"></span>
+            <span style="flex:1;height:10px;border-radius:3px;background:#D3D1C7"></span>
+            <span style="flex:1;height:18px;border-radius:3px;background:#97C459"></span>
+            <span style="flex:1;height:12px;border-radius:3px;background:#D3D1C7"></span>
+          </div>
+          <div class="lbl" style="margin-top:5px">点击可约时段直达预约并预填时间</div>
+        </div>
+        <div style="text-align:center;font-size:12px;font-weight:500;color:#ffffff;background:#378ADD;border-radius:8px;padding:8px">立即预约（已选 1 项）</div>
+      </div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:10px">
+        <div class="m">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:500">服务项目（卡片网格 · 选中态高亮）</span><span class="lbl">已选：排位上分 ¥45/小时</span></div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:8px;margin-top:8px">
+            <div style="background:var(--color-background-primary);border-radius:6px;padding:8px;border:1.5px solid #378ADD">
+              <div style="font-size:12px;font-weight:500">排位上分陪练</div>
+              <div class="lbl" style="margin-top:3px">英雄联盟 · 上分</div>
+              <div style="font-size:12px;font-weight:500;color:#185FA5;margin-top:4px">¥45/小时</div>
+            </div>
+            <div style="background:var(--color-background-primary);border-radius:6px;padding:8px;border:0.5px solid var(--color-border-tertiary)">
+              <div style="font-size:12px;font-weight:500">语音连麦畅聊</div>
+              <div class="lbl" style="margin-top:3px">王者荣耀 · 连麦</div>
+              <div style="font-size:12px;font-weight:500;color:#185FA5;margin-top:4px">¥30/小时</div>
+            </div>
+            <div style="background:var(--color-background-primary);border-radius:6px;padding:8px;border:0.5px solid var(--color-border-tertiary)">
+              <div style="font-size:12px;font-weight:500">娱乐开黑带队</div>
+              <div class="lbl" style="margin-top:3px">英雄联盟 · 娱乐</div>
+              <div style="font-size:12px;font-weight:500;color:#185FA5;margin-top:4px">¥38/小时</div>
+            </div>
+          </div>
+        </div>
+        <div class="m">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:500">评价 Tab（切换后）</span><span class="lbl">平均 4.9 · 128 条</span></div>
+          <div style="display:flex;gap:12px;margin-top:8px;align-items:center">
+            <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;gap:6px;align-items:center"><span class="lbl" style="width:20px">5 星</span><span style="flex:0 0 78%;height:8px;border-radius:4px;background:#B5D4F4"></span><span class="lbl">96%</span></div>
+              <div style="display:flex;gap:6px;align-items:center"><span class="lbl" style="width:20px">4 星</span><span style="flex:0 0 12%;height:8px;border-radius:4px;background:#B5D4F4"></span><span class="lbl">3%</span></div>
+              <div style="display:flex;gap:6px;align-items:center"><span class="lbl" style="width:20px">3 星</span><span style="flex:0 0 5%;height:8px;border-radius:4px;background:#B5D4F4"></span><span class="lbl">1%</span></div>
+            </div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;max-width:150px">
+              <span class="chip" style="padding:0 6px">技术好</span><span class="chip" style="padding:0 6px">有耐心</span><span class="chip" style="padding:0 6px">声音好听</span>
+            </div>
+          </div>
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">
+            <div class="bar" style="width:100%"></div>
+            <div class="bar" style="width:85%"></div>
+          </div>
+          <div class="lbl" style="margin-top:5px">筛选（全部/好评/中差评）+ 分页 + 星级渲染修复</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
