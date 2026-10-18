@@ -174,3 +174,24 @@ export function walletMe(): Promise<{ balanceCents: number; frozenCents: number;
     method: 'get',
   })
 }
+
+/** 钱包流水（FR-U09）：仅返回当前登录用户自己的收支记录。 */
+export interface WalletLedger {
+  businessNo: string
+  orderId: number | null
+  ledgerType: 'PAYMENT' | 'REFUND' | 'SETTLEMENT' | 'ADJUSTMENT'
+  direction: 'IN' | 'OUT'
+  amountCents: number
+  balanceAfterCents: number
+  frozenAfterCents: number
+  remark: string
+  createdAt: string
+}
+
+export function walletLedgers(page = 1, size = 10): Promise<PageResult<WalletLedger>> {
+  return request<PageResult<WalletLedger>>({
+    url: '/wallet/me/ledgers',
+    method: 'get',
+    params: { page, size },
+  })
+}
