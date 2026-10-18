@@ -17,6 +17,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashSet;
@@ -24,6 +25,8 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -649,6 +652,306 @@ class CompanionModuleTest {
                 .andExpect(jsonPath("$.data.length()").value(2));
     }
 
+    @Test
+    @DisplayName("档期管理：在已有可约时段中直接设置不可约，自动挖空切分且概览聚合正常")
+    void availability_punch_out_and_overview_flow() throws Exception {
+        String admin = adminToken();
+        String cToken = prepareCompanion(admin).path("token").asText();
+
+        String day = LocalDateTime.now().plusDays(2).format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+        // 1. 创建 10:00 - 22:00 可约
+        ObjectNode slot = objectMapper.createObjectNode()
+                .put("startAt", day + " 10:00:00")
+                .put("endAt", day + " 22:00:00");
+        mockMvc.perform(post("/api/companion/availabilities")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(slot.toString()))
+                .andExpect(status().isOk());
+
+        // 2. 在 10:00-22:00 之间直接设置 14:00-16:00 没空（Punch-out 挖空切分）
+        ObjectNode unavailPunch = objectMapper.createObjectNode()
+                .put("startAt", day + " 14:00:00")
+                .put("endAt", day + " 16:00:00")
+                .put("remark", "下午有考试");
+        mockMvc.perform(post("/api/companion/availabilities/unavailable")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(unavailPunch.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.availabilityStatus").value("UNAVAILABLE"));
+
+        // 3. 校验列表：自动切为 10-14 可约、16-22 可约、14-16 不可约（共 3 条）
+        mockMvc.perform(get("/api/companion/availabilities")
+                        .header("Authorization", bearer(cToken))
+                        .param("startAt", day + " 00:00:00")
+                        .param("endAt", day + " 23:59:59"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(3));
+
+        // 4. 测试周日程全景概览接口
+        mockMvc.perform(get("/api/companion/availabilities/overview")
+                        .header("Authorization", bearer(cToken))
+                        .param("startAt", day + " 00:00:00")
+                        .param("endAt", day + " 23:59:59"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.availabilities.length()").value(3))
+                .andExpect(jsonPath("$.data.bookedSlots").isArray());
+
+        // 5. 测试一键全天休息
+        ObjectNode toggleReq = objectMapper.createObjectNode()
+                .put("date", day)
+                .put("isOff", true)
+                .put("remark", "全天外出");
+        mockMvc.perform(post("/api/companion/availabilities/toggle-day-off")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(toggleReq.toString()))
+                .andExpect(status().isOk());
+    }
+
+    // ==================== FR-P10 周期模板与批量设置 ====================
+
+    @Test
+    @DisplayName("档期模板：按周几周期创建自动生成未来档期，来源标记为 RECURRENCE（FR-P10 周期设置）")
+    void availability_template_recurring() throws Exception {
+        String admin = adminToken();
+        String cToken = prepareCompanion(admin).path("token").asText();
+
+        // 模板：今天与明天所在周几，每天 19:00-23:00，今天起长期有效
+        LocalDate today = LocalDate.now();
+        String days = today.getDayOfWeek().getValue() + ","
+                + today.plusDays(1).getDayOfWeek().getValue();
+        MvcResult created = mockMvc.perform(post("/api/companion/availability-templates")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("templateName", "晚间固定档")
+                                .put("dayOfWeek", days)
+                                .put("allDay", false)
+                                .put("startTime", "19:00:00")
+                                .put("endTime", "23:00:00")
+                                .put("effectiveFrom", today.toString())
+                                .toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.enabled").value(true))
+                .andExpect(jsonPath("$.data.ruleText").exists())
+                .andReturn();
+        long templateId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        // 未来 28 天窗口内应生成 每周 2 天 × 4 周 ≈ 8 条 RECURRENCE 档期
+        mockMvc.perform(get("/api/companion/availabilities")
+                        .param("startAt", today.atStartOfDay().format(FMT))
+                        .param("endAt", today.plusDays(29).atStartOfDay().format(FMT))
+                        .header("Authorization", bearer(cToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()", greaterThanOrEqualTo(8)))
+                .andExpect(jsonPath("$.data[0].sourceType").value("RECURRENCE"))
+                .andExpect(jsonPath("$.data[0].templateId").value((int) templateId));
+    }
+
+    @Test
+    @DisplayName("档期模板：停用清理未来实例，重新启用再生成（FR-P10 周期设置）")
+    void availability_template_toggle() throws Exception {
+        String admin = adminToken();
+        String cToken = prepareCompanion(admin).path("token").asText();
+
+        LocalDate today = LocalDate.now();
+        MvcResult created = mockMvc.perform(post("/api/companion/availability-templates")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("templateName", "全天营业")
+                                .put("dayOfWeek", "1,2,3,4,5,6,7")
+                                .put("allDay", true)
+                                .put("effectiveFrom", today.toString())
+                                .toString()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long templateId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        // 从后天起的查询窗口（避开今天全天实例 [00:00, 次日00:00) 与窗口起点相接的边界包含；
+        // 停用清理只影响未来实例，今天已开始的实例设计为保留）
+        String from = today.plusDays(2).atStartOfDay().format(FMT);
+        String to = today.plusDays(8).atStartOfDay().format(FMT);
+        mockMvc.perform(get("/api/companion/availabilities")
+                        .param("startAt", from).param("endAt", to)
+                        .header("Authorization", bearer(cToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()", greaterThanOrEqualTo(6)));
+
+        // 停用 → 未来实例清空
+        mockMvc.perform(put("/api/companion/availability-templates/" + templateId + "/status?enabled=false")
+                        .header("Authorization", bearer(cToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.enabled").value(false));
+        mockMvc.perform(get("/api/companion/availabilities")
+                        .param("startAt", from).param("endAt", to)
+                        .header("Authorization", bearer(cToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(0));
+
+        // 重新启用 → 重新生成
+        mockMvc.perform(put("/api/companion/availability-templates/" + templateId + "/status?enabled=true")
+                        .header("Authorization", bearer(cToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.enabled").value(true));
+        mockMvc.perform(get("/api/companion/availabilities")
+                        .param("startAt", from).param("endAt", to)
+                        .header("Authorization", bearer(cToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()", greaterThanOrEqualTo(6)));
+    }
+
+    @Test
+    @DisplayName("批量设置：日期范围全天可约，相邻档期拼接支持跨边界预约（FR-P10/P11）")
+    void availability_batch_all_day_and_cross_boundary_order() throws Exception {
+        String admin = adminToken();
+        JsonNode companion = prepareCompanion(admin);
+        String cToken = companion.path("token").asText();
+        long companionUserId = companion.path("userId").asLong();
+
+        mockMvc.perform(put("/api/companion/profile/service-status")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("serviceStatus", "AVAILABLE")
+                                .toString()))
+                .andExpect(status().isOk());
+
+        // 批量：明天、后天两天全天可约（落库为 [00:00, 次日00:00) 相邻两条）
+        LocalDate d1 = LocalDate.now().plusDays(1);
+        LocalDate d2 = d1.plusDays(1);
+        mockMvc.perform(post("/api/companion/availabilities/batch")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("startDate", d1.toString())
+                                .put("endDate", d2.toString())
+                                .put("allDay", true)
+                                .put("remark", "周末全天")
+                                .toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.createdCount").value(2))
+                .andExpect(jsonPath("$.data.skippedCount").value(0));
+
+        long serviceId = createService(cToken);
+        auditApproveService(admin, serviceId);
+        mockMvc.perform(put("/api/companion/services/" + serviceId + "/shelf?onShelf=true")
+                        .header("Authorization", bearer(cToken)))
+                .andExpect(status().isOk());
+
+        JsonNode user = registerAndLogin(uniqueUser());
+        String uToken = user.path("token").asText();
+
+        // 跨天边界预约：明天 22:00 起 240 分钟（到后天 02:00）→ 两条相邻全天档期拼接覆盖 → 下单成功
+        mockMvc.perform(post("/api/play-orders")
+                        .header("Authorization", bearer(uToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("companionUserId", companionUserId)
+                                .put("companionServiceId", serviceId)
+                                .put("durationMinutes", 240)
+                                .put("appointmentStartAt", d1.atTime(22, 0).format(FMT))
+                                .toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.orderStatus").value("PENDING_PAYMENT"));
+
+        // 超出覆盖范围：第三天凌晨 03:00 起 60 分钟 → 不在可约档期内（批量只覆盖明天、后天两天）
+        mockMvc.perform(post("/api/play-orders")
+                        .header("Authorization", bearer(uToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("companionUserId", companionUserId)
+                                .put("companionServiceId", serviceId)
+                                .put("durationMinutes", 60)
+                                .put("appointmentStartAt", d2.plusDays(1).atTime(3, 0).format(FMT))
+                                .toString()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("SERVICE_NOT_AVAILABLE"));
+    }
+
+    @Test
+    @DisplayName("批量设置：与已有档期重叠的日期自动跳过并返回明细（FR-P10）")
+    void availability_batch_skip_conflict() throws Exception {
+        String admin = adminToken();
+        String cToken = prepareCompanion(admin).path("token").asText();
+
+        // 已有档期：明天 10:00-22:00
+        String day = LocalDate.now().plusDays(1).format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+        mockMvc.perform(post("/api/companion/availabilities")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("startAt", day + " 10:00:00")
+                                .put("endAt", day + " 22:00:00")
+                                .toString()))
+                .andExpect(status().isOk());
+
+        // 批量 明天~后天 每天 19:00-23:00：明天与已有档期重叠跳过，后天生效
+        mockMvc.perform(post("/api/companion/availabilities/batch")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("startDate", day)
+                                .put("endDate", LocalDate.now().plusDays(2).toString())
+                                .put("allDay", false)
+                                .put("startTime", "19:00:00")
+                                .put("endTime", "23:00:00")
+                                .toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.createdCount").value(1))
+                .andExpect(jsonPath("$.data.skippedCount").value(1))
+                .andExpect(jsonPath("$.data.skippedDetails[0]").value(containsString("重叠")));
+    }
+
+    @Test
+    @DisplayName("档期模板：参数校验（生效日期、相等时段、非法周几）（FR-P10）")
+    void availability_template_validation() throws Exception {
+        String admin = adminToken();
+        String cToken = prepareCompanion(admin).path("token").asText();
+        LocalDate today = LocalDate.now();
+
+        ObjectNode base = objectMapper.createObjectNode()
+                .put("templateName", "校验用模板")
+                .put("dayOfWeek", "1,3,5")
+                .put("allDay", false)
+                .put("startTime", "19:00:00")
+                .put("endTime", "23:00:00");
+
+        // 生效开始日期早于今天 → 422
+        mockMvc.perform(post("/api/companion/availability-templates")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(base.deepCopy().put("effectiveFrom", today.minusDays(1).toString()).toString()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("AVAILABILITY_TEMPLATE_PARAM_INVALID"));
+
+        // 开始时间等于结束时间 → 422
+        mockMvc.perform(post("/api/companion/availability-templates")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(base.deepCopy()
+                                .put("effectiveFrom", today.toString())
+                                .put("endTime", "19:00:00")
+                                .toString()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("AVAILABILITY_TEMPLATE_PARAM_INVALID"));
+
+        // 周几非法（8） → 422
+        mockMvc.perform(post("/api/companion/availability-templates")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(base.deepCopy()
+                                .put("effectiveFrom", today.toString())
+                                .put("dayOfWeek", "8")
+                                .toString()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("AVAILABILITY_TEMPLATE_PARAM_INVALID"));
+    }
+
     // ==================== FR-P13~P19 订单闭环 ====================
 
     @Test
@@ -668,13 +971,13 @@ class CompanionModuleTest {
                                 .toString()))
                 .andExpect(status().isOk());
 
-        // 档期覆盖 [now-1h, now+5h]
+        // 档期覆盖 [now, now+5h]
         LocalDateTime now = LocalDateTime.now();
         mockMvc.perform(post("/api/companion/availabilities")
                         .header("Authorization", bearer(cToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.createObjectNode()
-                                .put("startAt", now.minusHours(1).format(FMT))
+                                .put("startAt", now.format(FMT))
                                 .put("endAt", now.plusHours(5).format(FMT))
                                 .toString()))
                 .andExpect(status().isOk());
@@ -795,7 +1098,7 @@ class CompanionModuleTest {
                         .header("Authorization", bearer(cToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.createObjectNode()
-                                .put("startAt", now.minusHours(1).format(FMT))
+                                .put("startAt", now.format(FMT))
                                 .put("endAt", now.plusHours(5).format(FMT))
                                 .toString()))
                 .andExpect(status().isOk());
@@ -864,7 +1167,7 @@ class CompanionModuleTest {
                         .header("Authorization", bearer(cToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.createObjectNode()
-                                .put("startAt", now.minusHours(1).format(FMT))
+                                .put("startAt", now.format(FMT))
                                 .put("endAt", now.plusHours(8).format(FMT))
                                 .toString()))
                 .andExpect(status().isOk());
@@ -988,7 +1291,7 @@ class CompanionModuleTest {
                         .header("Authorization", bearer(cToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.createObjectNode()
-                                .put("startAt", now.minusHours(1).format(FMT))
+                                .put("startAt", now.format(FMT))
                                 .put("endAt", now.plusHours(5).format(FMT))
                                 .toString()))
                 .andExpect(status().isOk());

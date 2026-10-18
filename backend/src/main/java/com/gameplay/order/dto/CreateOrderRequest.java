@@ -43,4 +43,7 @@ public class CreateOrderRequest {
     @NotNull(message = "请选择预约开始时间")
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime appointmentStartAt;
+
+    /** 使用的用户优惠券ID，非必填 */
+    private Long couponId;
 }
