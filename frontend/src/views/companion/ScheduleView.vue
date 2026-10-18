@@ -3,6 +3,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs, { type Dayjs } from 'dayjs'
+import { ApiError } from '@/api/http'
 import {
   createAvailability,
   createAvailabilityTemplate,
@@ -266,7 +267,9 @@ async function saveException() {
     ElMessage.success(exceptionForm.kind === 'rest' ? '这一天已设为休息，长期作息保持不变' : '这段接单时间已添加')
   } catch (error) {
     if (error === 'cancel' || error === 'close') return
-    ElMessage.error('保存单日调整失败，请检查时间与已有订单后重试')
+    if (!(error instanceof ApiError)) {
+      ElMessage.error('保存单日调整失败，请检查时间与已有订单后重试')
+    }
   } finally {
     exceptionSaving.value = false
   }
@@ -290,7 +293,10 @@ function openTemplateDialog(_existing?: AvailabilityTemplate) {
   routineForm.weekdayEnd = weekdayTemplate?.endTime?.slice(0, 5) || '23:00'
   routineForm.weekendStart = weekendTemplate?.startTime?.slice(0, 5) || '14:00'
   routineForm.weekendEnd = weekendTemplate?.endTime?.slice(0, 5) || '22:00'
-  routineForm.effectiveFrom = weekdayTemplate?.effectiveFrom || weekendTemplate?.effectiveFrom || dayjs().format('YYYY-MM-DD')
+
+  const todayStr = dayjs().format('YYYY-MM-DD')
+  const candidateDate = weekdayTemplate?.effectiveFrom || weekendTemplate?.effectiveFrom || todayStr
+  routineForm.effectiveFrom = dayjs(candidateDate).isBefore(dayjs().startOf('day')) ? todayStr : candidateDate
   templateDialogVisible.value = true
 }
 
@@ -301,8 +307,8 @@ function toggleRoutineDay(group: 'weekdays' | 'weekends', day: number) {
     days.splice(index, 1)
   } else {
     days.push(day)
-    days.sort((left, right) => left - right)
   }
+  days.sort((left, right) => left - right)
 }
 
 async function saveRoutine() {
@@ -330,6 +336,11 @@ async function saveRoutine() {
     },
   ]
 
+  const todayStr = dayjs().format('YYYY-MM-DD')
+  const effectiveFrom = dayjs(routineForm.effectiveFrom).isBefore(dayjs().startOf('day'))
+    ? todayStr
+    : (routineForm.effectiveFrom || todayStr)
+
   templateSaving.value = true
   try {
     for (const group of groups) {
@@ -344,7 +355,7 @@ async function saveRoutine() {
         allDay: false,
         startTime: group.startTime + ':00',
         endTime: group.endTime + ':00',
-        effectiveFrom: routineForm.effectiveFrom,
+        effectiveFrom,
         effectiveUntil: undefined,
       }
       if (group.template) {
@@ -356,8 +367,10 @@ async function saveRoutine() {
     templateDialogVisible.value = false
     await Promise.all([load(), loadTemplates()])
     ElMessage.success('长期作息已保存，之后无需每周重复设置')
-  } catch {
-    ElMessage.error('保存长期作息失败，请检查设置后重试')
+  } catch (error) {
+    if (!(error instanceof ApiError)) {
+      ElMessage.error('保存长期作息失败，请检查设置后重试')
+    }
   } finally {
     templateSaving.value = false
   }
@@ -368,8 +381,10 @@ async function toggleTemplate(template: AvailabilityTemplate, enabled: boolean) 
     await toggleAvailabilityTemplate(template.id, enabled)
     await Promise.all([load(), loadTemplates()])
     ElMessage.success(enabled ? '长期规则已启用' : '长期规则已暂停')
-  } catch {
-    ElMessage.error('更新长期规则失败')
+  } catch (error) {
+    if (!(error instanceof ApiError)) {
+      ElMessage.error('更新长期规则失败')
+    }
   }
 }
 
@@ -384,7 +399,11 @@ async function deleteTemplate(template: AvailabilityTemplate) {
     await Promise.all([load(), loadTemplates()])
     ElMessage.success('长期规则已删除')
   } catch (error) {
-    if (error !== 'cancel' && error !== 'close') ElMessage.error('删除长期规则失败')
+    if (error !== 'cancel' && error !== 'close') {
+      if (!(error instanceof ApiError)) {
+        ElMessage.error('删除长期规则失败')
+      }
+    }
   }
 }
 
