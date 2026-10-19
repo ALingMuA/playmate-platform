@@ -498,6 +498,35 @@ class CompanionModuleTest {
                 .andExpect(jsonPath("$.data.startingPriceCents").value(2_500));
     }
 
+    @Test
+    @DisplayName("公开陪玩师卡片列表：匿名访问放行、仅收录有在架服务的陪玩师")
+    void public_companion_cards_list_supports_anonymous() throws Exception {
+        JsonNode companion = prepareCompanion(adminToken());
+        long companionUserId = companion.path("userId").asLong();
+        long enabledGameId = firstGameId();
+        long serviceTypeId = firstServiceTypeId();
+
+        // 发布在架服务后，应该出现在卡片列表中且匿名可读
+        insertPriceTestService(companionUserId, enabledGameId, serviceTypeId,
+                3_000L, "APPROVED", "ON_SHELF", 0);
+
+        MvcResult res = mockMvc.perform(get("/api/companion-profiles"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records").isArray())
+                .andReturn();
+        JsonNode root = objectMapper.readTree(res.getResponse().getContentAsString());
+        boolean found = false;
+        for (JsonNode record : root.path("data").path("records")) {
+            if (record.path("userId").asLong() == companionUserId) {
+                found = true;
+                assertThat(record.path("startingPriceCents").asLong()).isEqualTo(3_000L);
+                assertThat(record.path("serviceCount").asInt()).isGreaterThanOrEqualTo(1);
+                break;
+            }
+        }
+        assertThat(found).isTrue();
+    }
+
     private void insertPriceTestService(long companionUserId, long gameId, long serviceTypeId,
                                         long priceCents, String auditStatus, String serviceStatus, int deleted) {
         CompanionService service = new CompanionService();
