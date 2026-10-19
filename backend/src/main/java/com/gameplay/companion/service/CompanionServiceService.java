@@ -13,11 +13,13 @@ import com.gameplay.catalog.mapper.ServiceTypeMapper;
 import com.gameplay.catalog.mapper.TagMapper;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
+import com.gameplay.companion.domain.CompanionProfile;
 import com.gameplay.companion.domain.CompanionService;
 import com.gameplay.companion.dto.ServiceRequest;
 import com.gameplay.companion.dto.ServiceView;
 import com.gameplay.companion.enums.ServiceAuditStatus;
 import com.gameplay.companion.enums.ShelfStatus;
+import com.gameplay.companion.mapper.CompanionProfileMapper;
 import com.gameplay.companion.mapper.CompanionServiceMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -38,6 +40,7 @@ import java.util.List;
 public class CompanionServiceService {
 
     private final CompanionServiceMapper serviceMapper;
+    private final CompanionProfileMapper profileMapper;
     private final GameMapper gameMapper;
     private final ServiceTypeMapper serviceTypeMapper;
     private final TagMapper tagMapper;
@@ -209,6 +212,9 @@ public class CompanionServiceService {
     private ServiceView toView(CompanionService s) {
         Game game = gameMapper.selectById(s.getGameId());
         ServiceType type = serviceTypeMapper.selectById(s.getServiceTypeId());
+        // 陪玩师展示名：游戏详情页等"按服务浏览"场景需要识别服务提供者
+        CompanionProfile profile = profileMapper.selectOne(new LambdaQueryWrapper<CompanionProfile>()
+                .eq(CompanionProfile::getUserId, s.getCompanionUserId()));
         List<Long> tagIds = fromJson(s.getTagIdsJson(), new TypeReference<List<Long>>() {});
         // 标签分两组：仍启用的正常展示，已停用/已删除的单独返回，供前端加"已停用"标注（FR-M12 收口）
         List<String> tagNames = new ArrayList<>();
@@ -224,6 +230,7 @@ public class CompanionServiceService {
         return ServiceView.builder()
                 .id(s.getId())
                 .companionUserId(s.getCompanionUserId())
+                .companionDisplayName(profile == null ? "" : profile.getDisplayName())
                 .gameId(s.getGameId())
                 .gameName(game == null ? "" : game.getGameName())
                 .serviceTypeId(s.getServiceTypeId())

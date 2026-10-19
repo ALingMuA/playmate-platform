@@ -1,6 +1,7 @@
 package com.gameplay.companion.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -9,9 +10,12 @@ import com.gameplay.auth.mapper.UserMapper;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.companion.domain.CompanionProfile;
+import com.gameplay.companion.dto.BookableServiceAggregateRow;
 import com.gameplay.companion.dto.GameCapabilityDto;
 import com.gameplay.companion.dto.ProfileUpdateRequest;
 import com.gameplay.companion.dto.ProfileView;
+import com.gameplay.companion.dto.PublicCompanionCardRow;
+import com.gameplay.companion.dto.PublicCompanionCardView;
 import com.gameplay.companion.dto.PublicCompanionProfileView;
 import com.gameplay.companion.enums.CompanionServiceStatus;
 import com.gameplay.companion.mapper.CompanionProfileMapper;
@@ -22,6 +26,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 陪玩师主页与接单状态服务（FR-P05/P06）。
@@ -66,6 +73,53 @@ public class CompanionProfileService {
                         new TypeReference<List<GameCapabilityDto>>() {}))
                 .certificationStatus(profile.getCertificationStatus())
                 .build();
+    }
+
+    /**
+     * 游客可浏览的陪玩师公开列表（FR-U02：按陪玩师维度浏览）。
+     *
+     * <p>两步组装：先分页查陪玩师静态资料（含按游戏的 EXISTS 过滤），
+     * 再对当页用户批量聚合在架服务的数量、起价与游戏名，避免单条大 SQL。
+     * 聚合口径随 gameId 收窄，保证"筛选某游戏时卡片展示该游戏下的服务摘要"。</p>
+     */
+    public Page<PublicCompanionCardView> listPublicCards(Long gameId, long page, long size) {
+        Page<PublicCompanionCardRow> p = profileMapper.selectPublicCards(new Page<>(page, size), gameId);
+        List<PublicCompanionCardView> cards = new ArrayList<>(p.getRecords().size());
+        if (!p.getRecords().isEmpty()) {
+            Map<Long, BookableServiceAggregateRow> aggByUser = serviceMapper
+                    .aggregateBookableByUserIds(
+                            p.getRecords().stream().map(PublicCompanionCardRow::getUserId).toList(),
+                            gameId)
+                    .stream()
+                    .collect(Collectors.toMap(BookableServiceAggregateRow::getCompanionUserId,
+                            Function.identity()));
+            for (PublicCompanionCardRow row : p.getRecords()) {
+                BookableServiceAggregateRow agg = aggByUser.get(row.getUserId());
+                cards.add(PublicCompanionCardView.builder()
+                        .userId(row.getUserId())
+                        .displayName(row.getDisplayName())
+                        .avatarUrl(row.getAvatarUrl())
+                        .serviceStatus(row.getServiceStatus())
+                        .serviceCount(agg == null ? 0 : agg.getServiceCount().intValue())
+                        .startingPriceCents(agg == null ? null : agg.getStartingPriceCents())
+                        .ratingAvg(row.getRatingAvg())
+                        .ratingCount(row.getRatingCount())
+                        .completedOrderCount(row.getCompletedOrderCount())
+                        .gameNames(splitGameNames(agg))
+                        .build());
+            }
+        }
+        Page<PublicCompanionCardView> result = new Page<>(p.getCurrent(), p.getSize(), p.getTotal());
+        result.setRecords(cards);
+        return result;
+    }
+
+    /** GROUP_CONCAT 产物拆分为游戏名列表；聚合行缺失或为空时返回空列表。 */
+    private List<String> splitGameNames(BookableServiceAggregateRow agg) {
+        if (agg == null || agg.getGameNames() == null || agg.getGameNames().isBlank()) {
+            return List.of();
+        }
+        return List.of(agg.getGameNames().split(","));
     }
 
     /** 更新主页（FR-P05）：展示名、简介、认证能力 */

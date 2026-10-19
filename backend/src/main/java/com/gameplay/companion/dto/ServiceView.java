@@ -16,6 +16,10 @@ public class ServiceView {
 
     private Long id;
     private Long companionUserId;
+
+    /** 提供该服务的陪玩师展示名（联查 companion_profile；资料缺失时为空串） */
+    private String companionDisplayName;
+
     private Long gameId;
     private String gameName;
     private Long serviceTypeId;

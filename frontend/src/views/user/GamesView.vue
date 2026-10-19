@@ -28,8 +28,8 @@ async function loadData() {
   }
 }
 
-function goCompanions(game: Game) {
-  router.push({ path: '/companions', query: { gameId: String(game.id) } })
+function goGameDetail(game: Game) {
+  router.push(`/games/${game.id}`)
 }
 
 function gameInitial(game: Game): string {
@@ -61,7 +61,7 @@ onMounted(loadData)
 
       <!-- 游戏卡片网格（原型 game-grid） -->
       <div v-else-if="games.length" class="game-grid">
-        <div v-for="game in games" :key="game.id" class="game-card" @click="goCompanions(game)">
+        <div v-for="game in games" :key="game.id" class="game-card" @click="goGameDetail(game)">
           <div class="game-cover">
             <el-image
               v-if="game.gameIconUrl"
@@ -84,7 +84,7 @@ onMounted(loadData)
             <div class="game-name">{{ game.gameName }}</div>
             <div class="game-meta">{{ game.gameIntro || '暂无简介' }}</div>
             <div class="game-card-footer">
-              <span class="view-companions-btn">找TA陪玩 →</span>
+              <span class="view-companions-btn">查看服务 →</span>
             </div>
           </div>
         </div>

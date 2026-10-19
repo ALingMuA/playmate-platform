@@ -2,13 +2,14 @@
 /**
  * 找陪玩（对齐 frontend-prototype companions.html：筛选栏 + 陪玩师卡片 + 分页）。
  *
- * <p>展示审核通过且已上架的可预约服务，支持按游戏筛选与分页；
- * 从游戏列表页携带 gameId 进入时自动预选。点击卡片跳转订单页预约。</p>
+ * <p>列表展示陪玩师维度（FR-U02）：只出现认证通过且存在在架可预约服务的陪玩师；
+ * 支持按游戏筛选（该游戏下有在架服务）与分页，从游戏列表页携带 gameId 进入时自动预选。
+ * 点击卡片跳转陪玩师公开主页并直达"服务"Tab，由用户选择具体服务发起预约。</p>
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { listGames, type Game } from '@/api/catalog'
-import { listBookableServices, type BookableService } from '@/api/order'
+import { listPublicCompanions, type PublicCompanionCard } from '@/api/companion'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
@@ -20,7 +21,7 @@ const showApplyCta = computed(() => !userStore.hasRole('COMPANION'))
 
 const games = ref<Game[]>([])
 const gameId = ref<number | undefined>(undefined)
-const services = ref<BookableService[]>([])
+const companions = ref<PublicCompanionCard[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = 8
@@ -33,8 +34,8 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize))
 async function load() {
   loading.value = true
   try {
-    const result = await listBookableServices(gameId.value, undefined, page.value, pageSize)
-    services.value = result.records
+    const result = await listPublicCompanions(gameId.value, page.value, pageSize)
+    companions.value = result.records
     total.value = result.total
   } finally {
     loading.value = false
@@ -46,15 +47,32 @@ function onGameChange() {
   load()
 }
 
-function goBook(service: BookableService) {
-  router.push({
-    path: '/booking',
-    query: { companionUserId: String(service.companionUserId), serviceId: String(service.id) },
-  })
+/** 直达陪玩师公开主页的"服务"Tab（页内已支持选服务 → 立即预约） */
+function goServices(c: PublicCompanionCard) {
+  router.push(`/companions/${c.userId}#tab=services`)
 }
 
 function fmtPrice(cents: number): string {
   return '¥' + (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)
+}
+
+function initial(c: PublicCompanionCard): string {
+  return c.displayName ? c.displayName.charAt(0) : '伴'
+}
+
+const SERVICE_STATUS: Record<PublicCompanionCard['serviceStatus'], { text: string; badge: string }> = {
+  AVAILABLE: { text: '接单中', badge: 'badge-success' },
+  BUSY: { text: '忙碌中', badge: 'badge-warning' },
+  RESTING: { text: '休息中', badge: 'badge-secondary' },
+  SUSPENDED: { text: '已暂停', badge: 'badge-destructive' },
+}
+
+function statusText(status: PublicCompanionCard['serviceStatus']): string {
+  return SERVICE_STATUS[status]?.text ?? '休息中'
+}
+
+function statusBadge(status: PublicCompanionCard['serviceStatus']): string {
+  return SERVICE_STATUS[status]?.badge ?? 'badge-secondary'
 }
 
 onMounted(async () => {
@@ -89,7 +107,7 @@ watch(
       <!-- 页头 -->
       <div class="page-header">
         <h1 class="page-title">找陪玩师</h1>
-        <p class="page-subtitle">筛选心仪的陪玩伙伴 · 当前：{{ currentGameName }}（共 {{ total }} 个服务）</p>
+        <p class="page-subtitle">筛选心仪的陪玩伙伴 · 当前：{{ currentGameName }}（共 {{ total }} 位陪玩师）</p>
       </div>
 
       <!-- 筛选栏（原型 filter-bar） -->
@@ -113,32 +131,42 @@ watch(
       <div v-if="loading" class="empty-state">加载中…</div>
 
       <!-- 陪玩师卡片网格（原型 companion-grid） -->
-      <div v-else-if="services.length" class="companion-grid">
-        <div v-for="s in services" :key="s.id" class="companion-card"
-          @click="goBook(s)">
+      <div v-else-if="companions.length" class="companion-grid">
+        <div v-for="c in companions" :key="c.userId" class="companion-card" @click="goServices(c)">
           <div class="companion-header">
-            <div class="companion-avatar" @click.stop="router.push(`/companions/${s.companionUserId}`)" title="点击查看陪玩主页">🎮</div>
+            <div class="companion-avatar">
+              <el-image v-if="c.avatarUrl" :src="c.avatarUrl" fit="cover" loading="lazy">
+                <template #error>
+                  <span>{{ initial(c) }}</span>
+                </template>
+              </el-image>
+              <span v-else>{{ initial(c) }}</span>
+            </div>
             <div class="companion-meta">
-              <div class="companion-name">{{ s.title }}</div>
-              <div class="companion-level">{{ s.gameName }} · {{ s.serviceTypeName }}</div>
+              <div class="companion-name">
+                {{ c.displayName }}
+                <span class="badge" :class="statusBadge(c.serviceStatus)">{{ statusText(c.serviceStatus) }}</span>
+              </div>
+              <div class="companion-level">
+                {{ c.gameNames.length ? c.gameNames.join(' · ') : '暂无在架服务' }}
+              </div>
               <div class="companion-rating">
                 <span style="color: #f59e0b">★</span>
-                <span>{{ fmtPrice(s.priceCents) }}/小时</span>
-                <span class="text-muted">· 最短 {{ s.minDurationMinutes }} 分钟</span>
+                <span v-if="c.ratingCount">{{ c.ratingAvg?.toFixed(1) ?? '5.0' }}</span>
+                <span v-else>暂无评分</span>
+                <span class="text-muted">（{{ c.ratingCount }} 条评价）</span>
+                <span class="text-muted">· 已完成 {{ c.completedOrderCount }} 单</span>
               </div>
             </div>
           </div>
-          <div class="companion-tags" v-if="s.tagNames?.length">
-            <span v-for="t in s.tagNames" :key="t" class="tag">{{ t }}</span>
-          </div>
-          <p v-else-if="s.description" class="text-muted" style="font-size: 0.8125rem; margin-bottom: 12px">
-            {{ s.description }}
-          </p>
           <div class="companion-footer">
-            <div class="companion-price">{{ fmtPrice(s.priceCents) }}<span>/小时</span></div>
+            <div class="companion-price">
+              <template v-if="c.startingPriceCents != null">{{ fmtPrice(c.startingPriceCents) }}<span>起/小时</span></template>
+              <template v-else>暂无报价</template>
+            </div>
             <div class="companion-actions">
-              <button class="btn btn-outline btn-sm" @click.stop="router.push(`/companions/${s.companionUserId}`)">查看主页</button>
-              <button class="btn btn-primary btn-sm" @click.stop="goBook(s)">立即预约</button>
+              <span class="text-muted" style="font-size: 0.8125rem">{{ c.serviceCount }} 个在架服务</span>
+              <button class="btn btn-primary btn-sm" @click.stop="goServices(c)">查看服务</button>
             </div>
           </div>
         </div>
@@ -147,7 +175,7 @@ watch(
       <!-- 空态 -->
       <div v-else class="empty-state">
         <div class="empty-icon">🔍</div>
-        <p>暂无符合条件的陪玩服务，换个游戏看看吧</p>
+        <p>暂无符合条件的陪玩师，换个游戏看看吧</p>
       </div>
 
       <!-- 入驻引导（FR-P01）：陪玩师本人不展示 -->

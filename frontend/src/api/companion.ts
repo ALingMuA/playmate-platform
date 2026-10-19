@@ -203,6 +203,32 @@ export function getPublicCompanionProfile(userId: number): Promise<PublicCompani
   return request<PublicCompanionProfile>({ url: `/companion-profiles/${userId}`, method: 'get' })
 }
 
+/** 陪玩师公开列表卡片（对应后端 PublicCompanionCardView，FR-U02 按陪玩师维度浏览） */
+export interface PublicCompanionCard {
+  userId: number
+  displayName: string
+  avatarUrl: string | null
+  serviceStatus: 'AVAILABLE' | 'BUSY' | 'RESTING' | 'SUSPENDED'
+  /** 当前筛选口径下的在架服务数量 */
+  serviceCount: number
+  /** 当前筛选口径下最低服务价格（分）；无在架服务时为空 */
+  startingPriceCents: number | null
+  ratingAvg: number | null
+  ratingCount: number
+  completedOrderCount: number
+  /** 当前筛选口径下在架服务覆盖的游戏名（去重） */
+  gameNames: string[]
+}
+
+/** 陪玩师公开列表分页；携带 gameId 时按"该游戏下有在架服务"筛选，聚合摘要同口径收窄。 */
+export function listPublicCompanions(gameId?: number, page = 1, size = 10): Promise<PageResult<PublicCompanionCard>> {
+  return request<PageResult<PublicCompanionCard>>({
+    url: '/companion-profiles',
+    method: 'get',
+    params: { gameId, page, size },
+  })
+}
+
 export function listPublicAvailabilities(userId: number, days = 7): Promise<PublicAvailability[]> {
   return request<PublicAvailability[]>({
     url: `/companion-profiles/${userId}/availabilities`,

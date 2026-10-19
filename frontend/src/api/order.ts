@@ -72,6 +72,8 @@ export function createOrder(data: {
 export interface BookableService {
   id: number
   companionUserId: number
+  /** 提供该服务的陪玩师展示名（资料缺失时为空串） */
+  companionDisplayName?: string
   gameId: number
   gameName: string
   serviceTypeId: number

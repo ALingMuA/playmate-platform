@@ -44,6 +44,13 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '游戏' },
       },
       {
+        // 游戏详情（FR-U02）：展示该游戏下的公开可预约服务列表
+        path: 'games/:gameId',
+        name: 'game-detail',
+        component: () => import('@/views/user/GameDetailView.vue'),
+        meta: { title: '游戏详情' },
+      },
+      {
         path: 'companions',
         name: 'user-companions',
         component: () => import('@/views/user/CompanionsView.vue'),
