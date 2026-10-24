@@ -3,16 +3,20 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { listFavorites, type FavoriteView } from '@/api/favorite'
 import { myOrders, walletMe, type Order } from '@/api/order'
+import { myReviews, type Review } from '@/api/review'
 
 const router = useRouter()
 const orders = ref<Order[]>([])
 const favorites = ref<FavoriteView[]>([])
+const reviews = ref<Review[]>([])
 const wallet = ref<{ balanceCents: number; frozenCents: number; totalIncomeCents: number } | null>(null)
 const ordersLoading = ref(false)
 const favoritesLoading = ref(false)
+const reviewsLoading = ref(false)
 const walletLoading = ref(false)
 const ordersFailed = ref(false)
 const favoritesFailed = ref(false)
+const reviewsFailed = ref(false)
 const walletFailed = ref(false)
 
 async function loadOrders() {
@@ -39,6 +43,18 @@ async function loadFavorites() {
   }
 }
 
+async function loadReviews() {
+  reviewsLoading.value = true
+  reviewsFailed.value = false
+  try {
+    reviews.value = (await myReviews(1, 3)).records
+  } catch {
+    reviewsFailed.value = true
+  } finally {
+    reviewsLoading.value = false
+  }
+}
+
 async function loadWallet() {
   walletLoading.value = true
   walletFailed.value = false
@@ -62,7 +78,7 @@ function orderStatus(status: Order['orderStatus']) {
   } as Record<string, string>)[status] ?? status
 }
 
-onMounted(() => { void loadOrders(); void loadFavorites(); void loadWallet() })
+onMounted(() => { void loadOrders(); void loadFavorites(); void loadReviews(); void loadWallet() })
 </script>
 
 <template>
@@ -117,6 +133,27 @@ onMounted(() => { void loadOrders(); void loadFavorites(); void loadWallet() })
     <section class="card">
       <div class="card-body">
         <div class="flex items-center justify-between flex-wrap gap-1">
+          <h3 class="card-title">我的评价</h3>
+        </div>
+        <div v-if="reviewsLoading" class="profile-overview-loading">加载评价…</div>
+        <div v-else-if="reviewsFailed" class="profile-overview-loading">
+          <span>评价暂时无法加载</span><button class="btn btn-ghost btn-sm" @click="loadReviews">重试</button>
+        </div>
+        <div v-else-if="reviews.length" class="profile-overview-list">
+          <button v-for="review in reviews" :key="review.id" class="profile-overview-row"
+            @click="router.push(`/orders/${review.orderId}`)">
+            <span><strong>{{ review.score }} / 5 分</strong>
+              <small>评价了订单 #{{ review.orderId }} · {{ review.content || '未填写评价内容' }}</small></span>
+            <span class="text-muted">{{ review.createdAt?.slice(0, 10) }}</span>
+          </button>
+        </div>
+        <el-empty v-else description="完成订单后可发表评价" :image-size="72" />
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-body">
+        <div class="flex items-center justify-between flex-wrap gap-1">
           <h3 class="card-title">钱包概览</h3>
           <button class="btn btn-ghost btn-sm" @click="router.push('/profile#tab=wallet')">查看流水</button>
         </div>
@@ -134,7 +171,7 @@ onMounted(() => { void loadOrders(); void loadFavorites(); void loadWallet() })
 </template>
 
 <style scoped>
-.profile-overview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.profile-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .profile-overview-grid > .card { min-width: 0; margin: 0; }
 .profile-overview-list { display: grid; margin-top: 12px; }
 .profile-overview-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; padding: 12px 0; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: inherit; text-align: left; cursor: pointer; }
@@ -146,6 +183,5 @@ onMounted(() => { void loadOrders(); void loadFavorites(); void loadWallet() })
 .profile-wallet-summary > div { min-width: 0; display: grid; gap: 6px; padding: 13px; border-radius: 10px; background: var(--muted); }
 .profile-wallet-summary strong { overflow: hidden; text-overflow: ellipsis; font-size: 20px; }
 .profile-wallet-summary small { color: var(--muted-foreground); }
-@media (max-width: 980px) { .profile-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .profile-overview-grid { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .profile-overview-grid { grid-template-columns: 1fr; } }
 </style>

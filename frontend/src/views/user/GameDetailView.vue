@@ -68,9 +68,9 @@ function goBook(service: BookableService) {
   })
 }
 
-/** 查看服务提供者的公开主页，直达"服务"Tab */
+/** 查看服务提供者的公开主页（服务列表在主页首屏即可预约） */
 function goCompanion(service: BookableService) {
-  router.push(`/companions/${service.companionUserId}#tab=services`)
+  router.push(`/companions/${service.companionUserId}`)
 }
 
 function fmtPrice(cents: number): string {

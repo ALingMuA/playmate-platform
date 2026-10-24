@@ -47,9 +47,9 @@ function onGameChange() {
   load()
 }
 
-/** 直达陪玩师公开主页的"服务"Tab（页内已支持选服务 → 立即预约） */
+/** 直达陪玩师公开主页（服务列表在主页首屏即可预约） */
 function goServices(c: PublicCompanionCard) {
-  router.push(`/companions/${c.userId}#tab=services`)
+  router.push(`/companions/${c.userId}`)
 }
 
 function fmtPrice(cents: number): string {

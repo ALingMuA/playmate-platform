@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
- * 我的陪玩主页（FR-P05 主页维护 / FR-P06 接单状态）。
+ * 主页管理（FR-P05 主页维护 / FR-P06 接单状态）。
  *
- * <p>展示名、主页简介与认证游戏能力在此维护，保存后即时生效于用户端陪玩主页；
+ * <p>顶部「经营速览」横幅聚合接单状态开关（营业总闸）与评分/完成单/最近更新指标；
+ * 展示名、主页简介与认证游戏能力在下方表单维护，保存后即时生效于用户端陪玩主页。
  * 接单状态支持"可接单 / 忙碌 / 休息中"，`SUSPENDED`（暂停接单资格）仅管理员可设置，
  * 因此前端不提供该选项。</p>
  */
@@ -135,25 +136,49 @@ async function handleStatus(value: string | number | boolean | undefined) {
 
 <template>
   <div class="profile-view">
-    <el-card v-loading="loading" class="block">
-      <template #header>接单状态（FR-P06）</template>
-      <template v-if="profile">
-        <div class="status-row">
-          <el-radio-group
-            :model-value="profile.serviceStatus"
-            :disabled="statusSaving"
-            @change="handleStatus"
-          >
-            <el-radio-button v-for="s in statusOptions" :key="s.value" :value="s.value">
-              {{ s.label }}
-            </el-radio-button>
-          </el-radio-group>
+    <el-card v-loading="loading" class="block overview-card">
+      <template #header>
+        <div class="overview-header">
+          <span>经营速览</span>
           <el-tag
+            v-if="profile"
             :type="profile.certificationStatus === 'APPROVED' ? 'success' : 'danger'"
             size="small"
           >
             {{ certificationText[profile.certificationStatus] ?? profile.certificationStatus }}
           </el-tag>
+        </div>
+      </template>
+      <template v-if="profile">
+        <div class="overview-body">
+          <div class="overview-status">
+            <span class="overview-status-label">接单状态（FR-P06）</span>
+            <el-radio-group
+              :model-value="profile.serviceStatus"
+              :disabled="statusSaving"
+              @change="handleStatus"
+            >
+              <el-radio-button v-for="s in statusOptions" :key="s.value" :value="s.value">
+                {{ s.label }}
+              </el-radio-button>
+            </el-radio-group>
+          </div>
+          <div class="overview-divider" aria-hidden="true" />
+          <div class="overview-stats">
+            <div class="overview-stat">
+              <span>评分</span>
+              <strong>{{ profile.ratingAvg ?? '-' }}</strong>
+              <small>{{ profile.ratingCount }} 条评价</small>
+            </div>
+            <div class="overview-stat">
+              <span>已完成订单</span>
+              <strong>{{ profile.completedOrderCount }} 单</strong>
+            </div>
+            <div class="overview-stat">
+              <span>最近更新</span>
+              <strong class="is-time">{{ profile.updatedAt ?? '-' }}</strong>
+            </div>
+          </div>
         </div>
         <el-alert
           v-if="profile.serviceStatus !== 'AVAILABLE'"
@@ -164,29 +189,6 @@ async function handleStatus(value: string | number | boolean | undefined) {
         />
       </template>
     </el-card>
-
-    <el-row :gutter="16" class="stat-row" v-if="profile">
-      <el-col :xs="12" :sm="12" :md="8">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-label">评分</div>
-          <div class="stat-value">
-            {{ profile.ratingAvg ?? '-' }} <span class="stat-extra">{{ profile.ratingCount }} 条评价</span>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :sm="12" :md="8">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-label">已完成订单</div>
-          <div class="stat-value">{{ profile.completedOrderCount }} 单</div>
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :sm="12" :md="8">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-label">最近更新</div>
-          <div class="stat-value stat-time">{{ profile.updatedAt ?? '-' }}</div>
-        </el-card>
-      </el-col>
-    </el-row>
 
     <el-card class="block">
       <template #header>主页资料（FR-P05）</template>
@@ -250,32 +252,57 @@ async function handleStatus(value: string | number | boolean | undefined) {
 .block {
   margin-bottom: 16px;
 }
-.status-row {
+.overview-header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+}
+.overview-body {
+  display: flex;
+  align-items: center;
+  gap: 24px;
   flex-wrap: wrap;
 }
-.stat-row {
-  margin-bottom: 16px;
+.overview-status {
+  display: grid;
+  gap: 8px;
 }
-.stat-card {
-  text-align: center;
-}
-.stat-label {
+.overview-status-label {
   color: var(--el-text-color-secondary);
   font-size: 13px;
-  margin-bottom: 6px;
 }
-.stat-value {
+.overview-divider {
+  align-self: stretch;
+  width: 1px;
+  background: var(--el-border-color-lighter);
+}
+.overview-stats {
+  display: flex;
+  gap: 32px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+.overview-stat {
+  display: grid;
+  gap: 4px;
+  min-width: 90px;
+}
+.overview-stat span {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+.overview-stat strong {
   font-size: 20px;
   font-weight: 600;
 }
-.stat-extra,
-.stat-time {
-  font-size: 13px;
-  font-weight: 400;
+.overview-stat small {
+  font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+.overview-stat strong.is-time {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 28px;
 }
 .profile-form {
   max-width: 900px;
@@ -294,5 +321,16 @@ async function handleStatus(value: string | number | boolean | undefined) {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   margin-top: 4px;
+}
+@media (max-width: 768px) {
+  .overview-divider {
+    display: none;
+  }
+  .overview-body {
+    gap: 16px;
+  }
+  .overview-stats {
+    gap: 20px;
+  }
 }
 </style>
