@@ -29,6 +29,31 @@ const statusMap: Record<string, { label: string; type: string }> = {
   CLOSED: { label: '已关闭', type: 'info' },
 }
 
+/** 状态轨迹动作码 → 用户可读动作名（与后端 OrderService 写入的动作码及默认备注一一对应） */
+const actionLabels: Record<string, string> = {
+  CREATE: '创建订单',
+  PAY: '模拟支付成功',
+  ACCEPT: '接单成功',
+  REJECT: '陪玩师拒单',
+  START: '开始服务',
+  END: '结束服务',
+  CONFIRM: '用户确认完成',
+  CANCEL: '取消订单',
+  COMPLAINT: '发起投诉',
+  ARBITRATE: '平台仲裁',
+  CLOSE_EXPIRED_PAYMENT: '支付超时自动关闭',
+  CLOSE_EXPIRED_ACCEPTANCE: '接单超时自动关闭',
+  AUTO_CONFIRM: '超时自动确认完成',
+}
+
+function actionLabel(code?: string): string {
+  return (code && actionLabels[code]) || '状态更新'
+}
+
+function statusLabel(code?: string): string {
+  return (code && statusMap[code]?.label) || code || ''
+}
+
 function fmtTime(t?: string): string {
   if (!t) return '-'
   return t.length >= 16 ? t.slice(0, 16) : t
@@ -123,11 +148,9 @@ onMounted(load)
                 <div class="timeline">
                   <div v-for="(h, i) in order.statusHistories ?? []" :key="i" class="timeline-item active">
                     <div class="timeline-time">{{ fmtTime(h.createdAt) }}</div>
-                    <div class="timeline-title">
-                      {{ h.fromStatus || '创建' }} → {{ h.toStatus }}
-                      <span class="badge badge-secondary" style="margin-left: 6px">{{ h.actionCode }}</span>
-                    </div>
-                    <div v-if="h.reason" class="timeline-time">{{ h.reason }}</div>
+                    <div class="timeline-title">{{ actionLabel(h.actionCode) }}</div>
+                    <div class="timeline-time">订单进入「{{ statusLabel(h.toStatus) }}」阶段</div>
+                    <div v-if="h.reason && h.reason !== actionLabel(h.actionCode)" class="timeline-time">{{ h.reason }}</div>
                   </div>
                   <div v-if="!order.statusHistories?.length" class="text-muted" style="font-size: 0.875rem">
                     暂无状态记录

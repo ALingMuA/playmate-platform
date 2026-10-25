@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { cancelOrder, confirmOrder, myOrders, type Order } from '@/api/order'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
+
+/** 陪玩师收到的订单在工作台「接单履约」展示，本列表仅含买家视角订单 */
+const isCompanion = computed(() => userStore.user?.roles?.includes('COMPANION') ?? false)
 const activeTab = ref('ALL')
 const list = ref<Order[]>([])
 const total = ref(0)
@@ -118,6 +123,12 @@ onMounted(load)
 
 <template>
   <div v-loading="loading">
+    <div v-if="isCompanion" class="companion-order-guide">
+      <span>本列表为你作为买家的订单；玩家预约你的订单在陪玩师工作台「接单履约」处理。</span>
+      <button type="button" class="btn btn-outline btn-sm" @click="router.push('/companion/orders')">
+        去接单履约 →
+      </button>
+    </div>
     <div class="tabs">
       <button v-for="t in tabs" :key="t.value" class="tab" :class="{ active: activeTab === t.value }"
         @click="onTabChange(t.value)">
@@ -219,3 +230,19 @@ onMounted(load)
     </div>
   </div>
 </template>
+
+<style scoped>
+.companion-order-guide {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--primary) 6%, var(--card));
+  font-size: 13px;
+}
+</style>

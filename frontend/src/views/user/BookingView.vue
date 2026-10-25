@@ -10,6 +10,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { createOrder, listBookableServices, type BookableService } from '@/api/order'
+import { listPublicAvailabilities, type PublicAvailability } from '@/api/companion'
 import { availableCoupons, previewCoupon, type UserCouponView, type CouponPreviewResult } from '@/api/coupon'
 
 const route = useRoute()
@@ -67,6 +68,43 @@ const selectedTodayQuick = ref<TodayQuickTime>('15m')
 /** 明天/后天常用游戏时段：'14:00' | '19:30' | '21:30' | 'exact' */
 const futureTimePreset = ref<string>('19:30')
 const customTimeStr = ref<string>('20:00')
+
+// ==================== 档期可约性预检（与后端档期完全覆盖规则一致） ====================
+
+/** 陪玩师未来 7 日公开可约档期；接口失败时为空且 loaded=false，前端预检跳过、由后端兜底 */
+const availabilities = ref<PublicAvailability[]>([])
+const availabilityLoaded = ref(false)
+
+/** 判断 [start, end) 是否被档期完全覆盖（支持相邻档期拼接） */
+function slotCovered(start: ReturnType<typeof dayjs>, end: ReturnType<typeof dayjs>): boolean {
+  if (!availabilities.value.length) return false
+  const ranges = availabilities.value
+    .map((a) => ({ s: dayjs(a.startAt).valueOf(), e: dayjs(a.endAt).valueOf() }))
+    .sort((x, y) => x.s - y.s)
+  let cursor = start.valueOf()
+  for (const r of ranges) {
+    if (r.e <= cursor) continue
+    if (r.s > cursor) return false
+    cursor = r.e
+    if (cursor >= end.valueOf()) return true
+  }
+  return false
+}
+
+/** 今天快捷时段（now+offsetMin 起、按当前时长）是否可约 */
+function quickAvailable(offsetMinutes: number): boolean {
+  if (!availabilityLoaded.value) return true
+  const start = dayjs().add(offsetMinutes, 'minute')
+  return slotCovered(start, start.add(form.durationMinutes, 'minute'))
+}
+
+/** 当前所选 [开始时间, +时长) 是否落在可约档期内 */
+const selectedSlotAvailable = computed(() => {
+  if (!availabilityLoaded.value || !form.appointmentStart) return true
+  const start = dayjs(form.appointmentStart)
+  if (!start.isValid()) return true
+  return slotCovered(start, start.add(form.durationMinutes, 'minute'))
+})
 
 function updateAppointmentStart() {
   if (selectedDateKey.value === 'custom') {
@@ -220,6 +258,10 @@ async function handleSubmit() {
     ElMessage.warning(`该服务最短时长为 ${service.minDurationMinutes} 分钟`)
     return
   }
+  if (!selectedSlotAvailable.value) {
+    ElMessage.warning('所选时段不在陪玩师可约档期内，请选择档期内的具体时间')
+    return
+  }
   submitting.value = true
   try {
     const order = await createOrder({
@@ -240,6 +282,10 @@ async function handleSubmit() {
 }
 
 onMounted(async () => {
+  // 档期预检数据：失败不影响下单流程（后端仍会兜底校验）
+  listPublicAvailabilities(companionUserId.value, 7)
+    .then((slots) => { availabilities.value = slots; availabilityLoaded.value = true })
+    .catch(() => { availabilityLoaded.value = false })
   try {
     const result = await listBookableServices(undefined, companionUserId.value, 1, 50)
     services.value = result.records
@@ -350,6 +396,8 @@ onMounted(async () => {
                       type="button"
                       class="time-pill"
                       :class="{ active: selectedTodayQuick === '15m' }"
+                      :disabled="!quickAvailable(15)"
+                      :title="quickAvailable(15) ? '' : '当前时段不在陪玩师可约档期内'"
                       @click="selectTodayQuickTime('15m')"
                     >
                       ⚡ 尽快上号 (约15分钟后)
@@ -358,6 +406,8 @@ onMounted(async () => {
                       type="button"
                       class="time-pill"
                       :class="{ active: selectedTodayQuick === '30m' }"
+                      :disabled="!quickAvailable(30)"
+                      :title="quickAvailable(30) ? '' : '当前时段不在陪玩师可约档期内'"
                       @click="selectTodayQuickTime('30m')"
                     >
                       30分钟后
@@ -366,6 +416,8 @@ onMounted(async () => {
                       type="button"
                       class="time-pill"
                       :class="{ active: selectedTodayQuick === '60m' }"
+                      :disabled="!quickAvailable(60)"
+                      :title="quickAvailable(60) ? '' : '当前时段不在陪玩师可约档期内'"
                       @click="selectTodayQuickTime('60m')"
                     >
                       1小时后
@@ -457,6 +509,9 @@ onMounted(async () => {
                 <!-- 实时提示高亮徽章 -->
                 <div class="appointment-summary-pill mt-1">
                   ⏰ <strong>已选预约开始时间：</strong>{{ friendlyStartTime }}
+                  <span v-if="!selectedSlotAvailable" class="slot-warn">
+                    ⚠ 所选时段不在陪玩师可约档期内，无法下单
+                  </span>
                 </div>
               </div>
 
@@ -642,3 +697,12 @@ onMounted(async () => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.slot-warn {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.8125rem;
+  color: var(--destructive);
+}
+</style>
