@@ -46,7 +46,6 @@ const pageTitle = computed(() => (route.meta.title as string | undefined) ?? pro
 const canGoBack = computed(() => !route.meta.workbenchHome)
 
 const menuIcons: Record<string, Component> = {
-  '主页管理': UserFilled,
   '服务管理': Service,
   '接单时间': Tickets,
   '接单履约': Collection,

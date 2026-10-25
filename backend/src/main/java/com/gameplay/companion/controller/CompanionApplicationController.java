@@ -6,9 +6,11 @@ import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.companion.dto.ApplicationSubmitRequest;
 import com.gameplay.companion.dto.ApplicationView;
+import com.gameplay.companion.dto.CapabilityChangeSubmitRequest;
 import com.gameplay.companion.service.ApplicationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -34,6 +36,15 @@ public class CompanionApplicationController {
     public ApiResponse<ApplicationView> submit(@Valid @RequestBody ApplicationSubmitRequest request,
                                                Authentication authentication) {
         return ApiResponse.ok(applicationService.submit(currentUserId(authentication), request));
+    }
+
+    /** 提交能力变更申请（陪玩师端）：审核通过后覆盖陪玩主页的游戏能力 */
+    @PostMapping("/capability-changes")
+    @PreAuthorize("hasRole('COMPANION')")
+    public ApiResponse<ApplicationView> submitCapabilityChange(
+            @Valid @RequestBody CapabilityChangeSubmitRequest request,
+            Authentication authentication) {
+        return ApiResponse.ok(applicationService.submitCapabilityChange(currentUserId(authentication), request));
     }
 
     /** 我的申请记录（FR-P03） */

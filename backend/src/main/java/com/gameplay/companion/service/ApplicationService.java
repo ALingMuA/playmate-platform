@@ -19,8 +19,10 @@ import com.gameplay.companion.domain.CompanionApplication;
 import com.gameplay.companion.domain.CompanionProfile;
 import com.gameplay.companion.dto.ApplicationSubmitRequest;
 import com.gameplay.companion.dto.ApplicationView;
+import com.gameplay.companion.dto.CapabilityChangeSubmitRequest;
 import com.gameplay.companion.dto.GameCapabilityDto;
 import com.gameplay.companion.enums.ApplicationAuditStatus;
+import com.gameplay.companion.enums.ApplicationType;
 import com.gameplay.companion.mapper.CompanionApplicationMapper;
 import com.gameplay.companion.mapper.CompanionProfileMapper;
 import lombok.RequiredArgsConstructor;
@@ -59,25 +61,59 @@ public class ApplicationService {
                 .eq(CompanionProfile::getUserId, userId)) > 0) {
             throw new BusinessException(ErrorCode.COMPANION_ALREADY_APPROVED);
         }
-        // 存在待审核申请则拒绝重复提交
+        // 存在待审核的入驻申请则拒绝重复提交（能力变更申请不影响入驻判重）
         if (applicationMapper.selectCount(new LambdaQueryWrapper<CompanionApplication>()
                 .eq(CompanionApplication::getApplicantUserId, userId)
+                .eq(CompanionApplication::getApplicationType, ApplicationType.ENTRY.name())
                 .eq(CompanionApplication::getAuditStatus, ApplicationAuditStatus.PENDING.name())) > 0) {
             throw new BusinessException(ErrorCode.COMPANION_APPLICATION_ALREADY_PENDING);
         }
         // 校验能力中的游戏存在且启用
-        for (GameCapabilityDto cap : req.getCapabilities()) {
-            Game game = gameMapper.selectById(cap.getGameId());
-            if (game == null || !Integer.valueOf(1).equals(game.getEnabled())) {
-                throw new BusinessException(ErrorCode.GAME_NOT_FOUND, "游戏不存在或已停用");
-            }
-        }
+        validateCapabilities(req.getCapabilities());
 
         CompanionApplication application = new CompanionApplication();
         application.setApplicantUserId(userId);
+        application.setApplicationType(ApplicationType.ENTRY.name());
         application.setRealName(req.getRealName());
         application.setContactMobile(req.getContactMobile());
         application.setIntroduction(req.getIntroduction());
+        application.setGameCapabilityJson(toJson(req.getCapabilities()));
+        application.setProofUrlsJson(toJson(req.getProofUrls() == null ? List.of() : req.getProofUrls()));
+        application.setAuditStatus(ApplicationAuditStatus.PENDING.name());
+        application.setAuditBy(0L);
+        application.setAuditReason("");
+        applicationMapper.insert(application);
+        return toView(application);
+    }
+
+    /**
+     * 提交能力变更申请（陪玩师端）：游戏能力由平台审核，不可自行修改。
+     *
+     * <p>申请通过后用新能力整体覆盖陪玩主页；审核期间公开展示原能力不变。</p>
+     */
+    @Transactional
+    public ApplicationView submitCapabilityChange(Long userId, CapabilityChangeSubmitRequest req) {
+        // 必须已是陪玩师（主页存在）
+        CompanionProfile profile = profileMapper.selectOne(new LambdaQueryWrapper<CompanionProfile>()
+                .eq(CompanionProfile::getUserId, userId));
+        if (profile == null) {
+            throw new BusinessException(ErrorCode.COMPANION_NOT_APPROVED);
+        }
+        // 存在待审核的能力变更申请则拒绝重复提交
+        if (applicationMapper.selectCount(new LambdaQueryWrapper<CompanionApplication>()
+                .eq(CompanionApplication::getApplicantUserId, userId)
+                .eq(CompanionApplication::getApplicationType, ApplicationType.CAPABILITY_UPDATE.name())
+                .eq(CompanionApplication::getAuditStatus, ApplicationAuditStatus.PENDING.name())) > 0) {
+            throw new BusinessException(ErrorCode.COMPANION_CAPABILITY_CHANGE_PENDING);
+        }
+        validateCapabilities(req.getCapabilities());
+
+        CompanionApplication application = new CompanionApplication();
+        application.setApplicantUserId(userId);
+        application.setApplicationType(ApplicationType.CAPABILITY_UPDATE.name());
+        application.setRealName("");
+        application.setContactMobile("");
+        application.setIntroduction("");
         application.setGameCapabilityJson(toJson(req.getCapabilities()));
         application.setProofUrlsJson(toJson(req.getProofUrls() == null ? List.of() : req.getProofUrls()));
         application.setAuditStatus(ApplicationAuditStatus.PENDING.name());
@@ -141,6 +177,19 @@ public class ApplicationService {
         application.setAuditedAt(LocalDateTime.now());
         applicationMapper.updateById(application);
 
+        // 能力变更申请：通过后仅覆盖陪玩主页的游戏能力，不重复建主页/授角色；
+        // 驳回则公开展示的能力保持不变
+        if (approved && ApplicationType.CAPABILITY_UPDATE.name().equals(application.getApplicationType())) {
+            CompanionProfile profile = profileMapper.selectOne(new LambdaQueryWrapper<CompanionProfile>()
+                    .eq(CompanionProfile::getUserId, application.getApplicantUserId()));
+            if (profile == null) {
+                throw new BusinessException(ErrorCode.COMPANION_PROFILE_NOT_FOUND);
+            }
+            profile.setCapabilityJson(application.getGameCapabilityJson());
+            profileMapper.updateById(profile);
+            return;
+        }
+
         if (approved) {
             User user = userMapper.selectById(application.getApplicantUserId());
             if (user == null) {
@@ -177,9 +226,20 @@ public class ApplicationService {
 
     // ==================== 工具 ====================
 
+    /** 校验能力中的游戏存在且启用 */
+    private void validateCapabilities(List<GameCapabilityDto> capabilities) {
+        for (GameCapabilityDto cap : capabilities) {
+            Game game = gameMapper.selectById(cap.getGameId());
+            if (game == null || !Integer.valueOf(1).equals(game.getEnabled())) {
+                throw new BusinessException(ErrorCode.GAME_NOT_FOUND, "游戏不存在或已停用");
+            }
+        }
+    }
+
     private ApplicationView toView(CompanionApplication a) {
         return ApplicationView.builder()
                 .id(a.getId())
+                .applicationType(a.getApplicationType() == null ? ApplicationType.ENTRY.name() : a.getApplicationType())
                 .realName(a.getRealName())
                 .contactMobile(a.getContactMobile())
                 .introduction(a.getIntroduction())

@@ -15,6 +15,10 @@ import java.util.List;
 public class ApplicationView {
 
     private Long id;
+
+    /** 申请类型：ENTRY 入驻申请、CAPABILITY_UPDATE 能力变更申请 */
+    private String applicationType;
+
     private String realName;
     private String contactMobile;
     private String introduction;

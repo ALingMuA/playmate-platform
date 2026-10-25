@@ -58,6 +58,7 @@ CREATE TABLE user_role (
 CREATE TABLE companion_application (
   id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   applicant_user_id BIGINT NOT NULL DEFAULT 0 COMMENT '申请用户ID',
+  application_type VARCHAR(20) NOT NULL DEFAULT 'ENTRY' COMMENT '申请类型：ENTRY 入驻申请、CAPABILITY_UPDATE 能力变更申请',
   real_name VARCHAR(32) NOT NULL DEFAULT '' COMMENT '真实姓名',
   contact_mobile VARCHAR(20) NOT NULL DEFAULT '' COMMENT '联系手机号',
   introduction VARCHAR(1000) NOT NULL DEFAULT '' COMMENT '申请自我介绍',
@@ -72,7 +73,7 @@ CREATE TABLE companion_application (
   PRIMARY KEY (id),
   KEY idx_ca_user_status (applicant_user_id, audit_status),
   KEY idx_ca_status_created (audit_status, created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='陪玩师入驻申请表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='陪玩师申请表（入驻申请与能力变更申请）';
 
 CREATE TABLE companion_profile (
   id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',

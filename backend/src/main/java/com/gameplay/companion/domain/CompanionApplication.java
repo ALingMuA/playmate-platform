@@ -21,6 +21,9 @@ public class CompanionApplication {
     /** 申请用户ID */
     private Long applicantUserId;
 
+    /** 申请类型：ENTRY 入驻申请、CAPABILITY_UPDATE 能力变更申请 */
+    private String applicationType;
+
     /** 真实姓名 */
     private String realName;
 

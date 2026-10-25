@@ -322,15 +322,115 @@ class CompanionModuleTest {
                 .andExpect(jsonPath("$.data.length()").value(2));
     }
 
+    // ==================== 能力变更审核流 ====================
+
+    /** 提交能力变更申请，返回申请 id */
+    private long submitCapabilityChange(String token, String rank) throws Exception {
+        ObjectNode cap = objectMapper.createObjectNode()
+                .put("gameId", firstGameId())
+                .put("gameName", "王者荣耀")
+                .put("server", "微信区")
+                .put("rank", rank);
+        ObjectNode req = objectMapper.createObjectNode()
+                .set("capabilities", objectMapper.createArrayNode().add(cap));
+        MvcResult result = mockMvc.perform(post("/api/companion/applications/capability-changes")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(req.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.auditStatus").value("PENDING"))
+                .andExpect(jsonPath("$.data.applicationType").value("CAPABILITY_UPDATE"))
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+    }
+
+    @Test
+    @DisplayName("能力变更：提交后待审核拦截重复；审核通过覆盖主页能力")
+    void capability_change_submit_and_audit_approve() throws Exception {
+        String admin = adminToken();
+        JsonNode companion = prepareCompanion(admin);
+        String cToken = companion.path("token").asText();
+
+        // 普通用户不可提交能力变更
+        JsonNode plain = registerAndLogin(uniqueUser());
+        mockMvc.perform(post("/api/companion/applications/capability-changes")
+                        .header("Authorization", bearer(plain.path("token").asText()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .set("capabilities", objectMapper.createArrayNode()
+                                        .add(objectMapper.createObjectNode().put("gameId", firstGameId())
+                                                .put("server", "微信区").put("rank", "王者")))
+                                .toString()))
+                .andExpect(status().isForbidden());
+
+        long changeId = submitCapabilityChange(cToken, "荣耀王者50星");
+
+        // 待审核期间重复提交被拦截
+        mockMvc.perform(post("/api/companion/applications/capability-changes")
+                        .header("Authorization", bearer(cToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .set("capabilities", objectMapper.createArrayNode()
+                                        .add(objectMapper.createObjectNode().put("gameId", firstGameId())
+                                                .put("server", "微信区").put("rank", "王者")))
+                                .toString()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("COMPANION_CAPABILITY_CHANGE_PENDING"));
+
+        // 审核期间公开展示的能力保持原样（入驻时认证的最强王者）
+        mockMvc.perform(get("/api/companion/profile")
+                        .header("Authorization", bearer(cToken)))
+                .andExpect(jsonPath("$.data.capabilities[0].rank").value("最强王者"));
+
+        // 审核通过：主页能力被新认证覆盖
+        auditApproveApplication(admin, changeId);
+        mockMvc.perform(get("/api/companion/profile")
+                        .header("Authorization", bearer(cToken)))
+                .andExpect(jsonPath("$.data.capabilities[0].rank").value("荣耀王者50星"));
+
+        // 通过后可再次发起新的能力变更
+        submitCapabilityChange(cToken, "巅峰赛2000分");
+        mockMvc.perform(get("/api/companion/applications/mine")
+                        .header("Authorization", bearer(cToken)))
+                .andExpect(jsonPath("$.data.length()").value(3)); // 入驻 + 两次能力变更
+    }
+
+    @Test
+    @DisplayName("能力变更：驳回后主页能力保持不变，可重新提交")
+    void capability_change_reject_keeps_profile() throws Exception {
+        String admin = adminToken();
+        String cToken = prepareCompanion(admin).path("token").asText();
+
+        long changeId = submitCapabilityChange(cToken, "虚假段位");
+        mockMvc.perform(post("/api/admin/companion-applications/" + changeId + "/audit")
+                        .header("Authorization", bearer(admin))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("approved", false)
+                                .put("reason", "证明材料与段位不符")
+                                .toString()))
+                .andExpect(status().isOk());
+
+        // 驳回后主页能力保持入驻认证不变
+        mockMvc.perform(get("/api/companion/profile")
+                        .header("Authorization", bearer(cToken)))
+                .andExpect(jsonPath("$.data.capabilities[0].rank").value("最强王者"));
+
+        // 驳回后可重新提交
+        submitCapabilityChange(cToken, "荣耀王者100星");
+    }
+
     // ==================== FR-P05/P06 主页与接单状态 ====================
 
     @Test
-    @DisplayName("主页维护：更新展示名/简介/能力；接单状态可切换（FR-P05/P06）")
+    @DisplayName("主页维护：更新展示名/简介；能力不随主页更新修改；接单状态可切换（FR-P05/P06）")
     void profile_update_and_service_status() throws Exception {
         String admin = adminToken();
         String cToken = prepareCompanion(admin).path("token").asText();
 
-        // 更新主页
+        // 更新主页：请求携带 capabilities 但能力已改为审核制，应被忽略（保持入驻时认证的最强王者）
         mockMvc.perform(put("/api/companion/profile")
                         .header("Authorization", bearer(cToken))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -346,7 +446,7 @@ class CompanionModuleTest {
                                 .toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.displayName").value("王者大神"))
-                .andExpect(jsonPath("$.data.capabilities[0].rank").value("荣耀王者"));
+                .andExpect(jsonPath("$.data.capabilities[0].rank").value("最强王者"));
 
         // 接单状态：RESTING → AVAILABLE
         mockMvc.perform(put("/api/companion/profile/service-status")

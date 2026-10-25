@@ -238,7 +238,7 @@ function goWorkbench() {
           </div>
           <div class="mt-2 flex gap-1 flex-wrap">
             <button class="btn btn-primary btn-sm" @click="goWorkbench">进入陪玩师工作台</button>
-            <button class="btn btn-outline btn-sm" @click="router.push('/companion/profile')">
+            <button class="btn btn-outline btn-sm" @click="router.push('/profile#tab=companion')">
               维护陪玩主页资料
             </button>
           </div>

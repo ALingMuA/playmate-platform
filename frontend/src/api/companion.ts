@@ -11,9 +11,11 @@ export interface GameCapability {
   positionTagIds?: number[]
 }
 
-/** 入驻申请（FR-P01~P04） */
+/** 陪玩师申请（FR-P01~P04；能力变更复用同一表） */
 export interface Application {
   id: number
+  /** 申请类型：ENTRY 入驻申请、CAPABILITY_UPDATE 能力变更申请 */
+  applicationType?: 'ENTRY' | 'CAPABILITY_UPDATE'
   realName: string
   contactMobile: string
   introduction: string
@@ -191,6 +193,14 @@ export function myApplications(): Promise<Application[]> {
   return request<Application[]>({ url: '/companion/applications/mine', method: 'get' })
 }
 
+/** 提交能力变更申请：审核通过后整体覆盖陪玩主页的游戏能力；待审核期间重复提交返回 409。 */
+export function submitCapabilityChange(data: {
+  capabilities: GameCapability[]
+  proofUrls?: string[]
+}): Promise<Application> {
+  return request<Application>({ url: '/companion/applications/capability-changes', method: 'post', data })
+}
+
 // ==================== 主页 ====================
 
 export function myProfile(silentError = false): Promise<CompanionProfile> {
@@ -237,6 +247,7 @@ export function listPublicAvailabilities(userId: number, days = 7): Promise<Publ
   })
 }
 
+/** 仅更新展示名与简介；游戏能力已改为平台审核制，capabilities 字段被后端忽略。 */
 export function updateProfile(data: {
   displayName: string
   profileIntro?: string

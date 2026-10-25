@@ -79,7 +79,7 @@ function fmtPrice(cents: number): string {
           v-if="isOwner"
           type="button"
           class="btn btn-primary btn-sm"
-          @click="router.push('/companion/profile')"
+          @click="router.push('/profile#tab=companion')"
         >
           编辑主页
         </button>

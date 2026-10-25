@@ -157,14 +157,16 @@ const routes: RouteRecordRaw[] = [
     // 非陪玩师访问时兜底到入驻申请页，而不是丢弃到首页（角色不足的提示与下一步更明确）
     meta: { requiresAuth: true, roles: ['COMPANION'], roleFallback: '/become-companion' },
     children: [
-      // 默认落地"主页管理"：进入工作台先看到经营速览与主页资料维护
-      { path: '', redirect: '/companion/profile' },
+      // 工作台聚焦接单经营：落地页为「接单履约」（高频动作优先）；
+      // 主页资料与接单状态已并入个人主页「陪玩服务」分区
+      { path: '', redirect: '/companion/orders' },
       // 入驻申请已迁移到用户端 `/become-companion`，此处保留重定向以兼容旧链接
       { path: 'application', redirect: '/become-companion' },
-      { path: 'profile', name: 'companion-profile', component: () => import('@/views/companion/CompanionProfileView.vue'), meta: { title: '主页管理', workbenchHome: true } },
+      // 旧"主页管理"路径兼容：转到个人主页陪玩服务分区
+      { path: 'profile', redirect: '/profile#tab=companion' },
       { path: 'services', name: 'companion-services', component: () => import('@/views/companion/ServiceManageView.vue'), meta: { title: '服务管理' } },
       { path: 'schedule', name: 'companion-schedule', component: () => import('@/views/companion/ScheduleView.vue'), meta: { title: '接单时间' } },
-      { path: 'orders', name: 'companion-orders', component: () => import('@/views/companion/OrderFulfillView.vue'), meta: { title: '接单履约' } },
+      { path: 'orders', name: 'companion-orders', component: () => import('@/views/companion/OrderFulfillView.vue'), meta: { title: '接单履约', workbenchHome: true } },
       { path: 'earnings', name: 'companion-earnings', component: () => import('@/views/companion/EarningsView.vue'), meta: { title: '收益' } },
     ],
   },

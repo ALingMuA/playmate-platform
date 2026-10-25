@@ -66,10 +66,6 @@ function positionTagName(gameId: number, tagId: number): string {
             <dt>服务起价</dt>
             <dd>{{ profile.startingPriceCents != null ? fmtPrice(profile.startingPriceCents) + ' / 小时' : '—' }}</dd>
           </div>
-          <div>
-            <dt>完成订单</dt>
-            <dd>{{ profile.completedOrderCount }} 单</dd>
-          </div>
         </dl>
         <button type="button" class="btn btn-primary booking-button" :disabled="!bookable" @click="emit('book')">
           {{ bookable ? '立即预约' : '暂不可预约' }}
@@ -101,7 +97,7 @@ function positionTagName(gameId: number, tagId: number): string {
           </article>
         </div>
         <p v-else class="side-empty">暂未公开游戏能力资料。</p>
-        <p class="capability-disclaimer">平台资格状态不代表每项游戏能力均已单独核验。</p>
+        <p class="capability-disclaimer">以上能力均经平台审核认证后展示。</p>
       </div>
     </section>
 

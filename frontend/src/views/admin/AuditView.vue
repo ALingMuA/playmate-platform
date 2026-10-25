@@ -145,9 +145,11 @@ async function askRejectReason(): Promise<string | null> {
 }
 
 async function handleAudit(row: Application, approved: boolean) {
-  const reason = approved
-    ? await askApproveReason(`确认通过 ${row.realName} 的入驻申请？通过后将自动授予陪玩师资格。`)
-    : await askRejectReason()
+  const isCapabilityChange = row.applicationType === 'CAPABILITY_UPDATE'
+  const subject = isCapabilityChange
+    ? '确认通过该能力变更申请？通过后将覆盖陪玩师主页的游戏能力认证。'
+    : `确认通过 ${row.realName} 的入驻申请？通过后将自动授予陪玩师资格。`
+  const reason = approved ? await askApproveReason(subject) : await askRejectReason()
   if (reason == null) return
   await adminAudit(row.id, approved, reason)
   ElMessage.success(approved ? '已通过' : '已驳回')
@@ -185,6 +187,13 @@ onMounted(async () => {
         </div>
 
         <el-table :data="list" v-loading="loading" border stripe>
+          <el-table-column label="类型" width="96">
+            <template #default="{ row }">
+              <el-tag :type="row.applicationType === 'CAPABILITY_UPDATE' ? 'warning' : 'info'" size="small">
+                {{ row.applicationType === 'CAPABILITY_UPDATE' ? '能力变更' : '入驻申请' }}
+              </el-tag>
+            </template>
+          </el-table-column>
           <el-table-column prop="realName" label="真实姓名" width="100" />
           <el-table-column prop="contactMobile" label="联系手机" width="130" />
           <el-table-column label="游戏能力" min-width="180">

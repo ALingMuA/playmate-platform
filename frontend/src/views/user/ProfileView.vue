@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
- * 个人中心：账户资料 + 个人业务数据聚合页（概览/订单/收藏/钱包/设置）。
+ * 个人主页：账户资料 + 个人业务数据聚合页（概览/订单/收藏/钱包/设置）。
  *
- * <p>展示并维护头像、昵称、性别、简介等资料（FR-A05），展示虚拟钱包概览（FR-U09），
- * 支持修改密码（FR-A04）、注销全部会话（FR-A06）与退出登录；
- * 陪玩身份的唯一入口是概览中的「陪玩中心」卡（五态成长引导）。</p>
+ * <p>所有用户在此查看与维护个人信息、订单、收藏与钱包（FR-A05/A04/A06、FR-U09）；
+ * 陪玩师身份以「陪玩服务」分区叠加：接单状态与陪玩主页资料就地维护（FR-P05/P06），
+ * 游戏能力认证为平台审核制。普通用户主页不含入驻引导，申请入口在用户菜单与找陪玩页。</p>
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -12,9 +12,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { changePassword, logoutAll, updateProfile, type LoginUser } from '@/api/auth'
 import { uploadFile } from '@/api/file'
-import { myApplications, myProfile, type Application, type CompanionProfile } from '@/api/companion'
+import { myProfile, type CompanionProfile } from '@/api/companion'
 import ProfileOverviewPanel from '@/components/user/ProfileOverviewPanel.vue'
 import OrdersPanel from '@/components/user/OrdersPanel.vue'
+import CompanionProfilePanel from '@/components/user/CompanionProfilePanel.vue'
 import ProfileFavoritesPanel from '@/components/user/ProfileFavoritesPanel.vue'
 import ProfileWalletPanel from '@/components/user/ProfileWalletPanel.vue'
 
@@ -27,25 +28,16 @@ const loading = ref(false)
 const activeTab = ref('overview')
 const visitedTabs = ref(new Set<string>(['overview']))
 
-// 陪玩中心（FR-P01/P03）：入驻状态与陪玩主页
-const applications = ref<Application[]>([])
+// 陪玩师身份叠加：仅 COMPANION 角色加载陪玩资料（普通用户不请求陪玩接口）
+const isCompanion = computed(() => user.value?.roles?.includes('COMPANION') ?? false)
 const companionProfile = ref<CompanionProfile | null>(null)
-
-/** 入驻状态：已是陪玩师 / 已通过待生成资料 / 审核中 / 已驳回 / 未申请 */
-const companionState = computed<'COMPANION' | 'APPROVED' | 'PENDING' | 'REJECTED' | 'NEW'>(() => {
-  if (companionProfile.value) return 'COMPANION'
-  const latest = applications.value[0]
-  if (!latest) return 'NEW'
-  if (latest.auditStatus === 'PENDING') return 'PENDING'
-  if (latest.auditStatus === 'APPROVED') return 'APPROVED'
-  return 'REJECTED'
-})
 
 const profileTabs = computed(() => [
   { key: 'overview', label: '概览' },
   { key: 'orders', label: '订单' },
   { key: 'favorites', label: '收藏' },
   { key: 'wallet', label: '钱包' },
+  ...(isCompanion.value ? [{ key: 'companion', label: '陪玩服务' }] : []),
   { key: 'settings', label: '设置' },
 ])
 
@@ -57,8 +49,8 @@ const profileCompleteness = computed(() => {
 })
 
 function readHashTab(hash: string) {
-  // 旧版 7 Tab 的 #tab=reviews / #tab=companion 统一回落到概览
-  const match = hash.match(/^#tab=(overview|orders|favorites|wallet|settings)$/)
+  // 旧版 #tab=reviews 回落到概览；#tab=companion 仅陪玩师有效
+  const match = hash.match(/^#tab=(overview|orders|favorites|wallet|companion|settings)$/)
   const key = match?.[1]
   return key && profileTabs.value.some((tab) => tab.key === key) ? key : 'overview'
 }
@@ -71,20 +63,11 @@ async function selectTab(key: string) {
   }
 }
 
-const companionStateText: Record<string, string> = {
-  COMPANION: '已是陪玩师',
-  APPROVED: '审核已通过',
-  PENDING: '审核中',
-  REJECTED: '已驳回',
-  NEW: '未申请',
-}
-
-const companionStateCls: Record<string, string> = {
-  COMPANION: 'badge-success',
-  APPROVED: 'badge-success',
-  PENDING: 'badge-warning',
-  REJECTED: 'badge-destructive',
-  NEW: 'badge-outline',
+const serviceStatusText: Record<string, string> = {
+  AVAILABLE: '可接单',
+  BUSY: '忙碌',
+  RESTING: '休息中',
+  SUSPENDED: '资格暂停',
 }
 
 const roleMap: Record<string, string> = {
@@ -100,9 +83,8 @@ async function load() {
   loading.value = true
   try {
     user.value = await userStore.refreshUser()
-    // 陪玩中心：入驻状态探测失败不影响个人中心其它区块
-    applications.value = await myApplications().catch(() => [])
-    companionProfile.value = await myProfile(true).catch(() => null)
+    // 陪玩资料仅陪玩师角色加载；探测失败不影响个人主页其它区块
+    companionProfile.value = isCompanion.value ? await myProfile(true).catch(() => null) : null
     activeTab.value = readHashTab(route.hash)
     visitedTabs.value = new Set([...visitedTabs.value, activeTab.value])
   } finally {
@@ -225,7 +207,7 @@ watch(() => route.hash, (hash) => {
     <div class="container" v-loading="loading">
       <div class="page-header">
         <h1 class="page-title">个人中心</h1>
-        <p class="page-subtitle">查看你的订单、收藏、钱包与陪玩服务</p>
+        <p class="page-subtitle">管理个人资料，查看你的订单、收藏与钱包</p>
       </div>
 
       <template v-if="user">
@@ -242,7 +224,7 @@ watch(() => route.hash, (hash) => {
                 <span class="badge" :class="user.accountStatus === 'ENABLED' ? 'badge-success' : 'badge-warning'">
                   {{ user.accountStatus === 'ENABLED' ? '账号正常' : user.accountStatus }}
                 </span>
-                <span v-if="companionState === 'COMPANION'" class="badge badge-outline">陪玩师</span>
+                <span v-if="isCompanion" class="badge badge-outline">陪玩师</span>
               </div>
               <p v-if="user.introduction" class="text-muted mt-1">{{ user.introduction }}</p>
               <div class="profile-completeness mt-1" :aria-label="`资料完整度 ${profileCompleteness}%`">
@@ -264,31 +246,24 @@ watch(() => route.hash, (hash) => {
 
         <main id="profile-tab-content" class="profile-tab-content">
           <section v-if="visitedTabs.has('overview')" v-show="activeTab === 'overview'" class="profile-overview-section">
-            <section class="card mb-2">
+            <!-- 陪玩师身份入口卡：数据与编辑统一在「陪玩服务」分区，此处不重复展示 -->
+            <section v-if="companionProfile" class="card mb-2">
               <div class="card-body">
                 <div class="flex items-center justify-between flex-wrap gap-1">
-                  <h2 class="card-title">陪玩中心</h2>
-                  <span class="badge" :class="companionStateCls[companionState]">{{ companionStateText[companionState] }}</span>
+                  <h2 class="card-title">陪玩服务</h2>
+                  <div class="flex gap-1 flex-wrap">
+                    <span class="badge" :class="companionProfile.serviceStatus === 'AVAILABLE' ? 'badge-success' : 'badge-warning'">
+                      {{ serviceStatusText[companionProfile.serviceStatus] ?? companionProfile.serviceStatus }}
+                    </span>
+                    <span class="badge badge-outline">
+                      {{ companionProfile.certificationStatus === 'APPROVED' ? '认证通过' : '资格已暂停' }}
+                    </span>
+                  </div>
                 </div>
-                <p class="text-muted mt-1">
-                  <template v-if="companionState === 'COMPANION'">
-                    {{ companionProfile?.displayName }} · 已完成 {{ companionProfile?.completedOrderCount ?? 0 }} 单 · 评分 {{ companionProfile?.ratingAvg ?? '—' }}
-                  </template>
-                  <template v-else-if="companionState === 'APPROVED'">入驻审核已通过，可进入工作台维护陪玩主页。</template>
-                  <template v-else-if="companionState === 'PENDING'">入驻申请已提交（{{ applications[0]?.createdAt?.slice(0, 16) }}），等待平台审核。</template>
-                  <template v-else-if="companionState === 'REJECTED'">上次申请未通过：{{ applications[0]?.auditReason || '未填写原因' }}。</template>
-                  <template v-else>提交入驻申请并通过审核后，即可上架陪玩服务、管理档期并接单。</template>
-                </p>
+                <p class="text-muted mt-1">评分、接单状态与主页资料统一在「陪玩服务」分区维护。</p>
                 <div class="flex gap-1 mt-2 flex-wrap">
-                  <button v-if="['COMPANION', 'APPROVED'].includes(companionState)" class="btn btn-primary btn-sm"
-                    @click="router.push('/companion')">进入陪玩师工作台</button>
-                  <button v-if="companionState === 'COMPANION'" class="btn btn-outline btn-sm"
-                    @click="router.push(`/companions/${user.id}`)">预览公开主页</button>
-                  <button v-else-if="companionState === 'PENDING'" class="btn btn-outline btn-sm"
-                    @click="router.push('/become-companion')">查看审核进度</button>
-                  <button v-else class="btn btn-primary btn-sm" @click="router.push('/become-companion')">
-                    {{ companionState === 'REJECTED' ? '修改并重新提交' : '成为陪玩师' }}
-                  </button>
+                  <button class="btn btn-primary btn-sm" @click="selectTab('companion')">管理陪玩服务 →</button>
+                  <button class="btn btn-outline btn-sm" @click="router.push(`/companions/${user.id}`)">预览公开主页</button>
                 </div>
               </div>
             </section>
@@ -300,6 +275,12 @@ watch(() => route.hash, (hash) => {
           <ProfileFavoritesPanel v-if="visitedTabs.has('favorites')" v-show="activeTab === 'favorites'" />
 
           <ProfileWalletPanel v-if="visitedTabs.has('wallet')" v-show="activeTab === 'wallet'" />
+
+          <CompanionProfilePanel
+            v-if="visitedTabs.has('companion') && isCompanion"
+            v-show="activeTab === 'companion'"
+            @updated="companionProfile = $event"
+          />
 
           <section v-if="visitedTabs.has('settings')" v-show="activeTab === 'settings'" class="profile-settings">
             <div class="card">

@@ -122,13 +122,17 @@ public class CompanionProfileService {
         return List.of(agg.getGameNames().split(","));
     }
 
-    /** 更新主页（FR-P05）：展示名、简介、认证能力 */
+    /**
+     * 更新主页（FR-P05）：展示名与简介。
+     *
+     * <p>游戏能力认证已改为平台审核制：请求中的 capabilities 字段被忽略，
+     * 能力变更须提交能力变更申请，审核通过后由审核流程覆盖。</p>
+     */
     @Transactional
     public ProfileView updateProfile(Long userId, ProfileUpdateRequest req) {
         CompanionProfile profile = requireProfile(userId);
         profile.setDisplayName(req.getDisplayName());
         profile.setProfileIntro(req.getProfileIntro() == null ? "" : req.getProfileIntro());
-        profile.setCapabilityJson(toJson(req.getCapabilities() == null ? List.of() : req.getCapabilities()));
         profileMapper.updateById(profile);
         return toView(profile);
     }
