@@ -71,7 +71,8 @@ $shText = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'remote-deploy.
 Copy-Item $envFile (Join-Path $staging 'gameplay.env') -Force
 
 Step '打包前端 dist'
-tar -czf (Join-Path $staging 'frontend.tar.gz') -C $dist .
+$tarExe = if (Test-Path "$env:WINDIR\System32\tar.exe") { "$env:WINDIR\System32\tar.exe" } else { 'tar' }
+& $tarExe -czf (Join-Path $staging 'frontend.tar.gz') -C $dist .
 if ($LASTEXITCODE -ne 0) { throw 'tar 打包失败' }
 
 Step "上传到 $target 的 $remote"
