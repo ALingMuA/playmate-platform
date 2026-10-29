@@ -21,6 +21,7 @@ import com.gameplay.review.enums.ComplaintStatus;
 import com.gameplay.review.enums.ComplaintType;
 import com.gameplay.review.mapper.ComplaintEvidenceMapper;
 import com.gameplay.review.mapper.ComplaintMapper;
+import com.gameplay.notification.service.NotificationService;
 import com.gameplay.wallet.service.WalletService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,7 @@ public class ComplaintService {
     private final UserMapper userMapper;
     private final OrderService orderService;
     private final WalletService walletService;
+    private final NotificationService notificationService;
 
     /** 发起投诉（FR-U17/U18）：校验订单资格并转入售后 */
     @Transactional
@@ -107,7 +109,9 @@ public class ComplaintService {
                 evidenceMapper.insert(evidence);
             }
         }
-        return toView(complaint);
+        ComplaintView view = toView(complaint);
+        view.setHandledBy(null);
+        return view;
     }
 
     /** 我的投诉分页（FR-U19 售后进度） */
@@ -117,7 +121,9 @@ public class ComplaintService {
                 new LambdaQueryWrapper<Complaint>()
                         .eq(Complaint::getComplainantUserId, userId)
                         .orderByDesc(Complaint::getId));
-        return toViewPage(p);
+        Page<ComplaintView> vp = toViewPage(p);
+        vp.getRecords().forEach(v -> v.setHandledBy(null));
+        return vp;
     }
 
     /** 投诉详情（FR-U19）：发起人或管理员可查看 */
@@ -130,7 +136,11 @@ public class ComplaintService {
         if (!isAdmin && !complaint.getComplainantUserId().equals(operatorId)) {
             throw new BusinessException(ErrorCode.PERMISSION_DATA_SCOPE_DENIED);
         }
-        return toView(complaint);
+        ComplaintView view = toView(complaint);
+        if (!isAdmin) {
+            view.setHandledBy(null);
+        }
+        return view;
     }
 
     // ==================== 管理端（FR-M18/M19） ====================
@@ -214,6 +224,15 @@ public class ComplaintService {
         complaint.setHandlingOpinion(opinion);
         complaint.setHandledAt(LocalDateTime.now());
         complaintMapper.updateById(complaint);
+        notificationService.record(
+                complaint.getComplainantUserId(),
+                "COMPLAINT_RESULT",
+                "投诉仲裁处理完成",
+                "您的订单【" + (order != null ? order.getOrderNo() : "") + "】投诉已被管理员处理：" + (opinion == null ? "" : opinion),
+                "COMPLAINT",
+                complaint.getId(),
+                "COMPLAINT:" + complaint.getId() + ":RESOLVED"
+        );
         return toView(complaint);
     }
 

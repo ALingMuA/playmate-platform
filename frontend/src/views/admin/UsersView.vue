@@ -3,11 +3,20 @@
  * 管理后台 - 用户管理（FR-M03/M04）。
  *
  * <p>按账号/昵称/手机号关键词与账号状态查询用户（分页），
- * 可对违规用户执行启用/禁用（禁用必须填写原因，FR-M04）。</p>
+ * 可对违规用户执行启用/禁用（禁用必须填写原因，FR-M04）。
+ * 支持管理员发放演示余额。</p>
  */
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { adminResetUserPassword, adminSetUserStatus, adminUsers, type UserAdminView } from '@/api/admin'
+import {
+  adminDemoWalletConfig,
+  adminGrantDemoWallet,
+  adminResetUserPassword,
+  adminSetUserStatus,
+  adminUsers,
+  type DemoWalletConfigView,
+  type UserAdminView,
+} from '@/api/admin'
 
 const list = ref<UserAdminView[]>([])
 const total = ref(0)
@@ -158,14 +167,79 @@ async function handleResetPassword() {
   }
 }
 
-onMounted(load)
+// ==================== 演示余额发放 ====================
+
+const grantVisible = ref(false)
+const granting = ref(false)
+const grantTarget = ref<UserAdminView | null>(null)
+const demoConfig = ref<DemoWalletConfigView>({
+  enabled: true,
+  allowedAmountsCents: [1000, 5000, 10000, 50000],
+})
+const grantForm = reactive({
+  amountCents: 10000,
+  reason: '答辩演示账号准备余额',
+})
+
+async function fetchDemoConfig() {
+  try {
+    const cfg = await adminDemoWalletConfig()
+    if (cfg) {
+      demoConfig.value = cfg
+      if (cfg.allowedAmountsCents?.length > 0) {
+        grantForm.amountCents = cfg.allowedAmountsCents[0]
+      }
+    }
+  } catch {
+    // 忽略加载异常，采用默认值
+  }
+}
+
+function openGrantDemoWallet(row: UserAdminView) {
+  grantTarget.value = row
+  grantForm.reason = '答辩演示账号准备余额'
+  if (demoConfig.value.allowedAmountsCents?.length > 0) {
+    grantForm.amountCents = demoConfig.value.allowedAmountsCents[0]
+  }
+  grantVisible.value = true
+}
+
+async function handleGrantDemoWallet() {
+  if (!grantTarget.value) return
+  if (!grantForm.reason.trim()) {
+    ElMessage.warning('请填写发放原因')
+    return
+  }
+  granting.value = true
+  try {
+    const reqId = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `req_${Date.now()}_${Math.random().toString(36).substring(2)}`
+    const res = await adminGrantDemoWallet({
+      userId: grantTarget.value.id,
+      amountCents: grantForm.amountCents,
+      reason: grantForm.reason.trim(),
+      requestId: reqId,
+    })
+    grantVisible.value = false
+    ElMessage.success(`成功为用户 ${grantTarget.value.username} 发放 ${(res.amountCents / 100).toFixed(2)} 元演示余额`)
+    await load()
+  } finally {
+    granting.value = false
+  }
+}
+
+onMounted(() => {
+  load()
+  fetchDemoConfig()
+})
 </script>
 
 <template>
   <div class="users-page">
     <div class="page-header">
       <h1>用户管理</h1>
-      <p class="sub">查询用户资料，管理账号启用/禁用状态</p>
+      <p class="sub">查询用户资料，管理账号启用/禁用状态，发放演示余额</p>
     </div>
 
     <!-- 查询区 -->
@@ -233,8 +307,11 @@ onMounted(load)
         <el-table-column label="注册时间" width="130">
           <template #default="{ row }">{{ fmtTime(row.createdAt) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
+            <el-button size="small" type="primary" plain @click="openGrantDemoWallet(row)">
+              发放余额
+            </el-button>
             <el-button size="small" type="warning" plain @click="openResetPassword(row)">
               重置密码
             </el-button>
@@ -258,6 +335,59 @@ onMounted(load)
         @current-change="(p: number) => { page = p; load() }"
       />
     </el-card>
+
+    <!-- 发放演示余额弹窗 -->
+    <el-dialog v-model="grantVisible" title="发放演示余额" width="480px" destroy-on-close>
+      <el-form label-position="top">
+        <el-alert
+          title="演示环境虚拟余额发放，资金仅用于模拟下单和支付演练，记录操作审计流水。"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px"
+        />
+        <el-form-item label="目标账号">
+          <el-input :model-value="`${grantTarget?.username} (${grantTarget?.nickname || '无昵称'})`" disabled />
+        </el-form-item>
+        <el-form-item label="账号状态">
+          <el-tag :type="grantTarget?.accountStatus === 'ENABLED' ? 'success' : 'danger'">
+            {{ grantTarget?.accountStatus === 'ENABLED' ? '正常' : '已禁用' }}
+          </el-tag>
+        </el-form-item>
+        <el-form-item label="发放金额" required>
+          <el-radio-group v-model="grantForm.amountCents">
+            <el-radio-button
+              v-for="amt in demoConfig.allowedAmountsCents"
+              :key="amt"
+              :value="amt"
+            >
+              {{ (amt / 100).toFixed(0) }} 元
+            </el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="发放原因" required>
+          <el-input
+            v-model="grantForm.reason"
+            type="textarea"
+            :rows="3"
+            maxlength="200"
+            show-word-limit
+            placeholder="请填写演示余额发放原因（必填，最多200字）"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="grantVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="granting"
+          :disabled="grantTarget?.accountStatus !== 'ENABLED'"
+          @click="handleGrantDemoWallet"
+        >
+          确认发放
+        </el-button>
+      </template>
+    </el-dialog>
 
     <!-- 重置密码弹窗 -->
     <el-dialog v-model="resetVisible" title="重置用户密码" width="460px" destroy-on-close>

@@ -112,7 +112,8 @@ public class AdminUserService {
                 "安全提醒：您的登录密码已被管理员重置",
                 "您的账号密码已由平台管理员重置，原有登录设备已全部下线。若非本人申请，请及时联系客服核实。",
                 "USER",
-                userId
+                userId,
+                "USER:" + userId + ":RESET_PASSWORD:" + System.currentTimeMillis()
         );
 
         return toView(userMapper.selectById(userId));

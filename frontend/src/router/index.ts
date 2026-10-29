@@ -112,10 +112,22 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '评价订单', requiresAuth: true },
       },
       {
+        path: 'complaints/:id',
+        name: 'complaint-detail',
+        component: () => import('@/views/user/ComplaintDetailView.vue'),
+        meta: { title: '投诉详情', requiresAuth: true },
+      },
+      {
         path: 'complaint/:orderId',
         name: 'complaint',
         component: () => import('@/views/user/ComplaintView.vue'),
         meta: { title: '发起投诉', requiresAuth: true },
+      },
+      {
+        path: 'notifications',
+        name: 'user-notifications',
+        component: () => import('@/views/user/NotificationsView.vue'),
+        meta: { title: '通知中心', requiresAuth: true },
       },
       {
         path: 'announcements',

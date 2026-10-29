@@ -29,6 +29,7 @@ import com.gameplay.order.enums.SlotStatus;
 import com.gameplay.order.mapper.OrderStatusHistoryMapper;
 import com.gameplay.order.mapper.OrderTimeSlotMapper;
 import com.gameplay.order.mapper.PlayOrderMapper;
+import com.gameplay.notification.service.NotificationService;
 import com.gameplay.wallet.service.WalletService;
 import com.gameplay.coupon.service.CouponService;
 import lombok.RequiredArgsConstructor;
@@ -70,6 +71,7 @@ public class OrderService {
     private final UserMapper userMapper;
     private final WalletService walletService;
     private final CouponService couponService;
+    private final NotificationService notificationService;
 
     // ==================== 用户端 ====================
 
@@ -207,6 +209,15 @@ public class OrderService {
         order.setAcceptExpireAt(LocalDateTime.now().plusMinutes(ACCEPT_EXPIRE_MINUTES));
         orderMapper.updateById(order);
         slotMapper.updateStatusByOrder(order.getId(), SlotStatus.TEMPORARY.name(), SlotStatus.EFFECTIVE.name());
+        notificationService.record(
+                order.getCompanionUserId(),
+                "ORDER_STATUS",
+                "收到新预约订单",
+                "用户已支付订单【" + order.getOrderNo() + "】，请及时在工作台接单处理。",
+                "ORDER",
+                order.getId(),
+                "ORDER:" + order.getId() + ":WAITING_ACCEPTANCE"
+        );
         return detailView(order);
     }
 
@@ -223,6 +234,15 @@ public class OrderService {
             throw new BusinessException(ErrorCode.ORDER_ACCEPT_EXPIRED);
         }
         transition(order, OrderStatus.WAITING_SERVICE, companionUserId, "COMPANION", "ACCEPT", "接单成功");
+        notificationService.record(
+                order.getUserId(),
+                "ORDER_STATUS",
+                "陪玩师已接单",
+                "陪玩师已接受您的订单【" + order.getOrderNo() + "】，请按预约时间准备开始服务。",
+                "ORDER",
+                order.getId(),
+                "ORDER:" + order.getId() + ":WAITING_SERVICE"
+        );
         return detailView(order);
     }
 
@@ -238,6 +258,15 @@ public class OrderService {
         order.setClosedReason(reason);
         orderMapper.updateById(order);
         releaseSlot(order.getId());
+        notificationService.record(
+                order.getUserId(),
+                "ORDER_STATUS",
+                "订单已被陪玩师婉拒",
+                "您的订单【" + order.getOrderNo() + "】已被陪玩师婉拒，款项已全额退回您的钱包。原因：" + (reason == null ? "" : reason),
+                "ORDER",
+                order.getId(),
+                "ORDER:" + order.getId() + ":REJECTED"
+        );
         return detailView(order);
     }
 
@@ -268,6 +297,15 @@ public class OrderService {
         transition(order, OrderStatus.WAITING_CONFIRMATION, companionUserId, "COMPANION", "END", "结束服务");
         order.setEndedAt(LocalDateTime.now());
         orderMapper.updateById(order);
+        notificationService.record(
+                order.getUserId(),
+                "ORDER_STATUS",
+                "服务已完成，待您确认",
+                "陪玩师已标记完成订单【" + order.getOrderNo() + "】的服务，请前往订单详情确认完成。",
+                "ORDER",
+                order.getId(),
+                "ORDER:" + order.getId() + ":WAITING_CONFIRMATION"
+        );
         return detailView(order);
     }
 
@@ -296,6 +334,15 @@ public class OrderService {
             profile.setCompletedOrderCount(profile.getCompletedOrderCount() + 1);
             companionProfileMapper.updateById(profile);
         }
+        notificationService.record(
+                order.getCompanionUserId(),
+                "ORDER_STATUS",
+                "订单已确认完成",
+                "用户已确认完成订单【" + order.getOrderNo() + "】，收益已结算至您的钱包。",
+                "ORDER",
+                order.getId(),
+                "ORDER:" + order.getId() + ":COMPLETED"
+        );
         return detailView(order);
     }
 

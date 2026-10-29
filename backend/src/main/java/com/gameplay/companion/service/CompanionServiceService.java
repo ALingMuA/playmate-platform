@@ -21,6 +21,7 @@ import com.gameplay.companion.enums.ServiceAuditStatus;
 import com.gameplay.companion.enums.ShelfStatus;
 import com.gameplay.companion.mapper.CompanionProfileMapper;
 import com.gameplay.companion.mapper.CompanionServiceMapper;
+import com.gameplay.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +41,7 @@ import java.util.List;
 public class CompanionServiceService {
 
     private final CompanionServiceMapper serviceMapper;
+    private final NotificationService notificationService;
     private final CompanionProfileMapper profileMapper;
     private final GameMapper gameMapper;
     private final ServiceTypeMapper serviceTypeMapper;
@@ -158,6 +160,15 @@ public class CompanionServiceService {
         service.setAuditReason(reason == null ? "" : reason);
         service.setAuditAt(LocalDateTime.now());
         serviceMapper.updateById(service);
+        notificationService.record(
+                service.getCompanionUserId(),
+                "SERVICE_AUDIT",
+                approved ? "服务审核通过" : "服务审核未通过",
+                approved ? ("您的陪玩服务【" + service.getTitle() + "】已审核通过。") : ("您的陪玩服务【" + service.getTitle() + "】未通过审核。原因：" + (reason == null ? "" : reason)),
+                "SERVICE",
+                service.getId(),
+                "AUDIT:SERVICE:" + service.getId() + ":" + (approved ? "APPROVED" : "REJECTED")
+        );
     }
 
     /** 按ID读取服务（供订单模块校验，包含审核/上架状态） */

@@ -9,6 +9,7 @@ import com.gameplay.notification.dto.NotificationView;
 import com.gameplay.notification.mapper.NotificationMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,7 +19,7 @@ import java.time.LocalDateTime;
  * 站内通知服务（FR-A07）。
  *
  * <p>{@code record} 供订单、审核、投诉等模块在业务事件后调用；
- * 通知写入失败不影响主业务（调用方自行保证事务边界）。</p>
+ * 支持基于 eventKey 的幂等防重写入。</p>
  */
 @Slf4j
 @Service
@@ -27,10 +28,26 @@ public class NotificationService {
 
     private final NotificationMapper notificationMapper;
 
-    /** 生成通知（FR-A07：申请审核、服务审核、订单状态、投诉结果等事件） */
+    /** 生成通知（重载：无 eventKey） */
     @Transactional
     public void record(Long userId, String notificationType, String title, String content,
                        String relatedType, Long relatedId) {
+        record(userId, notificationType, title, content, relatedType, relatedId, null);
+    }
+
+    /** 生成通知（带业务幂等键 eventKey，FR-A07） */
+    @Transactional
+    public void record(Long userId, String notificationType, String title, String content,
+                       String relatedType, Long relatedId, String eventKey) {
+        if (eventKey != null && !eventKey.isBlank()) {
+            Notification existing = notificationMapper.selectOne(
+                    new LambdaQueryWrapper<Notification>()
+                            .eq(Notification::getUserId, userId)
+                            .eq(Notification::getEventKey, eventKey.trim()));
+            if (existing != null) {
+                return; // 幂等去重
+            }
+        }
         Notification notification = new Notification();
         notification.setUserId(userId);
         notification.setNotificationType(notificationType);
@@ -38,9 +55,12 @@ public class NotificationService {
         notification.setContent(content);
         notification.setRelatedType(relatedType);
         notification.setRelatedId(relatedId == null ? 0L : relatedId);
+        notification.setEventKey(eventKey == null || eventKey.isBlank() ? null : eventKey.trim());
         notification.setReadStatus(0);
         try {
             notificationMapper.insert(notification);
+        } catch (DuplicateKeyException e) {
+            log.info("通知已存在（并发幂等）：userId={}, eventKey={}", userId, eventKey);
         } catch (Exception e) {
             log.warn("通知写入失败: userId={}, type={}, 原因: {}", userId, notificationType, e.getMessage());
         }
@@ -100,6 +120,7 @@ public class NotificationService {
                 .content(n.getContent())
                 .relatedType(n.getRelatedType())
                 .relatedId(n.getRelatedId())
+                .eventKey(n.getEventKey())
                 .readStatus(n.getReadStatus())
                 .readAt(n.getReadAt())
                 .createdAt(n.getCreatedAt())

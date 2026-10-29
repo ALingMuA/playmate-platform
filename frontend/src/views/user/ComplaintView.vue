@@ -60,13 +60,17 @@ async function handleSubmit() {
   }
   submitting.value = true
   try {
-    await createComplaint(orderId.value, {
+    const created = await createComplaint(orderId.value, {
       complaintType: form.complaintType,
       description: form.description.trim(),
       evidences: form.evidences,
     })
     ElMessage.success('投诉已提交，订单进入售后处理')
-    router.replace('/orders')
+    if (created?.id) {
+      router.replace('/complaints/' + created.id)
+    } else {
+      router.replace('/profile#tab=complaints')
+    }
   } finally {
     submitting.value = false
   }

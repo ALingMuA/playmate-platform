@@ -236,3 +236,34 @@ export function publicAnnouncementDetail(id: number): Promise<AnnouncementView> 
     method: 'get',
   })
 }
+
+
+// ==================== 演示钱包管理 ====================
+
+export interface DemoWalletConfigView {
+  enabled: boolean
+  allowedAmountsCents: number[]
+}
+
+export interface DemoWalletGrantRequest {
+  userId: number
+  amountCents: number
+  reason: string
+  requestId: string
+}
+
+export interface DemoWalletGrantView {
+  userId: number
+  amountCents: number
+  balanceAfterCents: number
+  businessNo: string
+  createdAt: string
+}
+
+export function adminDemoWalletConfig(): Promise<DemoWalletConfigView> {
+  return request<DemoWalletConfigView>({ url: '/admin/demo-wallet/config', method: 'get' })
+}
+
+export function adminGrantDemoWallet(data: DemoWalletGrantRequest): Promise<DemoWalletGrantView> {
+  return request<DemoWalletGrantView>({ url: '/admin/demo-wallet/grants', method: 'post', data })
+}

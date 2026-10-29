@@ -124,7 +124,7 @@ onMounted(async () => {
         <div class="card mt-2">
           <div class="card-body">
             <p v-if="insufficient" class="text-destructive" style="margin-bottom: 12px">
-              余额不足，暂不支持充值，请取消订单后重新下单或联系在线客服。
+              当前为虚拟余额演示环境，余额不足时请联系管理员发放演示余额。
             </p>
             <button class="btn btn-primary btn-lg btn-block" :disabled="paying || insufficient" @click="handlePay">
               {{ paying ? '支付中…' : insufficient ? '余额不足' : '确认支付 ' + fmtMoney(order.totalAmountCents) }}

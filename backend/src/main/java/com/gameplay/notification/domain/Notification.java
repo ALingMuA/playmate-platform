@@ -36,6 +36,9 @@ public class Notification {
     /** 关联业务ID */
     private Long relatedId;
 
+    /** 业务事件幂等键 */
+    private String eventKey;
+
     /** 已读状态：0否，1是 */
     private Integer readStatus;
 

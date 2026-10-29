@@ -6,14 +6,18 @@
  * 右侧按登录态展示登录按钮或用户菜单（个人中心、角色工作台入口、退出）。
  * 工作台入口按角色显示：陪玩师端（COMPANION）、客服工作台（CUSTOMER_SERVICE）、管理后台（ADMIN）。</p>
  */
-import { computed } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Bell } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import { unreadNotificationCount } from '@/api/notification'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+
+const unreadCount = ref(0)
 
 const activeMenu = computed(() => {
   if (route.path === '/companions') return '/companions'
@@ -36,6 +40,38 @@ const workbenches = computed(() => {
   if (userStore.hasRole('CUSTOMER_SERVICE')) items.push({ label: '客服工作台', path: '/cs' })
   if (userStore.hasRole('ADMIN')) items.push({ label: '管理后台', path: '/admin' })
   return items
+})
+
+async function fetchUnread() {
+  if (!isLoggedIn.value) {
+    unreadCount.value = 0
+    return
+  }
+  try {
+    const res = await unreadNotificationCount()
+    unreadCount.value = res.count ?? 0
+  } catch {
+    // 忽略未读数拉取静默失败
+  }
+}
+
+watch(
+  () => route.fullPath,
+  () => {
+    fetchUnread()
+  }
+)
+
+watch(isLoggedIn, (loggedIn) => {
+  if (loggedIn) {
+    fetchUnread()
+  } else {
+    unreadCount.value = 0
+  }
+})
+
+onMounted(() => {
+  fetchUnread()
 })
 
 function handleLogout() {
@@ -73,8 +109,18 @@ function goLogin() {
           <template v-if="!isLoggedIn">
             <button class="btn btn-primary btn-sm" @click="goLogin">登录 / 注册</button>
           </template>
-          <!-- 已登录：用户菜单 -->
+          <!-- 已登录：通知图标与用户菜单 -->
           <template v-else>
+            <div
+              class="bell-trigger"
+              title="站内通知"
+              @click="router.push('/notifications')"
+            >
+              <el-badge :value="unreadCount" :max="99" :hidden="unreadCount === 0" class="bell-badge">
+                <el-button circle :icon="Bell" class="bell-btn" />
+              </el-badge>
+            </div>
+
             <el-dropdown trigger="click" @command="(cmd: string) => router.push(cmd)">
               <div class="user-trigger">
                 <el-avatar :size="32" :src="user?.avatarUrl || undefined" class="user-avatar">
@@ -85,6 +131,17 @@ function goLogin() {
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="/profile">个人中心</el-dropdown-item>
+                  <el-dropdown-item command="/notifications">
+                    <span class="menu-item-with-badge">
+                      <span>站内通知</span>
+                      <el-badge
+                        v-if="unreadCount > 0"
+                        :value="unreadCount"
+                        :max="99"
+                        class="menu-badge"
+                      />
+                    </span>
+                  </el-dropdown-item>
                   <el-dropdown-item command="/orders">我的订单</el-dropdown-item>
                   <el-dropdown-item command="/coupons">我的优惠券</el-dropdown-item>
                   <!-- 入驻申请入口：仅非陪玩师可见（已是陪玩师则显示下方工作台入口） -->
@@ -157,6 +214,28 @@ function goLogin() {
 main {
   flex: 1;
 }
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.bell-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.bell-btn {
+  border: 1px solid var(--border, #e2e8f0);
+  background: transparent;
+  color: var(--foreground, #1e293b);
+  transition: all 0.2s ease;
+}
+.bell-btn:hover {
+  background: var(--muted, #f1f5f9);
+  color: var(--primary, #3b82f6);
+  border-color: var(--primary, #3b82f6);
+}
 .user-trigger {
   display: flex;
   align-items: center;
@@ -181,6 +260,15 @@ main {
   background: var(--primary);
   color: #fff;
   flex-shrink: 0;
+}
+.menu-item-with-badge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+.menu-badge {
+  margin-left: 8px;
 }
 .logout-item {
   color: var(--destructive);

@@ -11,6 +11,7 @@ import com.gameplay.auth.entity.UserRole;
 import com.gameplay.auth.mapper.RoleMapper;
 import com.gameplay.auth.mapper.UserMapper;
 import com.gameplay.auth.mapper.UserRoleMapper;
+import com.gameplay.notification.service.NotificationService;
 import com.gameplay.catalog.domain.Game;
 import com.gameplay.catalog.mapper.GameMapper;
 import com.gameplay.common.exception.BusinessException;
@@ -52,6 +53,7 @@ public class ApplicationService {
     private final UserRoleMapper userRoleMapper;
     private final GameMapper gameMapper;
     private final ObjectMapper objectMapper;
+    private final NotificationService notificationService;
 
     /** 提交入驻申请（FR-P01/P02/P04） */
     @Transactional
@@ -176,6 +178,15 @@ public class ApplicationService {
         application.setAuditReason(reason == null ? "" : reason);
         application.setAuditedAt(LocalDateTime.now());
         applicationMapper.updateById(application);
+        notificationService.record(
+                application.getApplicantUserId(),
+                "AUDIT_RESULT",
+                approved ? "陪玩师资质审核已通过" : "陪玩师资质审核未通过",
+                approved ? "恭喜！您的陪玩师资质审核已通过。" : ("很遗憾，您的审核申请未通过。原因：" + (reason == null ? "" : reason)),
+                "COMPANION",
+                application.getId(),
+                "AUDIT:COMPANION:" + application.getId() + ":" + (approved ? "APPROVED" : "REJECTED")
+        );
 
         // 能力变更申请：通过后仅覆盖陪玩主页的游戏能力，不重复建主页/授角色；
         // 驳回则公开展示的能力保持不变

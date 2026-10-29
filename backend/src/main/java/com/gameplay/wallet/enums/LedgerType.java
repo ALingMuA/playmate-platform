@@ -11,5 +11,7 @@ public enum LedgerType {
     /** 结算 */
     SETTLEMENT,
     /** 调整 */
-    ADJUSTMENT
+    ADJUSTMENT,
+    /** 演示额度发放 */
+    DEMO_CREDIT
 }

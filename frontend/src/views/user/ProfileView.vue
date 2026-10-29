@@ -17,6 +17,7 @@ import ProfileOverviewPanel from '@/components/user/ProfileOverviewPanel.vue'
 import OrdersPanel from '@/components/user/OrdersPanel.vue'
 import CompanionProfilePanel from '@/components/user/CompanionProfilePanel.vue'
 import ProfileFavoritesPanel from '@/components/user/ProfileFavoritesPanel.vue'
+import ProfileComplaintsPanel from '@/components/user/ProfileComplaintsPanel.vue'
 import ProfileWalletPanel from '@/components/user/ProfileWalletPanel.vue'
 
 const router = useRouter()
@@ -35,6 +36,7 @@ const companionProfile = ref<CompanionProfile | null>(null)
 const profileTabs = computed(() => [
   { key: 'overview', label: '概览' },
   { key: 'orders', label: '订单' },
+  { key: 'complaints', label: '我的投诉' },
   { key: 'favorites', label: '收藏' },
   { key: 'wallet', label: '钱包' },
   ...(isCompanion.value ? [{ key: 'companion', label: '陪玩服务' }] : []),
@@ -50,7 +52,7 @@ const profileCompleteness = computed(() => {
 
 function readHashTab(hash: string) {
   // 旧版 #tab=reviews 回落到概览；#tab=companion 仅陪玩师有效
-  const match = hash.match(/^#tab=(overview|orders|favorites|wallet|companion|settings)$/)
+  const match = hash.match(/^#tab=(overview|orders|complaints|favorites|wallet|companion|settings)$/)
   const key = match?.[1]
   return key && profileTabs.value.some((tab) => tab.key === key) ? key : 'overview'
 }
@@ -271,6 +273,8 @@ watch(() => route.hash, (hash) => {
           </section>
 
           <OrdersPanel v-if="visitedTabs.has('orders')" v-show="activeTab === 'orders'" />
+
+          <ProfileComplaintsPanel v-if="visitedTabs.has('complaints')" v-show="activeTab === 'complaints'" />
 
           <ProfileFavoritesPanel v-if="visitedTabs.has('favorites')" v-show="activeTab === 'favorites'" />
 

@@ -2,11 +2,17 @@ package com.gameplay.wallet.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.gameplay.audit.service.OperationLogService;
+import com.gameplay.auth.entity.User;
+import com.gameplay.auth.mapper.UserMapper;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.order.domain.PlayOrder;
+import com.gameplay.wallet.config.DemoWalletProperties;
 import com.gameplay.wallet.domain.WalletAccount;
 import com.gameplay.wallet.domain.WalletLedger;
+import com.gameplay.wallet.dto.DemoWalletConfigView;
+import com.gameplay.wallet.dto.DemoWalletGrantView;
 import com.gameplay.wallet.dto.LedgerView;
 import com.gameplay.wallet.dto.WalletView;
 import com.gameplay.wallet.enums.LedgerDirection;
@@ -33,6 +39,9 @@ public class WalletService {
 
     private final WalletAccountMapper walletAccountMapper;
     private final WalletLedgerMapper walletLedgerMapper;
+    private final UserMapper userMapper;
+    private final OperationLogService operationLogService;
+    private final DemoWalletProperties demoWalletProperties;
 
     /** 行锁读取钱包；不存在时创建（资金操作事务入口） */
     private WalletAccount ensureWalletForUpdate(Long userId) {
@@ -216,6 +225,78 @@ public class WalletService {
         Page<LedgerView> result = new Page<>(p.getCurrent(), p.getSize(), p.getTotal());
         result.setRecords(p.getRecords().stream().map(this::toView).toList());
         return result;
+    }
+
+    /** 获取演示钱包配置 */
+    public DemoWalletConfigView getDemoConfig() {
+        return DemoWalletConfigView.builder()
+                .enabled(demoWalletProperties.isEnabled())
+                .allowedAmountsCents(demoWalletProperties.getAllowedAmountsCents())
+                .build();
+    }
+
+    /**
+     * 发放演示余额（仅演示环境开启时由管理员调用）。
+     * <p>businessNo = DEMO_CREDIT:{requestId} 保证幂等，同 requestId 返回既有记录。</p>
+     */
+    @Transactional
+    public DemoWalletGrantView grantDemoCredit(Long targetUserId, Long amountCents, String reason,
+                                              String requestId, Long operatorAdminId) {
+        if (!demoWalletProperties.isEnabled()) {
+            throw new BusinessException(ErrorCode.DEMO_WALLET_DISABLED);
+        }
+        if (amountCents == null || !demoWalletProperties.getAllowedAmountsCents().contains(amountCents)) {
+            throw new BusinessException(ErrorCode.DEMO_WALLET_AMOUNT_INVALID);
+        }
+        User targetUser = userMapper.selectById(targetUserId);
+        if (targetUser == null || (targetUser.getDeleted() != null && targetUser.getDeleted() == 1)) {
+            throw new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND);
+        }
+        if ("DISABLED".equalsIgnoreCase(targetUser.getAccountStatus())) {
+            throw new BusinessException(ErrorCode.AUTH_ACCOUNT_DISABLED);
+        }
+
+        String businessNo = "DEMO_CREDIT:" + requestId.trim();
+        WalletLedger existing = walletLedgerMapper.selectByBusinessNo(businessNo);
+        if (existing != null) {
+            return DemoWalletGrantView.builder()
+                    .userId(existing.getUserId())
+                    .amountCents(existing.getAmountCents())
+                    .balanceAfterCents(existing.getBalanceAfterCents())
+                    .businessNo(existing.getBusinessNo())
+                    .createdAt(existing.getCreatedAt())
+                    .build();
+        }
+
+        WalletAccount wallet = ensureWalletForUpdate(targetUserId);
+        int rows = walletAccountMapper.increaseBalanceWithVersion(
+                wallet.getId(), wallet.getVersion(), amountCents);
+        if (rows != 1) {
+            throw new BusinessException(ErrorCode.WALLET_CONCURRENT_MODIFICATION);
+        }
+
+        String cleanReason = (reason == null ? "" : reason.trim());
+        insertLedger(businessNo, targetUserId, 0L, LedgerType.DEMO_CREDIT, LedgerDirection.IN,
+                amountCents, wallet, "演示余额发放：" + cleanReason, operatorAdminId);
+
+        operationLogService.record(
+                operatorAdminId,
+                "ADMIN",
+                "DEMO_WALLET_GRANT",
+                "USER",
+                targetUserId,
+                "balance=" + wallet.getBalanceCents(),
+                "balance=" + (wallet.getBalanceCents() + amountCents),
+                "发放演示余额 " + (amountCents / 100) + " 元，原因：" + cleanReason
+        );
+
+        return DemoWalletGrantView.builder()
+                .userId(targetUserId)
+                .amountCents(amountCents)
+                .balanceAfterCents(wallet.getBalanceCents() + amountCents)
+                .businessNo(businessNo)
+                .createdAt(LocalDateTime.now())
+                .build();
     }
 
     private void insertLedger(String businessNo, Long userId, Long orderId, LedgerType type,

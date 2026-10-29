@@ -23,6 +23,7 @@ public class NotificationView {
     private String content;
     private String relatedType;
     private Long relatedId;
+    private String eventKey;
     /** 已读状态：0否，1是 */
     private Integer readStatus;
 

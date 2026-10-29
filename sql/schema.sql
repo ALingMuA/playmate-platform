@@ -367,10 +367,12 @@ CREATE TABLE notification (
   content VARCHAR(1000) NOT NULL DEFAULT '' COMMENT '通知内容',
   related_type VARCHAR(32) NOT NULL DEFAULT '' COMMENT '关联业务类型',
   related_id BIGINT NOT NULL DEFAULT 0 COMMENT '关联业务ID',
+  event_key VARCHAR(128) NULL DEFAULT NULL COMMENT '业务事件幂等键',
   read_status TINYINT NOT NULL DEFAULT 0 COMMENT '已读状态：0否，1是',
   read_at DATETIME NULL DEFAULT NULL COMMENT '读取时间',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   PRIMARY KEY (id),
+  UNIQUE KEY uk_n_user_event_key (user_id, event_key),
   KEY idx_n_user_read_created (user_id, read_status, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='站内通知表';
 

@@ -12,6 +12,11 @@ logging:
   file:
     name: /opt/gamemate/spring.log
 
+app:
+  demo-wallet:
+    enabled: true
+    allowed-amounts-cents: 1000,5000,10000,50000
+
 # 上传文件落盘目录，与 nginx 的 /uploads/ 别名保持一致
 file:
   storage:

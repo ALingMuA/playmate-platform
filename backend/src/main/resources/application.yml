@@ -67,3 +67,6 @@ logging:
 app:
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  demo-wallet:
+    enabled: ${APP_DEMO_WALLET_ENABLED:false}
+    allowed-amounts-cents: 1000,5000,10000,50000
