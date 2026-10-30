@@ -30,7 +30,7 @@ async function load() {
 }
 
 function goBack() {
-  router.push('/announcements')
+  router.push('/messages?tab=announcements')
 }
 
 onMounted(() => {

@@ -211,7 +211,7 @@ onUnmounted(() => {
           <div class="card-body">
             <div class="card-title mb-2" style="display: flex; justify-content: space-between; align-items: center;">
               <span>📢 平台公告</span>
-              <span style="font-size: 0.875rem; cursor: pointer; color: var(--primary); font-weight: normal;" @click="router.push('/announcements')">更多公告 →</span>
+              <span style="font-size: 0.875rem; cursor: pointer; color: var(--primary); font-weight: normal;" @click="router.push('/messages?tab=announcements')">更多公告 →</span>
             </div>
             <div v-for="a in announcements" :key="a.id" class="announce-item">
               <div class="announce-title-row" @click="router.push(`/announcements/${a.id}`)">

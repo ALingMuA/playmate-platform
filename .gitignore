@@ -46,3 +46,4 @@ coverage/
 _pdf_analysis/
 output/
 .zcode/
+.agents/

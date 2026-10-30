@@ -6,18 +6,19 @@
  * 右侧按登录态展示登录按钮或用户菜单（个人中心、角色工作台入口、退出）。
  * 工作台入口按角色显示：陪玩师端（COMPANION）、客服工作台（CUSTOMER_SERVICE）、管理后台（ADMIN）。</p>
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Bell } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
-import { unreadNotificationCount } from '@/api/notification'
+import { useNotificationStore } from '@/stores/notification'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const notificationStore = useNotificationStore()
 
-const unreadCount = ref(0)
+const unreadCount = computed(() => notificationStore.unreadCount)
 
 const activeMenu = computed(() => {
   if (route.path === '/companions') return '/companions'
@@ -44,15 +45,10 @@ const workbenches = computed(() => {
 
 async function fetchUnread() {
   if (!isLoggedIn.value) {
-    unreadCount.value = 0
+    notificationStore.clearUnread()
     return
   }
-  try {
-    const res = await unreadNotificationCount()
-    unreadCount.value = res.count ?? 0
-  } catch {
-    // 忽略未读数拉取静默失败
-  }
+  await notificationStore.fetchUnread()
 }
 
 watch(
@@ -66,7 +62,7 @@ watch(isLoggedIn, (loggedIn) => {
   if (loggedIn) {
     fetchUnread()
   } else {
-    unreadCount.value = 0
+    notificationStore.clearUnread()
   }
 })
 
@@ -76,6 +72,7 @@ onMounted(() => {
 
 function handleLogout() {
   userStore.logout()
+  notificationStore.clearUnread()
   ElMessage.success('已退出登录')
   router.push('/')
 }
@@ -113,8 +110,8 @@ function goLogin() {
           <template v-else>
             <div
               class="bell-trigger"
-              title="站内通知"
-              @click="router.push('/notifications')"
+              title="消息中心"
+              @click="router.push('/messages?tab=notifications')"
             >
               <el-badge :value="unreadCount" :max="99" :hidden="unreadCount === 0" class="bell-badge">
                 <el-button circle :icon="Bell" class="bell-btn" />
@@ -131,9 +128,9 @@ function goLogin() {
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="/profile">个人中心</el-dropdown-item>
-                  <el-dropdown-item command="/notifications">
+                  <el-dropdown-item command="/messages?tab=notifications">
                     <span class="menu-item-with-badge">
-                      <span>站内通知</span>
+                      <span>消息中心</span>
                       <el-badge
                         v-if="unreadCount > 0"
                         :value="unreadCount"
@@ -183,7 +180,7 @@ function goLogin() {
             <router-link to="/games">游戏列表</router-link>
             <router-link to="/companions">查找陪玩师</router-link>
             <router-link to="/activities">平台活动</router-link>
-            <router-link to="/announcements">平台公告</router-link>
+            <router-link to="/messages?tab=announcements">平台公告</router-link>
             <router-link to="/support">在线客服</router-link>
           </div>
           <div class="footer-col">

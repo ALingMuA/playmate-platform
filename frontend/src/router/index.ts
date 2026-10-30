@@ -124,16 +124,22 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '发起投诉', requiresAuth: true },
       },
       {
+        path: 'messages',
+        name: 'user-messages',
+        component: () => import('@/views/user/MessagesCenterView.vue'),
+        meta: { title: '消息中心' },
+      },
+      {
         path: 'notifications',
         name: 'user-notifications',
-        component: () => import('@/views/user/NotificationsView.vue'),
+        component: () => import('@/views/user/NotificationsRedirectView.vue'),
         meta: { title: '通知中心', requiresAuth: true },
+        beforeEnter: () => ({ path: '/messages', query: { tab: 'notifications' }, replace: true }),
       },
       {
         path: 'announcements',
         name: 'user-announcements',
-        component: () => import('@/views/user/AnnouncementsView.vue'),
-        meta: { title: '平台公告' },
+        redirect: { path: '/messages', query: { tab: 'announcements' } },
       },
       {
         path: 'announcements/:id',

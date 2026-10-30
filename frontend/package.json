@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "node tests/e2e/run-all.mjs"
   },
   "dependencies": {
     "axios": "^1.7.9",
@@ -19,6 +20,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
+    "tsx": "^4.23.15",
     "typescript": "~5.6.3",
     "vite": "^6.0.5",
     "vue-tsc": "^2.2.0"
