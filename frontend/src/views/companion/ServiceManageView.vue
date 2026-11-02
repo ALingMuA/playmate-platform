@@ -19,6 +19,8 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 10
 const loading = ref(false)
+const loadError = ref('')
+const pendingShelfIds = ref(new Set<number>())
 const tagLoading = ref(false)
 
 /**
@@ -44,10 +46,13 @@ const form = reactive({
 
 async function load() {
   loading.value = true
+  loadError.value = ''
   try {
     const result: PageResult<CompanionService> = await listMyServices(page.value, pageSize)
     list.value = result.records
     total.value = result.total
+  } catch (err) {
+    loadError.value = err instanceof Error ? err.message : '服务列表加载失败，请重试。'
   } finally {
     loading.value = false
   }
@@ -150,15 +155,26 @@ async function handleSave() {
 }
 
 async function handleShelf(row: CompanionService) {
+  if (pendingShelfIds.value.has(row.id)) return
   const onShelf = row.serviceStatus !== 'ON_SHELF'
-  if (onShelf) {
-    await ElMessageBox.confirm('上架后用户即可预约该服务，确认上架？', '上架确认', { type: 'warning' })
-  } else {
-    await ElMessageBox.confirm('下架后不再产生新订单，已有订单不受影响。确认下架？', '下架确认', { type: 'warning' })
+  pendingShelfIds.value = new Set(pendingShelfIds.value).add(row.id)
+  try {
+    try {
+      await ElMessageBox.confirm(
+        onShelf ? '上架后用户即可预约该服务，确认上架？' : '下架后不再产生新订单，已有订单不受影响。确认下架？',
+        onShelf ? '上架确认' : '下架确认', { type: 'warning' },
+      )
+    } catch {
+      return
+    }
+    await setServiceShelf(row.id, onShelf)
+    ElMessage.success(onShelf ? '已上架' : '已下架')
+    await load()
+  } finally {
+    const next = new Set(pendingShelfIds.value)
+    next.delete(row.id)
+    pendingShelfIds.value = next
   }
-  await setServiceShelf(row.id, onShelf)
-  ElMessage.success(onShelf ? '已上架' : '已下架')
-  await load()
 }
 
 const auditTag: Record<string, { label: string; type: 'info' | 'success' | 'danger' }> = {
@@ -178,7 +194,10 @@ const shelfTag: Record<string, { label: string; type: 'success' | 'info' }> = {
       <el-button type="primary" @click="openCreate">新增服务</el-button>
     </div>
 
-    <el-table :data="list" v-loading="loading" border stripe>
+    <el-alert v-if="loadError" type="error" :title="loadError" :closable="false" show-icon>
+      <el-button size="small" @click="load">重试</el-button>
+    </el-alert>
+    <el-table v-if="!loadError" :data="list" v-loading="loading" border stripe>
       <el-table-column prop="title" label="服务标题" min-width="160" show-overflow-tooltip />
       <el-table-column prop="gameName" label="游戏" width="110" />
       <el-table-column label="类型" width="130">
@@ -228,7 +247,8 @@ const shelfTag: Record<string, { label: string; type: 'success' | 'info' }> = {
         <template #default="{ row }">
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
           <el-button size="small" :type="row.serviceStatus === 'ON_SHELF' ? 'warning' : 'success'"
-            :disabled="row.auditStatus !== 'APPROVED' && row.serviceStatus !== 'ON_SHELF'"
+            :loading="pendingShelfIds.has(row.id)"
+            :disabled="pendingShelfIds.has(row.id) || (row.auditStatus !== 'APPROVED' && row.serviceStatus !== 'ON_SHELF')"
             @click="handleShelf(row)">
             {{ row.serviceStatus === 'ON_SHELF' ? '下架' : '上架' }}
           </el-button>

@@ -6,30 +6,35 @@
  * 点击卡片跳转对应游戏的陪玩师列表。数据来自 catalog 模块公开接口，游客可访问。</p>
  */
 import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { listGames, listServiceTypes, type Game, type ServiceType } from '@/api/catalog'
-
-const router = useRouter()
 
 const games = ref<Game[]>([])
 const serviceTypes = ref<ServiceType[]>([])
 const loading = ref(true)
+const failed = ref(false)
+const errorMessage = ref('')
 
 async function loadData() {
   loading.value = true
-  try {
-    const [gameList, typeList] = await Promise.all([listGames(), listServiceTypes()])
-    games.value = gameList
-    serviceTypes.value = typeList
-  } catch {
-    games.value = []
-  } finally {
-    loading.value = false
+  failed.value = false
+  errorMessage.value = ''
+  const [gamesResult, typesResult] = await Promise.allSettled([listGames(), listServiceTypes()])
+  if (gamesResult.status === 'fulfilled') {
+    games.value = gamesResult.value
+  } else {
+    failed.value = true
+    errorMessage.value = gamesResult.reason instanceof Error ? gamesResult.reason.message : '游戏目录加载失败，请重试。'
   }
-}
-
-function goGameDetail(game: Game) {
-  router.push(`/games/${game.id}`)
+  if (typesResult.status === 'fulfilled') {
+    serviceTypes.value = typesResult.value
+  } else if (!failed.value) {
+    failed.value = true
+    errorMessage.value = typesResult.reason instanceof Error ? typesResult.reason.message : '服务类型加载失败，请重试。'
+  }
+  if (failed.value) {
+    // 保留任一成功请求的数据，页面错误态只覆盖受影响的列表状态。
+  }
+  loading.value = false
 }
 
 function gameInitial(game: Game): string {
@@ -56,12 +61,22 @@ onMounted(loadData)
         </div>
       </div>
 
+      <div v-if="failed && games.length" class="error-banner" role="alert">
+        {{ errorMessage }}
+        <button class="btn btn-outline btn-sm" @click="loadData">重试</button>
+      </div>
+
       <!-- 加载中 -->
       <div v-if="loading" class="empty-state">加载中…</div>
 
+      <div v-else-if="failed && games.length === 0" class="empty-state" role="alert">
+        <p>{{ errorMessage }}</p>
+        <button class="btn btn-primary" @click="loadData">重新加载</button>
+      </div>
+
       <!-- 游戏卡片网格（原型 game-grid） -->
       <div v-else-if="games.length" class="game-grid">
-        <div v-for="game in games" :key="game.id" class="game-card" @click="goGameDetail(game)">
+        <router-link v-for="game in games" :key="game.id" :to="`/games/${game.id}`" class="game-card">
           <div class="game-cover">
             <el-image
               v-if="game.gameIconUrl"
@@ -87,11 +102,11 @@ onMounted(loadData)
               <span class="view-companions-btn">查看服务 →</span>
             </div>
           </div>
-        </div>
+        </router-link>
       </div>
 
       <!-- 空态 -->
-      <div v-else class="empty-state">
+      <div v-else-if="!failed" class="empty-state">
         <div class="empty-icon">🎮</div>
         <p>暂无游戏，请联系管理员在后台添加</p>
       </div>
@@ -130,6 +145,9 @@ onMounted(loadData)
   gap: 20px;
 }
 .game-card {
+  display: block;
+  color: inherit;
+  text-decoration: none;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);

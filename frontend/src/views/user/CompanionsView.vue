@@ -20,12 +20,15 @@ const userStore = useUserStore()
 const showApplyCta = computed(() => !userStore.hasRole('COMPANION'))
 
 const games = ref<Game[]>([])
+const gamesFailed = ref(false)
 const gameId = ref<number | undefined>(undefined)
 const companions = ref<PublicCompanionCard[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = 8
 const loading = ref(false)
+const failed = ref(false)
+const errorMessage = ref('')
 
 const currentGameName = computed(() => games.value.find((g) => g.id === gameId.value)?.gameName ?? '全部游戏')
 
@@ -33,10 +36,15 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize))
 
 async function load() {
   loading.value = true
+  failed.value = false
+  errorMessage.value = ''
   try {
     const result = await listPublicCompanions(gameId.value, page.value, pageSize)
     companions.value = result.records
     total.value = result.total
+  } catch (err) {
+    failed.value = true
+    errorMessage.value = err instanceof Error ? err.message : '陪玩师列表加载失败，请重试。'
   } finally {
     loading.value = false
   }
@@ -47,9 +55,13 @@ function onGameChange() {
   load()
 }
 
-/** 直达陪玩师公开主页（服务列表在主页首屏即可预约） */
-function goServices(c: PublicCompanionCard) {
-  router.push(`/companions/${c.userId}`)
+async function loadGames() {
+  gamesFailed.value = false
+  try {
+    games.value = await listGames()
+  } catch {
+    gamesFailed.value = true
+  }
 }
 
 function fmtPrice(cents: number): string {
@@ -76,11 +88,7 @@ function statusBadge(status: PublicCompanionCard['serviceStatus']): string {
 }
 
 onMounted(async () => {
-  try {
-    games.value = await listGames()
-  } catch {
-    games.value = []
-  }
+  await loadGames()
   const qGameId = Number(route.query.gameId)
   if (qGameId && games.value.some((g) => g.id === qGameId)) {
     gameId.value = qGameId
@@ -107,11 +115,15 @@ watch(
       <!-- 页头 -->
       <div class="page-header">
         <h1 class="page-title">找陪玩师</h1>
-        <p class="page-subtitle">筛选心仪的陪玩伙伴 · 当前：{{ currentGameName }}（共 {{ total }} 位陪玩师）</p>
+      <p class="page-subtitle">筛选心仪的陪玩伙伴 · 当前：{{ currentGameName }}<template v-if="!failed">（共 {{ total }} 位陪玩师）</template></p>
       </div>
 
       <!-- 筛选栏（原型 filter-bar） -->
       <div class="filter-bar">
+        <div v-if="gamesFailed" class="error-banner" role="alert">
+          游戏筛选选项加载失败。
+          <button class="btn btn-outline btn-sm" @click="loadGames">重试</button>
+        </div>
         <div class="filter-row">
           <div class="filter-item">
             <label>游戏</label>
@@ -130,9 +142,14 @@ watch(
       <!-- 加载中 -->
       <div v-if="loading" class="empty-state">加载中…</div>
 
+      <div v-else-if="failed" class="empty-state" role="alert">
+        <p>{{ errorMessage }}</p>
+        <button class="btn btn-primary" @click="load">重新加载</button>
+      </div>
+
       <!-- 陪玩师卡片网格（原型 companion-grid） -->
       <div v-else-if="companions.length" class="companion-grid">
-        <div v-for="c in companions" :key="c.userId" class="companion-card" @click="goServices(c)">
+        <router-link v-for="c in companions" :key="c.userId" :to="`/companions/${c.userId}`" class="companion-card">
           <div class="companion-header">
             <div class="companion-avatar">
               <el-image v-if="c.avatarUrl" :src="c.avatarUrl" fit="cover" loading="lazy">
@@ -166,10 +183,10 @@ watch(
             </div>
             <div class="companion-actions">
               <span class="text-muted" style="font-size: 0.8125rem">{{ c.serviceCount }} 个在架服务</span>
-              <button class="btn btn-primary btn-sm" @click.stop="goServices(c)">查看服务</button>
+              <span class="btn btn-primary btn-sm">查看服务</span>
             </div>
           </div>
-        </div>
+        </router-link>
       </div>
 
       <!-- 空态 -->

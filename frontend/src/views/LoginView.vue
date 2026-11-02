@@ -25,6 +25,12 @@ const form = reactive({
   mobile: '',
   email: '',
 })
+const registerErrors = reactive({
+  username: '',
+  nickname: '',
+  contact: '',
+  password: '',
+})
 
 async function handleLogin() {
   if (!form.account || !form.password) {
@@ -43,8 +49,15 @@ async function handleLogin() {
 }
 
 async function handleRegister() {
-  if (!form.username || !form.password || !form.nickname) {
-    ElMessage.warning('请完整填写注册信息')
+  registerErrors.username = /^[A-Za-z0-9_]{4,32}$/.test(form.username)
+    ? '' : '用户名须为 4～32 位字母、数字或下划线'
+  registerErrors.nickname = form.nickname.trim() ? '' : '请输入昵称'
+  registerErrors.contact = form.mobile.trim() || form.email.trim()
+    ? '' : '手机号与邮箱至少填写一项'
+  registerErrors.password = /^(?=.*[A-Za-z])(?=.*\d)\S{8,32}$/.test(form.password)
+    ? '' : '密码须为 8～32 位且同时包含字母和数字'
+  if (Object.values(registerErrors).some(Boolean)) {
+    ElMessage.warning('请修正注册表单中的错误')
     return
   }
   loading.value = true
@@ -94,33 +107,34 @@ async function handleRegister() {
         <button type="submit" class="btn btn-primary btn-block btn-lg" :disabled="loading">
           {{ loading ? '登录中…' : '登 录' }}
         </button>
-        <p class="mt-2 text-muted" style="font-size: 0.8125rem; text-align: center">
-          演示账号 admin / Admin@123456
-        </p>
       </form>
 
       <!-- 注册表单 -->
       <form v-else class="auth-panel active" @submit.prevent="handleRegister">
         <div class="form-group">
-          <label class="form-label">用户名</label>
-          <input v-model="form.username" class="form-control" placeholder="设置登录账号" autocomplete="username" />
+          <label class="form-label" for="register-username">用户名</label>
+          <input id="register-username" v-model="form.username" class="form-control" placeholder="设置登录账号" autocomplete="username" :aria-invalid="!!registerErrors.username" />
+          <small v-if="registerErrors.username" class="field-error">{{ registerErrors.username }}</small>
         </div>
         <div class="form-group">
-          <label class="form-label">昵称</label>
-          <input v-model="form.nickname" class="form-control" placeholder="展示昵称" />
+          <label class="form-label" for="register-nickname">昵称</label>
+          <input id="register-nickname" v-model="form.nickname" class="form-control" placeholder="展示昵称" :aria-invalid="!!registerErrors.nickname" />
+          <small v-if="registerErrors.nickname" class="field-error">{{ registerErrors.nickname }}</small>
         </div>
         <div class="form-group">
-          <label class="form-label">手机号</label>
-          <input v-model="form.mobile" class="form-control" placeholder="选填，手机号与邮箱至少一项" autocomplete="tel" />
+          <label class="form-label" for="register-mobile">手机号</label>
+          <input id="register-mobile" v-model="form.mobile" class="form-control" placeholder="选填，手机号与邮箱至少一项" autocomplete="tel" :aria-invalid="!!registerErrors.contact" />
         </div>
         <div class="form-group">
-          <label class="form-label">邮箱</label>
-          <input v-model="form.email" class="form-control" placeholder="选填" autocomplete="email" />
+          <label class="form-label" for="register-email">邮箱</label>
+          <input id="register-email" v-model="form.email" class="form-control" placeholder="选填" autocomplete="email" :aria-invalid="!!registerErrors.contact" />
+          <small v-if="registerErrors.contact" class="field-error">{{ registerErrors.contact }}</small>
         </div>
         <div class="form-group">
-          <label class="form-label">密码</label>
-          <input v-model="form.password" type="password" class="form-control"
-            placeholder="至少8位，含字母和数字" autocomplete="new-password" />
+          <label class="form-label" for="register-password">密码</label>
+          <input id="register-password" v-model="form.password" type="password" class="form-control"
+            placeholder="8～32位，含字母和数字" autocomplete="new-password" :aria-invalid="!!registerErrors.password" />
+          <small v-if="registerErrors.password" class="field-error">{{ registerErrors.password }}</small>
         </div>
         <button type="submit" class="btn btn-primary btn-block btn-lg" :disabled="loading">
           {{ loading ? '注册中…' : '注 册' }}
@@ -131,6 +145,7 @@ async function handleRegister() {
 </template>
 
 <style scoped>
+.field-error { display: block; margin-top: 4px; color: #dc2626; font-size: 0.8125rem; }
 @media (max-width: 768px) {
   .auth-page {
     display: block;

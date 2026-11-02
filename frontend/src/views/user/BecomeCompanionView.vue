@@ -14,8 +14,8 @@
  * 避免非陪玩师一进页面就弹出 403 的错误提示。</p>
  */
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { listGames, listTags, type Game, type TagView } from '@/api/catalog'
 import {
   myApplications,
@@ -45,6 +45,8 @@ const form = reactive({
   capabilities: [] as GameCapability[],
   proofUrls: '',
 })
+const initialFormSnapshot = JSON.stringify(form)
+const formDirty = computed(() => JSON.stringify(form) !== initialFormSnapshot)
 
 /** 各游戏可选的位置/英雄标签（按 gameId 缓存，避免多行能力互相覆盖选项） */
 const tagOptions = reactive<Record<number, TagView[]>>({})
@@ -194,6 +196,16 @@ async function handleSubmit() {
     submitting.value = false
   }
 }
+
+onBeforeRouteLeave(async () => {
+  if (!formDirty.value || submitting.value) return true
+  try {
+    await ElMessageBox.confirm('入驻申请尚未提交，离开后填写内容将丢失。确定离开吗？', '离开申请', { type: 'warning' })
+    return true
+  } catch {
+    return false
+  }
+})
 
 function goWorkbench() {
   router.push('/companion')

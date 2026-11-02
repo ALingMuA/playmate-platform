@@ -9,6 +9,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getGame, type Game } from '@/api/catalog'
 import { listBookableServices, type BookableService } from '@/api/order'
+import { ApiError } from '@/api/http'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,14 +18,20 @@ const gameId = computed(() => Number(route.params.gameId))
 
 const game = ref<Game | null>(null)
 const gameLoading = ref(true)
+const gameError = ref('')
 
 const services = ref<BookableService[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = 8
 const loading = ref(false)
+const servicesError = ref('')
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+const visiblePages = computed(() => {
+  const start = Math.max(1, Math.min(page.value - 2, totalPages.value - 4))
+  return Array.from({ length: Math.min(5, totalPages.value) }, (_, index) => start + index)
+})
 
 async function loadGame() {
   if (!gameId.value) {
@@ -33,10 +40,14 @@ async function loadGame() {
     return
   }
   gameLoading.value = true
+  gameError.value = ''
   try {
     game.value = await getGame(gameId.value)
-  } catch {
+  } catch (err) {
     game.value = null
+    gameError.value = err instanceof ApiError && err.status === 404
+      ? '该游戏不存在或已停用。'
+      : '游戏信息加载失败，请重试。'
   } finally {
     gameLoading.value = false
   }
@@ -48,10 +59,13 @@ async function loadServices() {
     return
   }
   loading.value = true
+  servicesError.value = ''
   try {
     const result = await listBookableServices(gameId.value, undefined, page.value, pageSize)
     services.value = result.records
     total.value = result.total
+  } catch (err) {
+    servicesError.value = err instanceof Error ? err.message : '服务列表加载失败，请重试。'
   } finally {
     loading.value = false
   }
@@ -106,9 +120,10 @@ watch(
       <div v-if="gameLoading" class="empty-state">加载中…</div>
 
       <!-- 游戏不存在或已停用 -->
-      <div v-else-if="!game" class="empty-state">
+      <div v-else-if="!game" class="empty-state" role="alert">
         <div class="empty-icon">🎮</div>
-        <p>游戏不存在或已停用</p>
+        <p>{{ gameError || '游戏不存在或已停用' }}</p>
+        <button v-if="gameError.includes('重试')" class="btn btn-outline" @click="loadGame">重试</button>
       </div>
 
       <template v-else>
@@ -137,6 +152,11 @@ watch(
         <!-- 加载中 -->
         <div v-if="loading" class="empty-state">加载中…</div>
 
+        <div v-if="servicesError" class="error-banner" role="alert">
+          {{ servicesError }}
+          <button class="btn btn-outline btn-sm" @click="loadServices">重试</button>
+        </div>
+
         <div v-else-if="services.length" class="companion-grid">
           <div v-for="s in services" :key="s.id" class="companion-card">
             <div class="companion-header">
@@ -148,7 +168,7 @@ watch(
                 <div class="companion-level">{{ s.companionDisplayName || '陪玩师' }} · {{ s.serviceTypeName }}</div>
                 <div class="companion-rating">
                   <span style="color: #f59e0b">★</span>
-                  <span>{{ fmtPrice(s.priceCents) }}/小时</span>
+                  <span>{{ s.ratingCount ? `${s.ratingAvg?.toFixed(1) ?? '暂无评分'}（${s.ratingCount} 条）` : '暂无评分' }}</span>
                   <span class="text-muted">· 最短 {{ s.minDurationMinutes }} 分钟</span>
                 </div>
               </div>
@@ -170,7 +190,7 @@ watch(
         </div>
 
         <!-- 空态 -->
-        <div v-else class="empty-state">
+        <div v-else-if="!loading" class="empty-state">
           <div class="empty-icon">🔍</div>
           <p>该游戏暂无在架服务，换个游戏看看吧</p>
         </div>
@@ -178,7 +198,7 @@ watch(
         <!-- 分页 -->
         <div v-if="totalPages > 1" class="pagination">
           <button class="page-link" :disabled="page <= 1" @click="page > 1 && (page -= 1, onPageChange())">‹</button>
-          <button v-for="p in totalPages" :key="p" class="page-link" :class="{ active: p === page }" @click="page = p; onPageChange()">
+          <button v-for="p in visiblePages" :key="p" class="page-link" :class="{ active: p === page }" @click="page = p; onPageChange()">
             {{ p }}
           </button>
           <button class="page-link" :disabled="page >= totalPages" @click="page < totalPages && (page += 1, onPageChange())">›</button>

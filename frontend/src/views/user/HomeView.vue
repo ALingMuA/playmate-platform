@@ -19,44 +19,10 @@ const announcements = ref<AnnouncementView[]>([])
 const recommended = ref<BookableService[]>([])
 
 /** 活动展示数据 */
-const defaultActivities: ActivityView[] = [
-  {
-    id: 1,
-    title: '新人专享福利',
-    subtitle: '首单立减优惠券免费领',
-    description: '注册即送新人优惠券，首次预约陪玩服务享专属优惠，大神陪你畅快开黑！',
-    bannerImage: '',
-    bgGradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    icon: '🎁',
-    tag: '限时活动',
-    tagColor: '#ff6b6b',
-    actionType: 'COMPANION_LIST',
-    actionRoute: '/companions',
-    sortOrder: 1,
-    status: 'PUBLISHED',
-    createdBy: 1,
-    createdAt: '',
-  },
-  {
-    id: 2,
-    title: '周末狂欢赛',
-    subtitle: '组队开黑赢大奖',
-    description: '每周六日参与组队活动，完成指定游戏任务即可赢取积分奖励和限定称号！',
-    bannerImage: '',
-    bgGradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-    icon: '🏆',
-    tag: '每周活动',
-    tagColor: '#ffa726',
-    actionType: 'PAGE_NAV',
-    actionRoute: '/activities',
-    sortOrder: 2,
-    status: 'PUBLISHED',
-    createdBy: 1,
-    createdAt: '',
-  },
-]
-
-const activities = ref<ActivityView[]>(defaultActivities)
+const activities = ref<ActivityView[]>([])
+const activityError = ref('')
+const announcementError = ref('')
+const recommendationError = ref('')
 
 /** 轮播控制 */
 const currentSlide = ref(0)
@@ -118,28 +84,44 @@ function fmtPrice(cents: number): string {
   return '¥' + (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)
 }
 
-onMounted(async () => {
-  startAutoPlay()
+async function loadActivities() {
+  activityError.value = ''
   try {
     const actList = await publicActivities()
-    if (actList && actList.length > 0) {
-      activities.value = actList
-    }
-  } catch {
-    // 降级使用默认活动
+    activities.value = actList ?? []
+  } catch (err) {
+    activities.value = []
+    activityError.value = err instanceof Error ? err.message : '活动加载失败，请重试。'
   }
+  currentSlide.value = 0
+  resetAutoPlay()
+}
+
+async function loadAnnouncements() {
+  announcementError.value = ''
   try {
     const result = await publicAnnouncements(1, 5)
     announcements.value = result.records
-  } catch {
+  } catch (err) {
     announcements.value = []
+    announcementError.value = err instanceof Error ? err.message : '公告加载失败，请重试。'
   }
+}
+
+async function loadRecommendations() {
+  recommendationError.value = ''
   try {
     const result = await listBookableServices(undefined, undefined, 1, 6)
     recommended.value = result.records
-  } catch {
+  } catch (err) {
     recommended.value = []
+    recommendationError.value = err instanceof Error ? err.message : '推荐服务加载失败，请重试。'
   }
+}
+
+onMounted(async () => {
+  startAutoPlay()
+  await Promise.all([loadActivities(), loadAnnouncements(), loadRecommendations()])
 })
 
 onUnmounted(() => {
@@ -152,7 +134,14 @@ onUnmounted(() => {
     <!-- 活动展示轮播 -->
     <section class="activity-showcase">
       <div class="container">
-        <div class="carousel-wrapper">
+        <div v-if="activityError" class="card" role="alert" style="padding: 12px; margin-bottom: 12px">
+          <span>{{ activityError }}</span>
+          <button class="btn btn-outline btn-sm" @click="loadActivities">重试</button>
+        </div>
+        <div v-else-if="activities.length === 0" class="card" style="padding: 12px; margin-bottom: 12px">
+          暂无可展示的活动
+        </div>
+        <div v-if="activities.length" class="carousel-wrapper">
           <!-- 轮播主体 -->
           <div class="carousel-viewport">
             <div
@@ -206,8 +195,12 @@ onUnmounted(() => {
 
     <div class="container">
       <!-- 平台公告（FR-A08） -->
-      <section v-if="announcements.length" class="section" style="padding-bottom: 0">
-        <div class="card">
+      <section v-if="announcementError || announcements.length" class="section" style="padding-bottom: 0">
+        <div v-if="announcementError" class="card" role="alert" style="padding: 12px">
+          <span>{{ announcementError }}</span>
+          <button class="btn btn-outline btn-sm" @click="loadAnnouncements">重试</button>
+        </div>
+        <div v-else class="card">
           <div class="card-body">
             <div class="card-title mb-2" style="display: flex; justify-content: space-between; align-items: center;">
               <span>📢 平台公告</span>
@@ -224,7 +217,12 @@ onUnmounted(() => {
       </section>
 
       <!-- 推荐陪玩师 -->
-      <section class="section" v-if="recommended.length">
+      <section class="section" v-if="recommended.length || recommendationError">
+        <div v-if="recommendationError" class="card" role="alert" style="padding: 12px">
+          <span>{{ recommendationError }}</span>
+          <button class="btn btn-outline btn-sm" @click="loadRecommendations">重试</button>
+        </div>
+        <template v-else>
         <div class="section-header">
           <h2 class="section-title">热门陪玩服务</h2>
           <span class="section-link" @click="router.push('/companions')">查看全部 →</span>
@@ -239,7 +237,7 @@ onUnmounted(() => {
                 <div class="companion-level">{{ s.gameName }} · {{ s.serviceTypeName }}</div>
                 <div class="companion-rating">
                   <span class="text-destructive" style="color: #f59e0b">★</span>
-                  <span>{{ fmtPrice(s.priceCents) }}/小时</span>
+                  <span>{{ s.ratingCount ? `${s.ratingAvg?.toFixed(1) ?? '暂无评分'}（${s.ratingCount} 条）` : '暂无评分' }}</span>
                 </div>
               </div>
             </div>
@@ -255,6 +253,7 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
+        </template>
       </section>
     </div>
   </div>
