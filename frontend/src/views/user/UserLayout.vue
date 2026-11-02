@@ -21,8 +21,9 @@ const notificationStore = useNotificationStore()
 const unreadCount = computed(() => notificationStore.unreadCount)
 
 const activeMenu = computed(() => {
-  if (route.path === '/companions') return '/companions'
-  if (route.path.startsWith('/orders')) return '/orders'
+  if (route.path.startsWith('/companions') || route.path.startsWith('/booking')) return '/companions'
+  if (route.path.startsWith('/orders') || route.path.startsWith('/payment')
+      || route.path.startsWith('/review') || route.path.startsWith('/complaint')) return '/orders'
   if (route.path.startsWith('/profile')) return '/profile'
   if (route.path.startsWith('/games')) return '/games'
   if (route.path.startsWith('/activities')) return '/activities'
@@ -149,7 +150,7 @@ function goLogin() {
                     {{ w.label }}
                   </el-dropdown-item>
                   <el-dropdown-item divided>
-                    <span class="logout-item" @click="handleLogout">退出登录</span>
+                    <span class="logout-item" @click.stop="handleLogout">退出登录</span>
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
