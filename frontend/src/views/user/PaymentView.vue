@@ -19,6 +19,9 @@ const order = ref<Order | null>(null)
 const wallet = ref<{ balanceCents: number } | null>(null)
 const loading = ref(true)
 const paying = ref(false)
+const orderError = ref('')
+const walletError = ref('')
+const orderNotFound = ref(false)
 
 const insufficient = computed(() => {
   if (!order.value || !wallet.value) return false
@@ -50,18 +53,39 @@ async function handlePay() {
   }
 }
 
-onMounted(async () => {
+async function loadPaymentData() {
+  loading.value = true
+  orderError.value = ''
+  walletError.value = ''
+  orderNotFound.value = false
+  if (!Number.isSafeInteger(orderId.value) || orderId.value <= 0) {
+    orderError.value = '订单链接无效，请从订单列表重新进入支付。'
+    loading.value = false
+    return
+  }
   try {
-    const [orderData, walletData] = await Promise.all([
+    const [orderResult, walletResult] = await Promise.allSettled([
       userOrderDetail(orderId.value),
       walletMe(),
     ])
-    order.value = orderData
-    wallet.value = walletData
+    if (orderResult.status === 'fulfilled') {
+      order.value = orderResult.value
+    } else {
+      const err = orderResult.reason as { status?: number; code?: string }
+      orderNotFound.value = err.status === 404 || err.code === 'ORDER_NOT_FOUND'
+      orderError.value = orderNotFound.value ? '订单不存在或已失效' : '订单信息加载失败，请重试。'
+    }
+    if (walletResult.status === 'fulfilled') {
+      wallet.value = walletResult.value
+    } else {
+      walletError.value = '余额加载失败，请重试后再支付。'
+    }
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(loadPaymentData)
 </script>
 
 <template>
@@ -123,10 +147,14 @@ onMounted(async () => {
 
         <div class="card mt-2">
           <div class="card-body">
+            <div v-if="walletError" class="text-destructive" role="alert" style="margin-bottom: 12px">
+              {{ walletError }}
+              <button class="btn btn-outline btn-sm" @click="loadPaymentData">重试</button>
+            </div>
             <p v-if="insufficient" class="text-destructive" style="margin-bottom: 12px">
-              当前为虚拟余额演示环境，余额不足时请联系管理员发放演示余额。
+              当前为演示环境虚拟余额。请由管理员在用户管理中为本账号发放演示余额；准备完成后可返回本订单继续支付。
             </p>
-            <button class="btn btn-primary btn-lg btn-block" :disabled="paying || insufficient" @click="handlePay">
+            <button class="btn btn-primary btn-lg btn-block" :disabled="paying || insufficient || !wallet" @click="handlePay">
               {{ paying ? '支付中…' : insufficient ? '余额不足' : '确认支付 ' + fmtMoney(order.totalAmountCents) }}
             </button>
             <button class="btn btn-ghost btn-block mt-1" @click="router.push('/orders')">稍后支付，返回订单列表</button>
@@ -134,9 +162,14 @@ onMounted(async () => {
         </div>
       </template>
 
-      <div v-else-if="!loading" class="empty-state">
+      <div v-else-if="!loading && orderNotFound" class="empty-state">
         <div class="empty-icon">📭</div>
-        <p>订单不存在或已失效</p>
+        <p>{{ orderError }}</p>
+        <button class="btn btn-secondary mt-2" @click="router.push('/orders')">返回订单列表</button>
+      </div>
+      <div v-else-if="!loading && orderError" class="empty-state" role="alert">
+        <p>{{ orderError }}</p>
+        <button class="btn btn-outline mt-2" @click="loadPaymentData">重试</button>
         <button class="btn btn-secondary mt-2" @click="router.push('/orders')">返回订单列表</button>
       </div>
     </div>

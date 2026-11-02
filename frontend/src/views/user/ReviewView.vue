@@ -14,10 +14,11 @@ import { reviewByOrder, submitReview } from '@/api/review'
 const route = useRoute()
 const router = useRouter()
 
-const orderId = computed(() => Number(route.params.id))
+const orderId = computed(() => Number(route.params.orderId))
 const order = ref<Order | null>(null)
 const loading = ref(true)
 const submitting = ref(false)
+const loadError = ref('')
 
 const form = reactive({
   score: 5,
@@ -51,7 +52,13 @@ async function handleSubmit() {
   }
 }
 
-onMounted(async () => {
+async function loadOrder() {
+  loadError.value = ''
+  if (!Number.isSafeInteger(orderId.value) || orderId.value <= 0) {
+    loadError.value = '订单链接无效，请从订单列表重新进入评价。'
+    loading.value = false
+    return
+  }
   try {
     const [orderData, existed] = await Promise.all([
       userOrderDetail(orderId.value),
@@ -62,10 +69,14 @@ onMounted(async () => {
       ElMessage.warning('该订单已评价')
       router.replace('/orders')
     }
+  } catch {
+    loadError.value = '订单信息加载失败，请重试。'
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(loadOrder)
 </script>
 
 <template>
@@ -129,7 +140,8 @@ onMounted(async () => {
 
       <div v-else-if="!loading" class="empty-state">
         <div class="empty-icon">📭</div>
-        <p>订单不存在</p>
+        <p>{{ loadError || '订单不存在或当前账号无权评价' }}</p>
+        <button v-if="loadError.includes('重试')" class="btn btn-outline mt-2" @click="loading = true; loadOrder()">重试</button>
         <button class="btn btn-secondary mt-2" @click="router.push('/orders')">返回订单列表</button>
       </div>
     </div>

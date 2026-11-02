@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -19,6 +20,10 @@ public class ServiceView {
 
     /** 提供该服务的陪玩师展示名（联查 companion_profile；资料缺失时为空串） */
     private String companionDisplayName;
+
+    /** 公开服务卡片展示用评价摘要。 */
+    private BigDecimal ratingAvg;
+    private Integer ratingCount;
 
     private Long gameId;
     private String gameName;

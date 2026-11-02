@@ -242,6 +242,8 @@ public class CompanionServiceService {
                 .id(s.getId())
                 .companionUserId(s.getCompanionUserId())
                 .companionDisplayName(profile == null ? "" : profile.getDisplayName())
+                .ratingAvg(profile == null ? null : profile.getRatingAvg())
+                .ratingCount(profile == null || profile.getRatingCount() == null ? 0 : profile.getRatingCount())
                 .gameId(s.getGameId())
                 .gameName(game == null ? "" : game.getGameName())
                 .serviceTypeId(s.getServiceTypeId())

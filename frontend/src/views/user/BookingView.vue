@@ -6,8 +6,8 @@
  * 支持选择可用优惠券进行平台抵扣，提交成功后跳转模拟支付页（FR-U09）。</p>
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import { createOrder, listBookableServices, type BookableService } from '@/api/order'
 import { listPublicAvailabilities, type PublicAvailability } from '@/api/companion'
@@ -17,6 +17,8 @@ const route = useRoute()
 const router = useRouter()
 
 const companionUserId = computed(() => Number(route.query.companionUserId))
+const invalidEntry = ref(false)
+const invalidEntryMessage = ref('')
 const presetServiceId = computed(() => Number(route.query.serviceId))
 const presetStartAt = computed(() => typeof route.query.startAt === 'string' ? route.query.startAt : '')
 
@@ -100,9 +102,10 @@ function quickAvailable(offsetMinutes: number): boolean {
 
 /** 当前所选 [开始时间, +时长) 是否落在可约档期内 */
 const selectedSlotAvailable = computed(() => {
-  if (!availabilityLoaded.value || !form.appointmentStart) return true
+  if (!form.appointmentStart) return false
   const start = dayjs(form.appointmentStart)
-  if (!start.isValid()) return true
+  if (!start.isValid() || !start.isAfter(dayjs())) return false
+  if (!availabilityLoaded.value) return true
   return slotCovered(start, start.add(form.durationMinutes, 'minute'))
 })
 
@@ -183,6 +186,9 @@ const userCoupons = ref<UserCouponView[]>([])
 const selectedCouponId = ref<number | undefined>(undefined)
 const previewResult = ref<CouponPreviewResult | null>(null)
 const couponLoading = ref(false)
+const initialFormSnapshot = ref('')
+const formSnapshot = () => JSON.stringify({ ...form, selectedCouponId: selectedCouponId.value })
+const formDirty = computed(() => initialFormSnapshot.value !== '' && initialFormSnapshot.value !== formSnapshot())
 
 /** 原价（分）= 单价 × 时长/60 */
 const totalAmountCents = computed(() => {
@@ -245,6 +251,7 @@ watch(selectedCouponId, () => {
 })
 
 async function handleSubmit() {
+  if (invalidEntry.value) return
   const service = selectedService.value
   if (!service) {
     ElMessage.warning('请先选择服务项目')
@@ -259,7 +266,7 @@ async function handleSubmit() {
     return
   }
   if (!selectedSlotAvailable.value) {
-    ElMessage.warning('所选时段不在陪玩师可约档期内，请选择档期内的具体时间')
+    ElMessage.warning('请选择未来且处于陪玩师可约档期内的时间')
     return
   }
   submitting.value = true
@@ -275,6 +282,7 @@ async function handleSubmit() {
       couponId: selectedCouponId.value || undefined,
     })
     ElMessage.success('订单已创建，请尽快支付')
+    initialFormSnapshot.value = formSnapshot()
     router.push(`/payment/${order.id}`)
   } finally {
     submitting.value = false
@@ -282,6 +290,12 @@ async function handleSubmit() {
 }
 
 onMounted(async () => {
+  if (!Number.isSafeInteger(companionUserId.value) || companionUserId.value <= 0) {
+    invalidEntry.value = true
+    invalidEntryMessage.value = '预约链接缺少有效的陪玩师信息，请先从找陪玩页面选择服务。'
+    loading.value = false
+    return
+  }
   // 档期预检数据：失败不影响下单流程（后端仍会兜底校验）
   listPublicAvailabilities(companionUserId.value, 7)
     .then((slots) => { availabilities.value = slots; availabilityLoaded.value = true })
@@ -313,8 +327,19 @@ onMounted(async () => {
       isCustomDuration.value = true
     }
     await refreshCouponsAndPreview()
+    initialFormSnapshot.value = formSnapshot()
   } finally {
     loading.value = false
+  }
+})
+
+onBeforeRouteLeave(async () => {
+  if (!formDirty.value || submitting.value) return true
+  try {
+    await ElMessageBox.confirm('当前预约信息尚未提交，离开后填写内容将丢失。确定离开吗？', '离开预约', { type: 'warning' })
+    return true
+  } catch {
+    return false
   }
 })
 </script>
@@ -326,6 +351,11 @@ onMounted(async () => {
       <div class="page-header">
         <h1 class="page-title">预约下单</h1>
         <p class="page-subtitle">简单两步快速预约陪玩师，提交后进入支付</p>
+      </div>
+
+      <div v-if="invalidEntry" class="card" role="alert" style="padding: 20px; margin-bottom: 16px">
+        <p>{{ invalidEntryMessage }}</p>
+        <button class="btn btn-primary" @click="router.push('/companions')">返回找陪玩</button>
       </div>
 
       <!-- 陪玩师直观卡片 -->
@@ -345,7 +375,7 @@ onMounted(async () => {
         </button>
       </div>
 
-      <div class="two-col-booking">
+      <div v-if="!invalidEntry" class="two-col-booking">
         <!-- 左侧：分步表单 -->
         <div>
           <!-- 第 1 步：核心服务与时间 -->
@@ -501,7 +531,7 @@ onMounted(async () => {
                     v-model="form.appointmentStart"
                     type="datetime"
                     placeholder="点击选择预约具体开始时间"
-                    :disabled-date="(d: Date) => d.getTime() < Date.now() - 86400000"
+                    :disabled-date="(d: Date) => d.getTime() < dayjs().startOf('day').valueOf()"
                     style="width: 100%"
                   />
                 </div>
@@ -666,7 +696,7 @@ onMounted(async () => {
 
           <button
             class="btn btn-primary btn-block btn-lg"
-            :disabled="submitting || !selectedService"
+            :disabled="submitting || !selectedService || !selectedSlotAvailable"
             @click="handleSubmit"
           >
             {{ submitting ? '提交中…' : '立即预约下单' }}
@@ -680,7 +710,7 @@ onMounted(async () => {
       </div>
 
       <!-- 移动端底部悬浮栏 -->
-      <div class="sticky-bottom-bar">
+      <div v-if="!invalidEntry" class="sticky-bottom-bar">
         <div class="sticky-bottom-price">
           <div>实付金额</div>
           <span class="price-value">{{ fmtPrice(finalPayableCents) }}</span>
@@ -688,7 +718,7 @@ onMounted(async () => {
         <button
           class="btn btn-primary"
           style="padding: 10px 24px"
-          :disabled="submitting || !selectedService"
+          :disabled="submitting || !selectedService || !selectedSlotAvailable"
           @click="handleSubmit"
         >
           {{ submitting ? '提交中…' : '立即预约' }}
