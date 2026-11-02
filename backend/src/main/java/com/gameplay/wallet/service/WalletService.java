@@ -235,6 +235,17 @@ public class WalletService {
                 .build();
     }
 
+    /** 管理端只读演示余额查询；没有钱包记录时按零余额返回且不创建账户。 */
+    public WalletView demoBalanceView(Long userId) {
+        WalletAccount wallet = walletAccountMapper.selectOne(
+                new LambdaQueryWrapper<WalletAccount>().eq(WalletAccount::getUserId, userId));
+        return WalletView.builder()
+                .balanceCents(wallet == null ? 0L : wallet.getBalanceCents())
+                .frozenCents(wallet == null ? 0L : wallet.getFrozenCents())
+                .totalIncomeCents(wallet == null ? 0L : wallet.getTotalIncomeCents())
+                .build();
+    }
+
     /**
      * 发放演示余额（仅演示环境开启时由管理员调用）。
      * <p>businessNo = DEMO_CREDIT:{requestId} 保证幂等，同 requestId 返回既有记录。</p>

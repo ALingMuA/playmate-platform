@@ -19,3 +19,19 @@ export async function uploadFile(file: File, category = 'general'): Promise<File
   })
   return response.data.data
 }
+
+/** 通过带登录态的请求读取受保护图片，返回可直接用于 img 的 data URL。 */
+export async function loadPrivateImage(fileUrl: string): Promise<string> {
+  const token = localStorage.getItem('token')
+  const response = await fetch(fileUrl, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!response.ok) throw new Error('图片读取失败')
+  const blob = await response.blob()
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('图片解析失败'))
+    reader.onerror = () => reject(new Error('图片解析失败'))
+    reader.readAsDataURL(blob)
+  })
+}

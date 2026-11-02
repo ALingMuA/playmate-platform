@@ -268,6 +268,16 @@ class AdminModuleTest {
         mockMvc.perform(get("/api/announcements"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(0));
+
+        // 仅 REVOKED 可恢复为草稿，随后复用既有编辑/发布流。
+        mockMvc.perform(post("/api/admin/announcements/" + id + "/restore-draft")
+                        .header("Authorization", "Bearer " + adminToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.publishStatus").value("DRAFT"));
+        mockMvc.perform(post("/api/admin/announcements/" + id + "/restore-draft")
+                        .header("Authorization", "Bearer " + adminToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("ANNOUNCEMENT_STATUS_INVALID"));
     }
 
     // ==================== 站内通知 ====================

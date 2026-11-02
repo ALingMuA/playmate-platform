@@ -13,6 +13,7 @@ import {
   adminDeleteAnnouncement,
   adminPublishAnnouncement,
   adminRevokeAnnouncement,
+  adminRestoreAnnouncementDraft,
   adminUpdateAnnouncement,
   type AnnouncementView,
 } from '@/api/admin'
@@ -22,6 +23,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 10
 const loading = ref(false)
+const listError = ref('')
 const status = ref<string | undefined>(undefined)
 
 const statusMap: Record<string, { label: string; type: string }> = {
@@ -37,10 +39,13 @@ function fmtTime(t?: string): string {
 
 async function load() {
   loading.value = true
+  listError.value = ''
   try {
     const result = await adminAnnouncements(status.value, page.value, pageSize)
     list.value = result.records
     total.value = result.total
+  } catch (err) {
+    listError.value = err instanceof Error ? err.message : '公告列表加载失败，请重试。'
   } finally {
     loading.value = false
   }
@@ -100,23 +105,34 @@ async function handleSave() {
 // ==================== 发布/撤回/删除 ====================
 
 async function handlePublish(row: AnnouncementView) {
-  await ElMessageBox.confirm(`发布后所有用户可见，确定发布公告「${row.title}」吗？`, '发布公告', { type: 'info' })
+  try { await ElMessageBox.confirm(`发布后所有用户可见，确定发布公告「${row.title}」吗？`, '发布公告', { type: 'info' }) } catch { return }
   await adminPublishAnnouncement(row.id)
   ElMessage.success('公告已发布')
   await load()
 }
 
 async function handleRevoke(row: AnnouncementView) {
-  await ElMessageBox.confirm('撤回后用户端不再展示该公告。', '撤回公告', { type: 'warning' })
+  try { await ElMessageBox.confirm('撤回后用户端不再展示该公告。', '撤回公告', { type: 'warning' }) } catch { return }
   await adminRevokeAnnouncement(row.id)
   ElMessage.success('公告已撤回')
   await load()
 }
 
 async function handleDelete(row: AnnouncementView) {
-  await ElMessageBox.confirm(`确定删除公告「${row.title}」吗？删除后不可恢复。`, '删除公告', { type: 'warning' })
+  try { await ElMessageBox.confirm(`确定删除公告「${row.title}」吗？删除后不可恢复。`, '删除公告', { type: 'warning' }) } catch { return }
   await adminDeleteAnnouncement(row.id)
   ElMessage.success('公告已删除')
+  await load()
+}
+
+async function handleRestoreDraft(row: AnnouncementView) {
+  try {
+    await ElMessageBox.confirm(`恢复「${row.title}」后将转为草稿，需重新编辑或确认内容后再发布。`, '恢复公告', { type: 'warning' })
+  } catch {
+    return
+  }
+  await adminRestoreAnnouncementDraft(row.id)
+  ElMessage.success('公告已恢复为草稿')
   await load()
 }
 
@@ -142,8 +158,12 @@ onMounted(load)
       </div>
     </el-card>
 
+    <el-alert v-if="listError" type="error" :title="listError" :closable="false" show-icon>
+      <el-button size="small" @click="load">重试</el-button>
+    </el-alert>
+
     <!-- 公告表格 -->
-    <el-card class="table-card" shadow="hover">
+    <el-card v-if="!listError" class="table-card" shadow="hover">
       <el-table :data="list" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
@@ -163,7 +183,7 @@ onMounted(load)
         <el-table-column label="更新时间" width="130">
           <template #default="{ row }">{{ fmtTime(row.updatedAt) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.publishStatus === 'DRAFT'" size="small" @click="openEdit(row)">编辑</el-button>
             <el-button v-if="row.publishStatus === 'DRAFT'" size="small" type="success" @click="handlePublish(row)">
@@ -174,6 +194,9 @@ onMounted(load)
             </el-button>
             <el-button v-if="row.publishStatus === 'DRAFT'" size="small" type="danger" @click="handleDelete(row)">
               删除
+            </el-button>
+            <el-button v-if="row.publishStatus === 'REVOKED'" size="small" type="primary" @click="handleRestoreDraft(row)">
+              恢复草稿
             </el-button>
           </template>
         </el-table-column>

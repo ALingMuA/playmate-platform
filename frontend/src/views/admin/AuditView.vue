@@ -196,6 +196,24 @@ onMounted(async () => {
           </el-table-column>
           <el-table-column prop="realName" label="真实姓名" width="100" />
           <el-table-column prop="contactMobile" label="联系手机" width="130" />
+          <el-table-column label="证明材料" min-width="150">
+            <template #default="{ row }">
+              <div v-if="row.proofUrls?.length" class="proof-preview-list">
+                <el-image
+                  v-for="(url, index) in row.proofUrls"
+                  :key="`${row.id}-${index}`"
+                  :src="url"
+                  fit="cover"
+                  class="proof-preview"
+                  :preview-src-list="row.proofUrls"
+                  preview-teleported
+                >
+                  <template #error><span class="hint">图片加载失败</span></template>
+                </el-image>
+              </div>
+              <span v-else class="hint">未提交证明</span>
+            </template>
+          </el-table-column>
           <el-table-column label="游戏能力" min-width="180">
             <template #default="{ row }">{{ capabilityText(row.capabilities) }}</template>
           </el-table-column>

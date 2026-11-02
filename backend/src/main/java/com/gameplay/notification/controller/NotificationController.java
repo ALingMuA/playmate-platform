@@ -32,8 +32,12 @@ public class NotificationController {
     @GetMapping
     public ApiResponse<Page<NotificationView>> list(@RequestParam(defaultValue = "1") long page,
                                                     @RequestParam(defaultValue = "10") long size,
+                                                    @RequestParam(required = false) Integer readStatus,
                                                     Authentication authentication) {
-        return ApiResponse.ok(notificationService.page(currentUserId(authentication), page, size));
+        if (readStatus != null && readStatus != 0 && readStatus != 1) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "readStatus 仅支持 0（未读）或 1（已读）");
+        }
+        return ApiResponse.ok(notificationService.page(currentUserId(authentication), page, size, readStatus));
     }
 
     /** 未读通知数 */

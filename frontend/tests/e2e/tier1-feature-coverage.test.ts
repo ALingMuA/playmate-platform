@@ -118,15 +118,19 @@ export async function runTier1Tests(): Promise<TestResult[]> {
 
   await executeTest('TC-T1-R2-01', 'In-site notification panel displays status filters and list records', 'R2: Panel Embedding', async () => {
     setupTestContext({ isLoggedIn: true })
-    const res = await myNotifications(1, 10)
-    assert.equal(res.records.length, 3, 'Must return 3 seed notifications')
-    assert.equal(res.total, 3)
+    const all = await myNotifications(1, 10)
+    const unreadRes = await myNotifications(1, 10, 0)
+    const readRes = await myNotifications(1, 10, 1)
+    assert.equal(all.records.length, 3, 'Must return 3 seed notifications')
+    assert.equal(all.total, 3)
 
-    // Filter simulation
-    const unreadOnly = res.records.filter(r => r.readStatus === 0)
-    const readOnly = res.records.filter(r => r.readStatus === 1)
+    const unreadOnly = unreadRes.records
+    const readOnly = readRes.records
     assert.equal(unreadOnly.length, 2, 'Should have 2 unread records')
+    assert.equal(unreadRes.total, 2, 'Unread total must reflect the server-side filter')
     assert.equal(readOnly.length, 1, 'Should have 1 read record')
+    assert.equal(readRes.total, 1, 'Read total must reflect the server-side filter')
+    assert.deepEqual(mockState.apiCallLogs.slice(-2).map((call) => call.params?.readStatus), [0, 1])
   })
 
   await executeTest('TC-T1-R2-02', 'Platform announcement panel displays published announcements with timestamp', 'R2: Panel Embedding', async () => {

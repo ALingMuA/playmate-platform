@@ -7,6 +7,7 @@ import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.order.dto.AcceptOrderRequest;
 import com.gameplay.order.dto.OrderView;
+import com.gameplay.order.dto.EndServiceRequest;
 import com.gameplay.order.dto.RejectOrderRequest;
 import com.gameplay.order.service.OrderService;
 import jakarta.validation.Valid;
@@ -70,8 +71,12 @@ public class CompanionOrderController {
 
     /** 结束服务（FR-P16） */
     @PostMapping("/{id}/end")
-    public ApiResponse<OrderView> end(@PathVariable Long id, Authentication authentication) {
-        return ApiResponse.ok(orderService.endService(currentUserId(authentication), id));
+    public ApiResponse<OrderView> end(@PathVariable Long id,
+                                      @Valid @RequestBody(required = false) EndServiceRequest request,
+                                      Authentication authentication) {
+        return ApiResponse.ok(orderService.endService(
+                currentUserId(authentication), id,
+                request == null || request.getEvidences() == null ? java.util.List.of() : request.getEvidences()));
     }
 
     private Long currentUserId(Authentication authentication) {

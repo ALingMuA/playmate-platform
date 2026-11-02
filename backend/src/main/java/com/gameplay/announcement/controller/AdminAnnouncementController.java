@@ -68,6 +68,12 @@ public class AdminAnnouncementController {
         return ApiResponse.ok(announcementService.revoke(id, currentAdminId(authentication)));
     }
 
+    /** 恢复已撤回公告至草稿 */
+    @PostMapping("/{id}/restore-draft")
+    public ApiResponse<AnnouncementView> restoreDraft(@PathVariable Long id) {
+        return ApiResponse.ok(announcementService.restoreDraft(id));
+    }
+
     /** 删除公告（仅草稿） */
     @DeleteMapping("/{id}")
     public ApiResponse<Void> delete(@PathVariable Long id, Authentication authentication) {

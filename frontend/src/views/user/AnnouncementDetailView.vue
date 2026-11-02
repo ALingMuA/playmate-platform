@@ -5,6 +5,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { publicAnnouncementDetail, type AnnouncementView } from '@/api/admin'
+import { ApiError } from '@/api/http'
 
 const route = useRoute()
 const router = useRouter()
@@ -12,6 +13,8 @@ const router = useRouter()
 const announcementId = computed(() => Number(route.params.id))
 const announcement = ref<AnnouncementView | null>(null)
 const loading = ref(true)
+const loadError = ref('')
+const notFound = ref(false)
 
 function fmtTime(t?: string): string {
   if (!t) return '-'
@@ -20,10 +23,17 @@ function fmtTime(t?: string): string {
 
 async function load() {
   loading.value = true
+  loadError.value = ''
+  notFound.value = false
   try {
     announcement.value = await publicAnnouncementDetail(announcementId.value)
-  } catch {
+  } catch (err) {
     announcement.value = null
+    if (err instanceof ApiError && (err.status === 404 || err.code === 'ANNOUNCEMENT_NOT_FOUND')) {
+      notFound.value = true
+    } else {
+      loadError.value = '公告加载失败，请检查网络后重试。'
+    }
   } finally {
     loading.value = false
   }
@@ -47,9 +57,10 @@ onMounted(() => {
         </el-button>
       </div>
 
-      <div v-if="!announcement && !loading" class="card empty-card">
+      <div v-if="!announcement && !loading" class="card empty-card" role="alert">
         <div class="empty-icon">⚠️</div>
-        <div class="empty-text">该公告不存在或已被撤回</div>
+        <div class="empty-text">{{ notFound ? '该公告不存在或已被撤回' : loadError }}</div>
+        <el-button v-if="!notFound" type="primary" class="mt-4" @click="load">重试</el-button>
         <el-button type="primary" class="mt-4" @click="goBack">返回列表</el-button>
       </div>
 

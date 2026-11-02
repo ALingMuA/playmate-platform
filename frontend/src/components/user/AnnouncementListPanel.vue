@@ -6,10 +6,7 @@
  * 面向游客与登录用户公开，不参与个人通知未读数统计。
  */
 import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { publicAnnouncements, type AnnouncementView } from '@/api/admin'
-
-const router = useRouter()
 
 const list = ref<AnnouncementView[]>([])
 const total = ref(0)
@@ -45,10 +42,6 @@ function handlePageChange(p: number) {
   loadData()
 }
 
-function goDetail(id: number) {
-  router.push(`/announcements/${id}`)
-}
-
 onMounted(() => {
   loadData()
 })
@@ -64,17 +57,17 @@ onMounted(() => {
 
     <!-- 公告列表内容 -->
     <div v-loading="loading" class="announcement-list-wrap">
-      <div v-if="list.length === 0 && !loading" class="empty-box card">
+      <div v-if="list.length === 0 && !loading && !failed" class="empty-box card">
         <div class="empty-icon">📢</div>
         <div class="empty-text">暂无已发布的平台公告</div>
       </div>
 
-      <div v-else class="announcement-list">
-        <div
+      <div v-else-if="!failed" class="announcement-list">
+        <router-link
           v-for="item in list"
           :key="item.id"
+          :to="`/announcements/${item.id}`"
           class="card announcement-card"
-          @click="goDetail(item.id)"
         >
           <div class="card-body">
             <div class="item-header">
@@ -91,7 +84,7 @@ onMounted(() => {
               <span class="read-more">阅读全文 →</span>
             </div>
           </div>
-        </div>
+        </router-link>
       </div>
 
       <!-- 独立分页栏 -->
@@ -132,6 +125,9 @@ onMounted(() => {
   gap: 16px;
 }
 .announcement-card {
+  display: block;
+  color: inherit;
+  text-decoration: none;
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
   border: 1px solid var(--border, #e2e8f0);

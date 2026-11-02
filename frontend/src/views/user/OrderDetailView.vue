@@ -9,6 +9,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { cancelOrder, confirmOrder, userOrderDetail, type Order } from '@/api/order'
+import { loadPrivateImage } from '@/api/file'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,6 +18,8 @@ const orderId = computed(() => Number(route.params.id))
 const order = ref<Order | null>(null)
 const loading = ref(true)
 const acting = ref(false)
+const deliveryImageUrls = ref<Record<string, string>>({})
+const deliveryImageErrors = ref<Record<string, boolean>>({})
 
 const statusMap: Record<string, { label: string; type: string }> = {
   PENDING_PAYMENT: { label: '待支付', type: 'warning' },
@@ -67,6 +70,15 @@ async function load() {
   loading.value = true
   try {
     order.value = await userOrderDetail(orderId.value)
+    deliveryImageUrls.value = {}
+    deliveryImageErrors.value = {}
+    await Promise.all((order.value.deliveryEvidences ?? []).map(async (evidence) => {
+      try {
+        deliveryImageUrls.value[evidence.fileUrl] = await loadPrivateImage(evidence.fileUrl)
+      } catch {
+        deliveryImageErrors.value[evidence.fileUrl] = true
+      }
+    }))
   } finally {
     loading.value = false
   }
@@ -95,8 +107,9 @@ async function handleCancel() {
   }
   acting.value = true
   try {
+    const wasPaid = order.value.orderStatus !== 'PENDING_PAYMENT'
     await cancelOrder(order.value.id, reason)
-    ElMessage.success('订单已取消')
+    ElMessage.success(wasPaid ? '订单已取消，款项已全额退回虚拟钱包' : '订单已取消')
     await load()
   } finally {
     acting.value = false
@@ -194,6 +207,20 @@ onMounted(load)
                     <template v-if="order.closedReason">
                       <div class="order-meta text-destructive">关闭原因：{{ order.closedReason }}</div>
                     </template>
+                    <div class="order-meta" style="margin-top: 8px">陪玩师履约凭证</div>
+                    <div v-if="order.deliveryEvidences?.length" class="delivery-evidence-list">
+                      <template v-for="evidence in order.deliveryEvidences" :key="evidence.id">
+                        <el-image
+                          v-if="deliveryImageUrls[evidence.fileUrl]"
+                          :src="deliveryImageUrls[evidence.fileUrl]"
+                          fit="cover"
+                          :preview-src-list="Object.values(deliveryImageUrls)"
+                          preview-teleported
+                        />
+                        <span v-else class="text-muted">{{ deliveryImageErrors[evidence.fileUrl] ? '图片加载失败' : '凭证加载中…' }}</span>
+                      </template>
+                    </div>
+                    <span v-else class="order-meta">陪玩师未上传履约凭证</span>
                   </div>
                 </div>
               </div>
@@ -244,8 +271,12 @@ onMounted(load)
                 @click="router.push(`/review/${order.id}`)">
                 评价订单
               </button>
+              <button v-if="order.orderStatus === 'AFTER_SALES'" class="btn btn-destructive btn-block mt-1"
+                @click="router.push('/profile#tab=complaints')">
+                查看售后进度
+              </button>
               <button
-                v-if="['WAITING_CONFIRMATION', 'COMPLETED', 'AFTER_SALES'].includes(order.orderStatus)"
+                v-else-if="['WAITING_CONFIRMATION', 'COMPLETED'].includes(order.orderStatus)"
                 class="btn btn-destructive btn-block mt-1"
                 @click="router.push(`/complaint/${order.id}`)"
               >

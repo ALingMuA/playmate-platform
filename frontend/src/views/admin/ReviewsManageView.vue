@@ -9,16 +9,20 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 10
 const loading = ref(false)
+const listError = ref('')
 const keyword = ref('')
 const scoreFilter = ref<number | undefined>(undefined)
 const statusFilter = ref('')
 
 async function load() {
   loading.value = true
+  listError.value = ''
   try {
     const result = await adminReviews(keyword.value, scoreFilter.value, statusFilter.value, page.value, pageSize)
     list.value = result.records
     total.value = result.total
+  } catch (err) {
+    listError.value = err instanceof Error ? err.message : '评价列表加载失败，请重试。'
   } finally {
     loading.value = false
   }
@@ -62,7 +66,10 @@ const scoreText = (s: number) => '★★★★★'.slice(0, s) + '☆☆☆☆�
       <el-button type="primary" @click="onFilterChange">查询</el-button>
     </div>
 
-    <el-table :data="list" v-loading="loading" border stripe>
+    <el-alert v-if="listError" type="error" :title="listError" :closable="false" show-icon>
+      <el-button size="small" @click="load">重试</el-button>
+    </el-alert>
+    <el-table v-if="!listError" :data="list" v-loading="loading" border stripe>
       <el-table-column prop="userNickname" label="评价用户" width="120" />
       <el-table-column prop="companionUserId" label="陪玩师ID" width="100" />
       <el-table-column label="评分" width="140">

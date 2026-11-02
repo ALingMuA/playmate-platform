@@ -183,11 +183,11 @@ export function csClaim(id: number, expectedVersion: number, claimRemark?: strin
 }
 
 /** 人工回复（REST 兜底，正常走 WebSocket） */
-export function csReply(id: number, content: string): Promise<MessageView> {
+export function csReply(id: number, content: string, clientMsgId: string = crypto.randomUUID()): Promise<MessageView> {
   return request<MessageView>({
     url: `/customer-service/conversations/${id}/messages`,
     method: 'post',
-    data: { clientMsgId: crypto.randomUUID(), content },
+    data: { clientMsgId, content },
   })
 }
 

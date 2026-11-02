@@ -58,6 +58,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/companion-profiles", "/api/companion-profiles/**").permitAll()
                         // 评价展示与文件读取公开（URL 含 UUID 不可枚举；上传仍需登录）
                         .requestMatchers("/api/reviews/companion/**").permitAll()
+                        // 履约凭证必须先登录，具体订单数据范围由 FileController 再做对象级校验。
+                        .requestMatchers(HttpMethod.GET, "/api/files/delivery/**").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/files/**").permitAll()
                         // 公告查看公开（仅已发布，FR-A08）
                         .requestMatchers(HttpMethod.GET, "/api/announcements/**").permitAll()

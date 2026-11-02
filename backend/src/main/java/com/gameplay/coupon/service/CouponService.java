@@ -448,10 +448,31 @@ public class CouponService {
             if (req.getDiscountCents() == null || req.getDiscountCents() <= 0) {
                 throw new BusinessException(ErrorCode.VALIDATION_FAILED, "满减券优惠金额必须大于0");
             }
+            long threshold = req.getThresholdCents() == null ? 0L : req.getThresholdCents();
+            if (threshold < 0) {
+                throw new BusinessException(ErrorCode.VALIDATION_FAILED, "使用门槛不能小于0");
+            }
+            if (threshold > 0 && req.getDiscountCents() >= threshold) {
+                throw new BusinessException(ErrorCode.VALIDATION_FAILED, "有门槛满减券的减免金额必须低于使用门槛");
+            }
         } else if (CouponType.DISCOUNT.name().equalsIgnoreCase(req.getCouponType())) {
             if (req.getDiscountRateBp() == null || req.getDiscountRateBp() <= 0 || req.getDiscountRateBp() >= 10000) {
                 throw new BusinessException(ErrorCode.VALIDATION_FAILED, "折扣券折扣基点必须在 1~9999 之间（例如 8500 为 8.5 折）");
             }
+            if (req.getMaxDiscountCents() != null && req.getMaxDiscountCents() < 0) {
+                throw new BusinessException(ErrorCode.VALIDATION_FAILED, "最高减免金额不能小于0");
+            }
+        } else {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "优惠券类型无效");
+        }
+
+        String scopeType = req.getScopeType() == null ? "ALL" : req.getScopeType().toUpperCase();
+        if (!java.util.Set.of("ALL", "GAME", "SERVICE", "COMPANION").contains(scopeType)) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "优惠券适用范围无效");
+        }
+        long scopeId = req.getScopeId() == null ? 0L : req.getScopeId();
+        if (scopeId < 0 || (!"ALL".equals(scopeType) && scopeId == 0)) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "请选择有效的优惠券适用对象");
         }
     }
 

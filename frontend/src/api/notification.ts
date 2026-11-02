@@ -16,11 +16,11 @@ export interface NotificationView {
 }
 
 /** 获取当前用户的通知列表（分页） */
-export function myNotifications(page = 1, size = 10): Promise<PageResult<NotificationView>> {
+export function myNotifications(page = 1, size = 10, readStatus?: 0 | 1): Promise<PageResult<NotificationView>> {
   return request<PageResult<NotificationView>>({
     url: '/notifications',
     method: 'get',
-    params: { page, size },
+    params: { page, size, readStatus },
   })
 }
 

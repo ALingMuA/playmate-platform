@@ -5,7 +5,7 @@
  * <p>展示用户数、陪玩师数、服务数、订单数、模拟交易额等核心指标，
  * 以及待审核申请、待处理投诉、等待人工会话等待办事项，可点击跳转处理。</p>
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Collection, Document, Money, Trophy, UserFilled, User } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -16,6 +16,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const stats = ref<StatsOverview | null>(null)
 const loading = ref(true)
+const statsError = ref('')
 
 function fmtMoney(cents: number): string {
   return '¥' + (cents / 100).toFixed(2)
@@ -37,6 +38,9 @@ const todoItems = [
   { key: 'pendingComplaints', label: '待处理投诉', path: '/admin/complaints' },
   { key: 'waitingHumanConversations', label: '等待人工客服会话', path: '/cs/queue' },
 ] as const
+const visibleTodoItems = computed(() => todoItems.filter((item) =>
+  item.path !== '/cs/queue' || userStore.hasRole('CUSTOMER_SERVICE'),
+))
 
 function metricValue(key: (typeof metricCards)[number]['key']): string {
   if (!stats.value) return '-'
@@ -55,13 +59,19 @@ function goTodo(path: string) {
   router.push(path)
 }
 
-onMounted(async () => {
+async function loadStats() {
+  loading.value = true
+  statsError.value = ''
   try {
     stats.value = await adminStatsOverview()
+  } catch (err) {
+    statsError.value = err instanceof Error ? err.message : '数据概览加载失败，请重试。'
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(loadStats)
 </script>
 
 <template>
@@ -70,6 +80,10 @@ onMounted(async () => {
       <h1>数据概览</h1>
       <p class="sub">平台核心指标与待办事项</p>
     </div>
+
+    <el-alert v-if="statsError" type="error" :closable="false" show-icon :title="statsError" class="mb-2">
+      <el-button size="small" @click="loadStats">重试</el-button>
+    </el-alert>
 
     <!-- 指标卡片 -->
     <el-row :gutter="16">
@@ -86,7 +100,7 @@ onMounted(async () => {
     <el-card class="todo-card" shadow="hover">
       <template #header>待办事项</template>
       <div class="todo-list">
-        <div v-for="item in todoItems" :key="item.key" class="todo-item" @click="goTodo(item.path)">
+        <div v-for="item in visibleTodoItems" :key="item.key" class="todo-item" @click="goTodo(item.path)">
           <span class="todo-label">{{ item.label }}</span>
           <el-badge :value="stats?.[item.key] ?? 0" :max="999" :type="(stats?.[item.key] ?? 0) > 0 ? 'danger' : 'info'" />
           <el-button size="small" text type="primary">去处理 →</el-button>

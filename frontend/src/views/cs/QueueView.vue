@@ -9,6 +9,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { ApiError } from '@/api/http'
 import { useUserStore } from '@/stores/user'
 import { changePassword } from '@/api/auth'
 import {
@@ -32,7 +33,9 @@ const queue = ref<QueueItemView[]>([])
 /** 我的已分配会话 */
 const assigned = ref<ConversationView[]>([])
 const loading = ref(false)
-const claiming = ref(false)
+const loadError = ref('')
+const lastUpdatedAt = ref('')
+const claimingId = ref<number | null>(null)
 const activeTab = ref('queue')
 
 /** 工作状态选项（FR-C06） */
@@ -66,6 +69,7 @@ const sourceMap: Record<string, string> = {
 
 async function loadAll() {
   loading.value = true
+  loadError.value = ''
   try {
     const [meView, queueList, assignedList] = await Promise.all([csMe(), csQueue(), csAssigned()])
     me.value = meView
@@ -75,6 +79,9 @@ async function loadAll() {
     if (meView.forceChangePassword === 1) {
       forcePwdVisible.value = true
     }
+    lastUpdatedAt.value = new Date().toLocaleTimeString('zh-HK', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  } catch (err) {
+    loadError.value = err instanceof Error ? err.message : '队列加载失败，请重试。'
   } finally {
     loading.value = false
   }
@@ -95,13 +102,20 @@ async function handleWorkStatusChange(value: string) {
 // ==================== 领取会话（FR-C25） ====================
 
 async function handleClaim(item: QueueItemView) {
-  claiming.value = true
+  claimingId.value = item.conversationId
   try {
     await csClaim(item.conversationId, item.version)
     ElMessage.success('会话领取成功')
     router.push(`/cs/conversation/${item.conversationId}`)
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) {
+      ElMessage.info('该会话已被其他客服领取，队列已刷新')
+      await loadAll()
+    } else {
+      ElMessage.error(err instanceof Error ? err.message : '领取会话失败，请重试。')
+    }
   } finally {
-    claiming.value = false
+    claimingId.value = null
   }
 }
 
@@ -160,6 +174,14 @@ onMounted(loadAll)
       </div>
     </el-card>
 
+    <div class="queue-toolbar">
+      <span class="text-muted">{{ lastUpdatedAt ? `上次更新：${lastUpdatedAt}` : '尚未同步队列' }}</span>
+      <el-button :loading="loading" @click="loadAll">刷新队列</el-button>
+    </div>
+    <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError">
+      <el-button size="small" @click="loadAll">重试</el-button>
+    </el-alert>
+
     <!-- 队列与已分配 -->
     <el-tabs v-model="activeTab" class="tabs">
       <el-tab-pane :label="`等待人工 (${queue.length})`" name="queue">
@@ -179,7 +201,7 @@ onMounted(loadAll)
               <span>{{ fmtTime(item.createdAt) }}</span>
             </div>
             <div class="q-actions">
-              <el-button type="primary" size="small" :loading="claiming" @click="handleClaim(item)">
+              <el-button type="primary" size="small" :loading="claimingId === item.conversationId" :disabled="claimingId !== null" @click="handleClaim(item)">
                 领取并处理
               </el-button>
             </div>

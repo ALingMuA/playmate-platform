@@ -5,6 +5,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import com.gameplay.order.dto.DeliveryEvidenceView;
 
 /**
  * 投诉视图（FR-U19、FR-M18）。
@@ -69,4 +70,7 @@ public class ComplaintView {
 
     /** 证据列表 */
     private List<ComplaintEvidenceView> evidences;
+
+    /** 订单关联的陪玩师履约凭证。 */
+    private List<DeliveryEvidenceView> deliveryEvidences;
 }

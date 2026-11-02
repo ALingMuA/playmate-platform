@@ -77,6 +77,20 @@ public class AnnouncementService {
         return toView(announcement);
     }
 
+    /** 已撤回公告恢复为草稿；后续仍须按现有草稿流程编辑和重新发布。 */
+    @Transactional
+    public AnnouncementView restoreDraft(Long id) {
+        Announcement announcement = requireAnnouncement(id);
+        if (!"REVOKED".equals(announcement.getPublishStatus())) {
+            throw new BusinessException(ErrorCode.ANNOUNCEMENT_STATUS_INVALID, "仅已撤回公告可恢复为草稿");
+        }
+        announcement.setPublishStatus("DRAFT");
+        announcement.setPublishedBy(0L);
+        announcement.setPublishedAt(null);
+        announcementMapper.updateById(announcement);
+        return toView(announcement);
+    }
+
     /** 删除公告（仅草稿，FR-M13） */
     @Transactional
     public void delete(Long id) {

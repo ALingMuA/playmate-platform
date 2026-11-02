@@ -33,6 +33,7 @@ export interface UserAdminView {
   gender: number
   introduction: string
   accountStatus: string
+  disabledReason?: string
   roles: string[]
   /** 陪玩师资格状态（非陪玩师为 null） */
   companionCertificationStatus?: string
@@ -117,6 +118,10 @@ export function adminPublishAnnouncement(id: number): Promise<AnnouncementView> 
 
 export function adminRevokeAnnouncement(id: number): Promise<AnnouncementView> {
   return request<AnnouncementView>({ url: `/admin/announcements/${id}/revoke`, method: 'post' })
+}
+
+export function adminRestoreAnnouncementDraft(id: number): Promise<AnnouncementView> {
+  return request<AnnouncementView>({ url: `/admin/announcements/${id}/restore-draft`, method: 'post' })
 }
 
 export function adminDeleteAnnouncement(id: number): Promise<void> {
@@ -262,6 +267,10 @@ export interface DemoWalletGrantView {
 
 export function adminDemoWalletConfig(): Promise<DemoWalletConfigView> {
   return request<DemoWalletConfigView>({ url: '/admin/demo-wallet/config', method: 'get' })
+}
+
+export function adminDemoWalletBalance(userId: number): Promise<{ balanceCents: number }> {
+  return request<{ balanceCents: number }>({ url: `/admin/demo-wallet/users/${userId}/balance`, method: 'get' })
 }
 
 export function adminGrantDemoWallet(data: DemoWalletGrantRequest): Promise<DemoWalletGrantView> {

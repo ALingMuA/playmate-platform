@@ -10,6 +10,7 @@ import {
   startOrderService,
   type Order,
 } from '@/api/order'
+import { loadPrivateImage, uploadFile } from '@/api/file'
 
 const activeTab = ref('WAITING_ACCEPTANCE')
 const list = ref<Order[]>([])
@@ -17,17 +18,29 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 10
 const loading = ref(false)
+const loadError = ref('')
+const pendingActionIds = ref(new Set<number>())
 
 const detailVisible = ref(false)
 const detail = ref<Order | null>(null)
+const endDialogVisible = ref(false)
+const endingOrder = ref<Order | null>(null)
+const ending = ref(false)
+const uploadingEvidence = ref(false)
+const deliveryEvidences = ref<{ fileUrl: string; fileName: string; previewUrl: string }[]>([])
+const detailEvidenceImages = ref<Record<string, string>>({})
+const detailEvidenceErrors = ref<Record<string, boolean>>({})
 
 async function load() {
   loading.value = true
+  loadError.value = ''
   try {
     const status = activeTab.value === 'HISTORY' ? 'COMPLETED,CLOSED' : activeTab.value
     const result = await companionOrders(status, page.value, pageSize)
     list.value = result.records
     total.value = result.total
+  } catch (err) {
+    loadError.value = err instanceof Error ? err.message : '订单列表加载失败，请重试。'
   } finally {
     loading.value = false
   }
@@ -41,38 +54,120 @@ function onTabChange() {
 onMounted(load)
 
 async function handleAccept(row: Order) {
-  await ElMessageBox.confirm(`确认接受订单「${row.serviceTitleSnapshot}」？`, '接单确认', { type: 'info' })
-  await acceptOrder(row.id)
-  ElMessage.success('接单成功，等待服务开始')
-  await load()
+  if (pendingActionIds.value.has(row.id)) return
+  pendingActionIds.value = new Set(pendingActionIds.value).add(row.id)
+  try {
+    try { await ElMessageBox.confirm(`确认接受订单「${row.serviceTitleSnapshot}」？`, '接单确认', { type: 'info' }) } catch { return }
+    await acceptOrder(row.id)
+    ElMessage.success('接单成功，等待服务开始')
+    await load()
+  } finally {
+    const next = new Set(pendingActionIds.value); next.delete(row.id); pendingActionIds.value = next
+  }
 }
 
 async function handleReject(row: Order) {
-  const { value } = await ElMessageBox.prompt('请填写拒绝原因', '拒绝订单', {
-    inputPlaceholder: '如：档期冲突、临时有事',
-    inputValidator: (v: string) => (v && v.trim().length > 0 ? true : '拒绝原因不能为空'),
-  })
-  await rejectOrder(row.id, value)
-  ElMessage.success('已拒绝订单，款项已退还用户')
-  await load()
+  if (pendingActionIds.value.has(row.id)) return
+  pendingActionIds.value = new Set(pendingActionIds.value).add(row.id)
+  try {
+    let value: string
+    try {
+      ({ value } = await ElMessageBox.prompt('请填写拒绝原因', '拒绝订单', {
+        inputPlaceholder: '如：档期冲突、临时有事',
+        inputValidator: (v: string) => (v && v.trim().length > 0 ? true : '拒绝原因不能为空'),
+      }))
+    } catch { return }
+    await rejectOrder(row.id, value)
+    ElMessage.success('已拒绝订单，款项已退还用户')
+    await load()
+  } finally {
+    const next = new Set(pendingActionIds.value); next.delete(row.id); pendingActionIds.value = next
+  }
 }
 
 async function handleStart(row: Order) {
-  await ElMessageBox.confirm('确认开始服务？', '开始服务', { type: 'info' })
-  await startOrderService(row.id)
-  ElMessage.success('服务已开始')
-  await load()
+  if (pendingActionIds.value.has(row.id)) return
+  pendingActionIds.value = new Set(pendingActionIds.value).add(row.id)
+  try {
+    try { await ElMessageBox.confirm('确认开始服务？', '开始服务', { type: 'info' }) } catch { return }
+    await startOrderService(row.id)
+    ElMessage.success('服务已开始')
+    await load()
+  } finally {
+    const next = new Set(pendingActionIds.value); next.delete(row.id); pendingActionIds.value = next
+  }
 }
 
-async function handleEnd(row: Order) {
-  await ElMessageBox.confirm('确认结束服务？结束后将等待用户确认完成。', '结束服务', { type: 'info' })
-  await endOrderService(row.id)
-  ElMessage.success('服务已结束，等待用户确认')
-  await load()
+function openEndDialog(row: Order) {
+  deliveryEvidences.value.forEach((evidence) => URL.revokeObjectURL(evidence.previewUrl))
+  endingOrder.value = row
+  deliveryEvidences.value = []
+  endDialogVisible.value = true
+}
+
+function cancelEndDialog() {
+  if (ending.value) return
+  deliveryEvidences.value.forEach((evidence) => URL.revokeObjectURL(evidence.previewUrl))
+  deliveryEvidences.value = []
+  endingOrder.value = null
+  endDialogVisible.value = false
+}
+
+function removeDeliveryEvidence(index: number) {
+  const removed = deliveryEvidences.value.splice(index, 1)[0]
+  if (removed) URL.revokeObjectURL(removed.previewUrl)
+}
+
+async function handleDeliveryEvidence(file: File) {
+  if (deliveryEvidences.value.length >= 5) {
+    ElMessage.warning('履约凭证最多上传 5 张')
+    return false
+  }
+  uploadingEvidence.value = true
+  try {
+    const result = await uploadFile(file, 'delivery')
+    deliveryEvidences.value.push({ fileUrl: result.url, fileName: result.fileName, previewUrl: URL.createObjectURL(file) })
+    ElMessage.success('凭证已上传')
+  } catch {
+    // 上传失败由统一拦截器提示，保留其他已上传凭证。
+  } finally {
+    uploadingEvidence.value = false
+  }
+  return false
+}
+
+async function submitEndService() {
+  if (!endingOrder.value || ending.value || uploadingEvidence.value) return
+  try {
+    await ElMessageBox.confirm('确认结束服务？结束后将等待用户确认完成。履约凭证为选填。', '结束服务', { type: 'info' })
+  } catch {
+    return
+  }
+  ending.value = true
+  try {
+    await endOrderService(endingOrder.value.id, deliveryEvidences.value.map(({ fileUrl, fileName }) => ({ fileUrl, fileName })))
+    ElMessage.success('服务已结束，等待用户确认')
+    endDialogVisible.value = false
+    endingOrder.value = null
+    deliveryEvidences.value.forEach((evidence) => URL.revokeObjectURL(evidence.previewUrl))
+    deliveryEvidences.value = []
+    await load()
+  } finally {
+    ending.value = false
+  }
 }
 
 async function openDetail(row: Order) {
   detail.value = await orderDetail(row.id)
+  detailEvidenceImages.value = {}
+  detailEvidenceErrors.value = {}
+  await Promise.all((detail.value.deliveryEvidences ?? []).map(async (evidence) => {
+    try {
+      detailEvidenceImages.value[evidence.fileUrl] = await loadPrivateImage(evidence.fileUrl)
+    } catch {
+      detailEvidenceErrors.value[evidence.fileUrl] = true
+    }
+  }))
   detailVisible.value = true
 }
 
@@ -107,6 +202,9 @@ function fmtTime(t?: string): string {
 
 <template>
   <div class="order-fulfill">
+    <el-alert v-if="loadError" type="error" :title="loadError" :closable="false" show-icon>
+      <el-button size="small" @click="load">重试</el-button>
+    </el-alert>
     <el-tabs v-model="activeTab" @tab-change="onTabChange">
       <el-tab-pane label="待接单" name="WAITING_ACCEPTANCE" />
       <el-tab-pane label="待服务" name="WAITING_SERVICE" />
@@ -137,18 +235,18 @@ function fmtTime(t?: string): string {
         <div class="order-actions">
           <el-button size="small" @click="openDetail(row)">详情</el-button>
           <template v-if="row.orderStatus === 'WAITING_ACCEPTANCE'">
-            <el-button size="small" type="success" @click="handleAccept(row)">接单</el-button>
-            <el-button size="small" type="danger" @click="handleReject(row)">拒绝</el-button>
+            <el-button size="small" type="success" :loading="pendingActionIds.has(row.id)" :disabled="pendingActionIds.has(row.id)" @click="handleAccept(row)">接单</el-button>
+            <el-button size="small" type="danger" :loading="pendingActionIds.has(row.id)" :disabled="pendingActionIds.has(row.id)" @click="handleReject(row)">拒绝</el-button>
           </template>
-          <el-button v-if="row.orderStatus === 'WAITING_SERVICE'" size="small" type="primary" @click="handleStart(row)">
+          <el-button v-if="row.orderStatus === 'WAITING_SERVICE'" size="small" type="primary" :loading="pendingActionIds.has(row.id)" :disabled="pendingActionIds.has(row.id)" @click="handleStart(row)">
             开始服务
           </el-button>
-          <el-button v-if="row.orderStatus === 'IN_SERVICE'" size="small" type="warning" @click="handleEnd(row)">
+          <el-button v-if="row.orderStatus === 'IN_SERVICE'" size="small" type="warning" @click="openEndDialog(row)">
             结束服务
           </el-button>
         </div>
       </el-card>
-      <el-empty v-if="!loading && list.length === 0" description="暂无相关订单" />
+      <el-empty v-if="!loading && !loadError && list.length === 0" description="暂无相关订单" />
     </div>
 
     <el-pagination
@@ -159,6 +257,23 @@ function fmtTime(t?: string): string {
       :current-page="page"
       @current-change="(p: number) => { page = p; load() }"
     />
+
+    <el-dialog v-model="endDialogVisible" title="结束服务并提交履约凭证（选填）" width="560px">
+      <p class="text-muted">可上传 0～5 张图片，单张不超过 5MB。凭证将随订单状态一并保存。</p>
+      <div class="delivery-evidence-list">
+        <div v-for="(evidence, index) in deliveryEvidences" :key="evidence.fileUrl" class="delivery-evidence-item">
+          <el-image :src="evidence.previewUrl" fit="cover" :preview-src-list="deliveryEvidences.map((item) => item.previewUrl)" preview-teleported />
+          <el-button text type="danger" @click="removeDeliveryEvidence(index)">移除</el-button>
+        </div>
+        <el-upload v-if="deliveryEvidences.length < 5" :show-file-list="false" accept="image/*" :before-upload="handleDeliveryEvidence">
+          <el-button :loading="uploadingEvidence">上传图片（{{ deliveryEvidences.length }}/5）</el-button>
+        </el-upload>
+      </div>
+      <template #footer>
+        <el-button @click="cancelEndDialog">取消</el-button>
+        <el-button type="warning" :loading="ending" :disabled="uploadingEvidence" @click="submitEndService">确认结束服务</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="detailVisible" title="订单详情" width="680px">
       <template v-if="detail">
@@ -184,6 +299,14 @@ function fmtTime(t?: string): string {
             <span class="trace-reason" v-if="h.reason">（{{ h.reason }}）</span>
           </el-timeline-item>
         </el-timeline>
+        <h4 class="trace-title">陪玩师履约凭证</h4>
+        <div v-if="detail.deliveryEvidences?.length" class="delivery-evidence-list">
+          <template v-for="e in detail.deliveryEvidences" :key="e.id">
+            <el-image v-if="detailEvidenceImages[e.fileUrl]" :src="detailEvidenceImages[e.fileUrl]" fit="cover" :preview-src-list="Object.values(detailEvidenceImages)" preview-teleported />
+            <span v-else class="text-muted">{{ detailEvidenceErrors[e.fileUrl] ? '图片加载失败' : '凭证加载中…' }}</span>
+          </template>
+        </div>
+        <span v-else class="text-muted">陪玩师未上传履约凭证</span>
       </template>
     </el-dialog>
   </div>
@@ -193,6 +316,9 @@ function fmtTime(t?: string): string {
 .order-card {
   margin-bottom: 12px;
 }
+.delivery-evidence-list { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.delivery-evidence-item { display: flex; align-items: center; gap: 6px; }
+.delivery-evidence-list :deep(.el-image) { width: 72px; height: 72px; border-radius: 6px; }
 .order-head {
   display: flex;
   align-items: center;

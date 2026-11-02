@@ -5,6 +5,9 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
+import { adminUsers, type UserAdminView } from '@/api/admin'
+import { adminGames, adminServiceTypes } from '@/api/adminCatalog'
+import type { Game, ServiceType } from '@/api/catalog'
 import {
   adminCoupons,
   adminCreateCoupon,
@@ -21,7 +24,12 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 10
 const loading = ref(false)
+const listError = ref('')
 const status = ref<string | undefined>(undefined)
+const gameOptions = ref<Game[]>([])
+const serviceTypeOptions = ref<ServiceType[]>([])
+const companionOptions = ref<UserAdminView[]>([])
+const companionSearchLoading = ref(false)
 
 const statusMap: Record<string, { label: string; type: string }> = {
   DRAFT: { label: '草稿', type: 'info' },
@@ -47,10 +55,13 @@ function fmtTime(t?: string): string {
 
 async function load() {
   loading.value = true
+  listError.value = ''
   try {
     const result = await adminCoupons(status.value, page.value, pageSize)
     list.value = result.records
     total.value = result.total
+  } catch (err) {
+    listError.value = err instanceof Error ? err.message : '优惠券列表加载失败，请重试。'
   } finally {
     loading.value = false
   }
@@ -143,6 +154,19 @@ async function handleSave() {
     ElMessage.warning('请选择优惠券有效期')
     return
   }
+  if (form.scopeType !== 'ALL' && !form.scopeId) {
+    ElMessage.warning('请选择优惠券适用对象')
+    return
+  }
+  if (form.couponType === 'FIXED' && form.thresholdYuan > 0 && form.discountYuan >= form.thresholdYuan) {
+    ElMessage.warning('有门槛满减券的减免金额必须低于使用门槛')
+    return
+  }
+  if (form.couponType === 'DISCOUNT'
+      && (form.discountRateZhe <= 0 || form.discountRateZhe >= 10 || form.maxDiscountYuan < 0)) {
+    ElMessage.warning('请检查折扣比例和最高减免金额')
+    return
+  }
 
   saving.value = true
   try {
@@ -178,28 +202,47 @@ async function handleSave() {
 // ==================== 状态操作 ====================
 
 async function handlePublish(row: CouponTemplateView) {
-  await ElMessageBox.confirm(`确定发布优惠券「${row.name}」吗？发布后用户可正常领取并抵扣。`, '发布优惠券', { type: 'info' })
+  try { await ElMessageBox.confirm(`确定发布优惠券「${row.name}」吗？发布后用户可正常领取并抵扣。`, '发布优惠券', { type: 'info' }) } catch { return }
   await adminPublishCoupon(row.id)
   ElMessage.success('优惠券已发布')
   await load()
 }
 
 async function handleOffline(row: CouponTemplateView) {
-  await ElMessageBox.confirm(`确定下线优惠券「${row.name}」吗？下线后用户将无法继续领取。`, '下线优惠券', { type: 'warning' })
+  try { await ElMessageBox.confirm(`确定下线优惠券「${row.name}」吗？下线后用户将无法继续领取。`, '下线优惠券', { type: 'warning' }) } catch { return }
   await adminOfflineCoupon(row.id)
   ElMessage.success('优惠券已下线')
   await load()
 }
 
 async function handleDelete(row: CouponTemplateView) {
-  await ElMessageBox.confirm(`确定删除优惠券「${row.name}」吗？删除后不可恢复。`, '删除优惠券', { type: 'warning' })
+  try { await ElMessageBox.confirm(`确定删除优惠券「${row.name}」吗？删除后不可恢复。`, '删除优惠券', { type: 'warning' }) } catch { return }
   await adminDeleteCoupon(row.id)
   ElMessage.success('优惠券已删除')
   await load()
 }
 
-onMounted(() => {
-  load()
+async function searchCompanions(keyword = '') {
+  companionSearchLoading.value = true
+  try {
+    const result = await adminUsers(keyword || undefined, undefined, 1, 100)
+    companionOptions.value = result.records.filter((user) => user.roles.includes('COMPANION'))
+  } finally {
+    companionSearchLoading.value = false
+  }
+}
+
+async function loadScopeOptions() {
+  const [games, serviceTypes] = await Promise.allSettled([
+    adminGames(undefined, undefined),
+    adminServiceTypes(undefined, undefined),
+  ])
+  if (games.status === 'fulfilled') gameOptions.value = games.value
+  if (serviceTypes.status === 'fulfilled') serviceTypeOptions.value = serviceTypes.value
+}
+
+onMounted(async () => {
+  await Promise.all([loadScopeOptions(), searchCompanions(), load()])
 })
 </script>
 
@@ -228,7 +271,10 @@ onMounted(() => {
 
     <!-- 表格 -->
     <el-card shadow="never">
-      <el-table :data="list" v-loading="loading" stripe>
+      <el-alert v-if="listError" type="error" :title="listError" :closable="false" show-icon>
+        <el-button size="small" @click="load">重试</el-button>
+      </el-alert>
+      <el-table v-if="!listError" :data="list" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="name" label="优惠券名称" min-width="150" />
         <el-table-column label="券类型" width="100">
@@ -371,16 +417,30 @@ onMounted(() => {
         </template>
 
         <el-form-item label="适用范围" required>
-          <el-select v-model="form.scopeType" class="w-full">
+          <el-select v-model="form.scopeType" class="w-full" @change="form.scopeId = 0">
             <el-option label="全场通用" value="ALL" />
             <el-option label="指定游戏" value="GAME" />
             <el-option label="指定服务品类" value="SERVICE" />
             <el-option label="指定陪玩师" value="COMPANION" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="form.scopeType !== 'ALL'" label="范围对象ID" required>
-          <el-input-number v-model="form.scopeId" :min="1" />
-          <span class="text-xs text-muted ml-2">游戏ID / 服务品类ID / 陪玩师ID</span>
+        <el-form-item v-if="form.scopeType === 'GAME'" label="适用游戏" required>
+          <el-select v-model="form.scopeId" filterable placeholder="选择游戏" class="w-full">
+            <el-option v-for="item in gameOptions" :key="item.id" :label="item.gameName" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-else-if="form.scopeType === 'SERVICE'" label="服务品类" required>
+          <el-select v-model="form.scopeId" filterable placeholder="选择服务品类" class="w-full">
+            <el-option v-for="item in serviceTypeOptions" :key="item.id" :label="item.typeName" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-else-if="form.scopeType === 'COMPANION'" label="陪玩师" required>
+          <el-select v-model="form.scopeId" filterable remote reserve-keyword :remote-method="searchCompanions"
+            :loading="companionSearchLoading" placeholder="按昵称或账号搜索陪玩师" class="w-full">
+            <el-option v-if="form.scopeId && !companionOptions.some((item) => item.id === form.scopeId)"
+              :label="`当前已选陪玩师 #${form.scopeId}`" :value="form.scopeId" />
+            <el-option v-for="item in companionOptions" :key="item.id" :label="`${item.nickname}（${item.username}）`" :value="item.id" />
+          </el-select>
         </el-form-item>
         <el-form-item label="发放总量" required>
           <el-input-number v-model="form.totalQuantity" :min="1" :max="1000000" :step="100" />

@@ -92,15 +92,19 @@ http.defaults.adapter = async (config) => {
     }
     const page = Number(config.params?.page ?? 1)
     const size = Number(config.params?.size ?? 10)
+    const readStatus = config.params?.readStatus
+    const filtered = readStatus === 0 || readStatus === 1
+      ? mockState.notifications.filter((notification) => notification.readStatus === readStatus)
+      : mockState.notifications
     const start = (page - 1) * size
-    const pagedRecords = mockState.notifications.slice(start, start + size)
+    const pagedRecords = filtered.slice(start, start + size)
     return {
       data: {
         code: 'SUCCESS',
         message: 'ok',
         data: {
           records: pagedRecords,
-          total: mockState.notifications.length,
+          total: filtered.length,
           size,
           current: page
         }

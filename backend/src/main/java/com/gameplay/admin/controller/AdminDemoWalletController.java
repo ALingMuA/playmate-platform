@@ -7,6 +7,7 @@ import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.wallet.dto.DemoWalletConfigView;
 import com.gameplay.wallet.dto.DemoWalletGrantRequest;
 import com.gameplay.wallet.dto.DemoWalletGrantView;
+import com.gameplay.wallet.dto.WalletView;
 import com.gameplay.wallet.service.WalletService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +15,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -33,6 +35,12 @@ public class AdminDemoWalletController {
     @GetMapping("/config")
     public ApiResponse<DemoWalletConfigView> config() {
         return ApiResponse.ok(walletService.getDemoConfig());
+    }
+
+    /** 查询目标用户演示余额（不创建钱包账户）。 */
+    @GetMapping("/users/{userId}/balance")
+    public ApiResponse<WalletView> balance(@PathVariable Long userId) {
+        return ApiResponse.ok(walletService.demoBalanceView(userId));
     }
 
     /** 发放演示余额 */

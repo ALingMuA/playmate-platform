@@ -68,9 +68,15 @@ public class NotificationService {
 
     /** 我的通知分页（FR-A07） */
     public Page<NotificationView> page(Long userId, long page, long size) {
+        return page(userId, page, size, null);
+    }
+
+    /** 我的通知分页，可按已读状态筛选（FR-A07）。 */
+    public Page<NotificationView> page(Long userId, long page, long size, Integer readStatus) {
         Page<Notification> p = notificationMapper.selectPage(new Page<>(page, size),
                 new LambdaQueryWrapper<Notification>()
                         .eq(Notification::getUserId, userId)
+                        .eq(readStatus != null, Notification::getReadStatus, readStatus)
                         .orderByDesc(Notification::getId));
         Page<NotificationView> vp = new Page<>(p.getCurrent(), p.getSize(), p.getTotal());
         vp.setRecords(p.getRecords().stream().map(this::toView).toList());

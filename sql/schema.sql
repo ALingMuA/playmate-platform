@@ -21,6 +21,7 @@ CREATE TABLE `user` (
   gender TINYINT NOT NULL DEFAULT 0 COMMENT '性别：0未知，1男，2女',
   introduction VARCHAR(500) NOT NULL DEFAULT '' COMMENT '个人简介',
   account_status VARCHAR(20) NOT NULL DEFAULT 'ENABLED' COMMENT '账号状态：ENABLED、DISABLED',
+  disabled_reason VARCHAR(500) NOT NULL DEFAULT '' COMMENT '管理员禁用原因',
   token_version INT NOT NULL DEFAULT 1 COMMENT 'JWT令牌版本，变更后旧令牌失效',
   last_login_at DATETIME NULL DEFAULT NULL COMMENT '最后登录时间',
   deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除：0否，1是',
@@ -238,6 +239,20 @@ CREATE TABLE play_order (
   KEY idx_po_companion_status_time (companion_user_id, order_status, appointment_start_at),
   KEY idx_po_timeout (order_status, pay_expire_at, accept_expire_at, confirmed_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='陪玩订单主表';
+
+CREATE TABLE order_delivery_evidence (
+  id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  order_id BIGINT NOT NULL COMMENT '订单ID',
+  companion_user_id BIGINT NOT NULL COMMENT '上传凭证的陪玩师用户ID',
+  file_url VARCHAR(500) NOT NULL COMMENT '履约凭证文件地址',
+  file_name VARCHAR(200) NOT NULL DEFAULT '' COMMENT '原始文件名',
+  sort_no INT NOT NULL DEFAULT 0 COMMENT '显示顺序',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (id),
+  KEY idx_ode_order_sort (order_id, sort_no),
+    KEY idx_ode_companion_order (companion_user_id, order_id),
+    KEY idx_ode_file_url (file_url)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='陪玩师订单履约凭证';
 
 CREATE TABLE order_time_slot (
   id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',

@@ -148,6 +148,41 @@ class NotificationLifecycleFlowTest {
     }
 
     @Test
+    @DisplayName("N-06: 未读/已读筛选服务端分页、总数准确且用户隔离")
+    void testReadStatusFilterPaginationAndIsolation() throws Exception {
+        User userA = registerUser();
+        User userB = registerUser();
+        String tokenA = loginAndGetToken(userA.getUsername(), PASSWORD);
+        String tokenB = loginAndGetToken(userB.getUsername(), PASSWORD);
+        notificationService.record(userA.getId(), "SYSTEM", "未读1", "内容", "SYSTEM", 0L);
+        notificationService.record(userA.getId(), "SYSTEM", "未读2", "内容", "SYSTEM", 0L);
+        notificationService.record(userA.getId(), "SYSTEM", "已读", "内容", "SYSTEM", 0L);
+        Notification read = notificationMapper.selectOne(new LambdaQueryWrapper<Notification>()
+                .eq(Notification::getUserId, userA.getId())
+                .eq(Notification::getTitle, "已读"));
+        notificationService.markRead(userA.getId(), read.getId());
+
+        mockMvc.perform(get("/api/notifications").header("Authorization", "Bearer " + tokenA)
+                        .param("page", "1").param("size", "10").param("readStatus", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(2))
+                .andExpect(jsonPath("$.data.records[0].readStatus").value(0));
+        mockMvc.perform(get("/api/notifications").header("Authorization", "Bearer " + tokenA)
+                        .param("page", "1").param("size", "10").param("readStatus", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.records[0].readStatus").value(1));
+        mockMvc.perform(get("/api/notifications").header("Authorization", "Bearer " + tokenB)
+                        .param("page", "1").param("size", "10").param("readStatus", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0));
+        mockMvc.perform(get("/api/notifications").header("Authorization", "Bearer " + tokenA)
+                        .param("readStatus", "2"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
     @DisplayName("N-05: 带 eventKey 的通知具备幂等性，同一事件重复生成时只保留一条")
     void testNotificationEventKeyIdempotency() throws Exception {
         User user = registerUser();

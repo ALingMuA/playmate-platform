@@ -46,6 +46,9 @@ public class User {
     /** 账号状态：ENABLED、DISABLED */
     private String accountStatus;
 
+    /** 管理员禁用原因。 */
+    private String disabledReason;
+
     /** JWT 令牌版本，变更后旧令牌失效 */
     private Integer tokenVersion;
 

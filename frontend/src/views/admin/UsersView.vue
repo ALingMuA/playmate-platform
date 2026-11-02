@@ -10,6 +10,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   adminDemoWalletConfig,
+  adminDemoWalletBalance,
   adminGrantDemoWallet,
   adminResetUserPassword,
   adminSetUserStatus,
@@ -23,6 +24,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 10
 const loading = ref(false)
+const listError = ref('')
 
 const query = reactive({
   keyword: '',
@@ -45,10 +47,13 @@ function fmtTime(t?: string): string {
 
 async function load() {
   loading.value = true
+  listError.value = ''
   try {
     const result = await adminUsers(query.keyword || undefined, query.accountStatus, page.value, pageSize)
     list.value = result.records
     total.value = result.total
+  } catch (err) {
+    listError.value = err instanceof Error ? err.message : '用户列表加载失败，请重试。'
   } finally {
     loading.value = false
   }
@@ -172,6 +177,8 @@ async function handleResetPassword() {
 const grantVisible = ref(false)
 const granting = ref(false)
 const grantTarget = ref<UserAdminView | null>(null)
+const grantBalanceCents = ref<number | null>(null)
+const grantBalanceLoading = ref(false)
 const demoConfig = ref<DemoWalletConfigView>({
   enabled: true,
   allowedAmountsCents: [1000, 5000, 10000, 50000],
@@ -195,13 +202,23 @@ async function fetchDemoConfig() {
   }
 }
 
-function openGrantDemoWallet(row: UserAdminView) {
+async function openGrantDemoWallet(row: UserAdminView) {
   grantTarget.value = row
+  grantBalanceCents.value = null
   grantForm.reason = '答辩演示账号准备余额'
   if (demoConfig.value.allowedAmountsCents?.length > 0) {
     grantForm.amountCents = demoConfig.value.allowedAmountsCents[0]
   }
   grantVisible.value = true
+  grantBalanceLoading.value = true
+  try {
+    const wallet = await adminDemoWalletBalance(row.id)
+    grantBalanceCents.value = wallet.balanceCents
+  } catch {
+    grantBalanceCents.value = null
+  } finally {
+    grantBalanceLoading.value = false
+  }
 }
 
 async function handleGrantDemoWallet() {
@@ -255,6 +272,11 @@ onMounted(() => {
             <el-option label="已禁用" value="DISABLED" />
           </el-select>
         </el-form-item>
+        <el-form-item label="当前可用余额">
+          <span v-if="grantBalanceLoading">加载中…</span>
+          <span v-else-if="grantBalanceCents != null">¥{{ (grantBalanceCents / 100).toFixed(2) }}</span>
+          <span v-else>暂时无法读取</span>
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="onSearch">查询</el-button>
           <el-button @click="onReset">重置</el-button>
@@ -264,7 +286,10 @@ onMounted(() => {
 
     <!-- 用户表格 -->
     <el-card class="table-card" shadow="hover">
-      <el-table :data="list" v-loading="loading" stripe>
+      <el-alert v-if="listError" type="error" :title="listError" :closable="false" show-icon>
+        <el-button size="small" @click="load">重试</el-button>
+      </el-alert>
+      <el-table v-if="!listError" :data="list" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="username" label="账号" min-width="110" />
         <el-table-column prop="nickname" label="昵称" min-width="110" />
@@ -296,7 +321,7 @@ onMounted(() => {
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
-            <el-tag :type="row.accountStatus === 'ENABLED' ? 'success' : 'danger'" size="small">
+            <el-tag :type="row.accountStatus === 'ENABLED' ? 'success' : 'danger'" size="small" :title="row.disabledReason || ''">
               {{ row.accountStatus === 'ENABLED' ? '正常' : '已禁用' }}
             </el-tag>
           </template>

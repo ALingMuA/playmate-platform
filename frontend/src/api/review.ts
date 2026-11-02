@@ -43,6 +43,7 @@ export interface Complaint {
   handledAt?: string
   createdAt: string
   evidences: ComplaintEvidence[]
+  deliveryEvidences?: ComplaintEvidence[]
 }
 
 /** 提交评价（FR-U15） */
@@ -119,6 +120,11 @@ export function adminComplaints(status?: string, complaintType?: string, keyword
     method: 'get',
     params: { status, complaintType, keyword, page, size },
   })
+}
+
+/** 管理端投诉详情（含用户证据与陪玩师履约凭证） */
+export function adminComplaintDetail(id: number): Promise<Complaint> {
+  return request<Complaint>({ url: `/admin/complaints/${id}`, method: 'get' })
 }
 
 /** 投诉仲裁（FR-M18/M19） */

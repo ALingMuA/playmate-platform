@@ -28,6 +28,7 @@ public class UserAdminView {
     private Integer gender;
     private String introduction;
     private String accountStatus;
+    private String disabledReason;
     /** 角色编码列表 */
     private List<String> roles;
     /** 陪玩师资格状态（非陪玩师为 null） */

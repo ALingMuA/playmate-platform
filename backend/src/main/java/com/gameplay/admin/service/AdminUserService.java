@@ -68,6 +68,7 @@ public class AdminUserService {
         }
         userMapper.update(null, new LambdaUpdateWrapper<User>()
                 .set(User::getAccountStatus, req.getAccountStatus())
+                .set(User::getDisabledReason, "DISABLED".equals(req.getAccountStatus()) ? req.getReason().trim() : "")
                 .eq(User::getId, userId));
         // 禁用：递增令牌版本
         if ("DISABLED".equals(req.getAccountStatus())) {
@@ -137,6 +138,7 @@ public class AdminUserService {
                 .gender(user.getGender())
                 .introduction(user.getIntroduction())
                 .accountStatus(user.getAccountStatus())
+                .disabledReason(user.getDisabledReason())
                 .roles(roles)
                 .companionCertificationStatus(profile == null ? null : profile.getCertificationStatus())
                 .lastLoginAt(user.getLastLoginAt())

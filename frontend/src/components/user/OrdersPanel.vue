@@ -95,7 +95,9 @@ async function handleCancel(row: Order) {
   acting.value = true
   try {
     await cancelOrder(row.id, reason)
-    ElMessage.success('订单已取消')
+    ElMessage.success(row.orderStatus === 'PENDING_PAYMENT'
+      ? '订单已取消'
+      : '订单已取消，款项已全额退回虚拟钱包')
     await load()
   } finally {
     acting.value = false
@@ -200,8 +202,12 @@ onMounted(load)
             @click="router.push(`/review/${row.id}`)">
             评价
           </button>
+          <button v-if="row.orderStatus === 'AFTER_SALES'" class="btn btn-destructive btn-sm"
+            @click="router.push('/profile#tab=complaints')">
+            查看售后进度
+          </button>
           <button
-            v-if="['WAITING_CONFIRMATION', 'COMPLETED', 'AFTER_SALES'].includes(row.orderStatus)"
+            v-else-if="['WAITING_CONFIRMATION', 'COMPLETED'].includes(row.orderStatus)"
             class="btn btn-destructive btn-sm" @click="router.push(`/complaint/${row.id}`)">
             投诉
           </button>

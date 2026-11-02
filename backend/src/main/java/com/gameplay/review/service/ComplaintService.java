@@ -9,6 +9,9 @@ import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.order.domain.PlayOrder;
 import com.gameplay.order.mapper.PlayOrderMapper;
+import com.gameplay.order.domain.OrderDeliveryEvidence;
+import com.gameplay.order.dto.DeliveryEvidenceView;
+import com.gameplay.order.mapper.OrderDeliveryEvidenceMapper;
 import com.gameplay.order.service.OrderService;
 import com.gameplay.review.domain.Complaint;
 import com.gameplay.review.domain.ComplaintEvidence;
@@ -45,6 +48,7 @@ public class ComplaintService {
 
     private final ComplaintMapper complaintMapper;
     private final ComplaintEvidenceMapper evidenceMapper;
+    private final OrderDeliveryEvidenceMapper deliveryEvidenceMapper;
     private final PlayOrderMapper orderMapper;
     private final UserMapper userMapper;
     private final OrderService orderService;
@@ -109,7 +113,7 @@ public class ComplaintService {
                 evidenceMapper.insert(evidence);
             }
         }
-        ComplaintView view = toView(complaint);
+        ComplaintView view = toView(complaint, true);
         view.setHandledBy(null);
         return view;
     }
@@ -136,7 +140,7 @@ public class ComplaintService {
         if (!isAdmin && !complaint.getComplainantUserId().equals(operatorId)) {
             throw new BusinessException(ErrorCode.PERMISSION_DATA_SCOPE_DENIED);
         }
-        ComplaintView view = toView(complaint);
+        ComplaintView view = toView(complaint, true);
         if (!isAdmin) {
             view.setHandledBy(null);
         }
@@ -233,18 +237,18 @@ public class ComplaintService {
                 complaint.getId(),
                 "COMPLAINT:" + complaint.getId() + ":RESOLVED"
         );
-        return toView(complaint);
+        return toView(complaint, true);
     }
 
     // ==================== 内部 ====================
 
     private Page<ComplaintView> toViewPage(Page<Complaint> p) {
         Page<ComplaintView> result = new Page<>(p.getCurrent(), p.getSize(), p.getTotal());
-        result.setRecords(p.getRecords().stream().map(this::toView).toList());
+        result.setRecords(p.getRecords().stream().map(c -> toView(c, false)).toList());
         return result;
     }
 
-    private ComplaintView toView(Complaint c) {
+    private ComplaintView toView(Complaint c, boolean includeDeliveryEvidences) {
         PlayOrder order = orderMapper.selectById(c.getOrderId());
         User complainant = userMapper.selectById(c.getComplainantUserId());
         User companion = order == null ? null : userMapper.selectById(order.getCompanionUserId());
@@ -252,6 +256,18 @@ public class ComplaintService {
                 new LambdaQueryWrapper<ComplaintEvidence>()
                         .eq(ComplaintEvidence::getComplaintId, c.getId())
                         .orderByAsc(ComplaintEvidence::getSortNo));
+        List<DeliveryEvidenceView> deliveryEvidences = includeDeliveryEvidences ? deliveryEvidenceMapper.selectList(
+                        new LambdaQueryWrapper<OrderDeliveryEvidence>()
+                                .eq(OrderDeliveryEvidence::getOrderId, c.getOrderId())
+                                .orderByAsc(OrderDeliveryEvidence::getSortNo))
+                .stream()
+                .map(e -> DeliveryEvidenceView.builder()
+                        .id(e.getId())
+                        .fileUrl(e.getFileUrl())
+                        .fileName(e.getFileName())
+                        .createdAt(e.getCreatedAt())
+                        .build())
+                .toList() : List.of();
         return ComplaintView.builder()
                 .id(c.getId())
                 .orderId(c.getOrderId())
@@ -277,6 +293,7 @@ public class ComplaintService {
                         .fileName(e.getFileName())
                         .createdAt(e.getCreatedAt())
                         .build()).toList())
+                .deliveryEvidences(deliveryEvidences)
                 .build();
     }
 }

@@ -67,4 +67,7 @@ public class OrderView {
 
     /** 状态轨迹（详情时返回） */
     private List<OrderStatusHistoryView> statusHistories;
+
+    /** 履约凭证（订单详情时返回，分页列表不加载）。 */
+    private List<DeliveryEvidenceView> deliveryEvidences;
 }

@@ -32,22 +32,20 @@ const page = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
 const rawNotifications = ref<NotificationView[]>([])
+const markingReadIds = ref(new Set<number>())
 
 // 统计当前列表中的未读数（用于界面展示与一键已读按钮禁用状态）
 const localUnreadCount = computed(() => {
   return rawNotifications.value.filter((n) => n.readStatus === 0).length
 })
 
-// 根据当前选中的 Tab 过滤显示
-const displayedNotifications = computed(() => {
-  if (filterTab.value === 'UNREAD') {
-    return rawNotifications.value.filter((n) => n.readStatus === 0)
-  }
-  if (filterTab.value === 'READ') {
-    return rawNotifications.value.filter((n) => n.readStatus === 1)
-  }
-  return rawNotifications.value
-})
+const displayedNotifications = computed(() => rawNotifications.value)
+
+function readStatusParam(): 0 | 1 | undefined {
+  if (filterTab.value === 'UNREAD') return 0
+  if (filterTab.value === 'READ') return 1
+  return undefined
+}
 
 const typeTagConfig: Record<string, { label: string; type: 'primary' | 'success' | 'warning' | 'danger' | 'info' }> = {
   ORDER_STATUS: { label: '订单提醒', type: 'primary' },
@@ -77,7 +75,7 @@ async function loadData() {
   failed.value = false
   errorMessage.value = ''
   try {
-    const res = await myNotifications(page.value, pageSize.value)
+    const res = await myNotifications(page.value, pageSize.value, readStatusParam())
     rawNotifications.value = res.records || []
     total.value = res.total || 0
     // 同步刷新全局未读数
@@ -90,16 +88,24 @@ async function loadData() {
   }
 }
 
-async function handleMarkRead(item: NotificationView) {
-  if (item.readStatus === 1) return
+async function handleMarkRead(item: NotificationView): Promise<boolean> {
+  if (item.readStatus === 1) return true
+  if (markingReadIds.value.has(item.id)) return false
+  markingReadIds.value = new Set(markingReadIds.value).add(item.id)
   try {
     await markNotificationRead(item.id)
     item.readStatus = 1
     item.readAt = new Date().toISOString()
     // 递减全局未读计数
     notificationStore.decrementUnread()
+    return true
   } catch (err: any) {
     ElMessage.error(err?.message || '标记已读失败')
+    return false
+  } finally {
+    const next = new Set(markingReadIds.value)
+    next.delete(item.id)
+    markingReadIds.value = next
   }
 }
 
@@ -150,12 +156,18 @@ function getTargetRoute(item: NotificationView): string | null {
 
 async function handleItemClick(item: NotificationView) {
   if (item.readStatus === 0) {
-    await handleMarkRead(item)
+    const marked = await handleMarkRead(item)
+    if (!marked) return
   }
   const target = getTargetRoute(item)
   if (target) {
     router.push(target)
   }
+}
+
+function handleFilterChange() {
+  page.value = 1
+  loadData()
 }
 
 function handlePageChange(p: number) {
@@ -210,7 +222,7 @@ onMounted(() => {
       <div class="panel-header">
         <div class="header-left">
           <div class="tabs-group">
-            <el-radio-group v-model="filterTab" size="default">
+            <el-radio-group v-model="filterTab" size="default" @change="handleFilterChange">
               <el-radio-button label="ALL">全部</el-radio-button>
               <el-radio-button label="UNREAD">
                 未读
@@ -285,6 +297,8 @@ onMounted(() => {
                   text
                   type="primary"
                   class="btn-mark-single"
+                  :loading="markingReadIds.has(item.id)"
+                  :disabled="markingReadIds.has(item.id)"
                   @click.stop="handleMarkRead(item)"
                 >
                   标为已读

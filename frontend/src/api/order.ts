@@ -42,6 +42,14 @@ export interface Order {
   closedReason: string
   createdAt: string
   statusHistories?: OrderStatusHistory[]
+  deliveryEvidences?: DeliveryEvidence[]
+}
+
+export interface DeliveryEvidence {
+  id: number
+  fileUrl: string
+  fileName: string
+  createdAt?: string
 }
 
 /** 订单状态历史（FR-U11） */
@@ -74,6 +82,9 @@ export interface BookableService {
   companionUserId: number
   /** 提供该服务的陪玩师展示名（资料缺失时为空串） */
   companionDisplayName?: string
+  /** 陪玩师有效评价平均分和数量；无评价时为 null/0 */
+  ratingAvg?: number | null
+  ratingCount?: number
   gameId: number
   gameName: string
   serviceTypeId: number
@@ -171,8 +182,12 @@ export function startOrderService(id: number): Promise<Order> {
 }
 
 /** 结束服务（FR-P16） */
-export function endOrderService(id: number): Promise<Order> {
-  return request<Order>({ url: `/companion/orders/${id}/end`, method: 'post' })
+export function endOrderService(id: number, evidences?: { fileUrl: string; fileName: string }[]): Promise<Order> {
+  return request<Order>({
+    url: `/companion/orders/${id}/end`,
+    method: 'post',
+    ...(evidences?.length ? { data: { evidences } } : {}),
+  })
 }
 
 /** 钱包概览 */

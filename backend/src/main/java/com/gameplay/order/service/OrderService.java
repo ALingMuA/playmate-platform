@@ -22,11 +22,15 @@ import com.gameplay.companion.mapper.CompanionServiceMapper;
 import com.gameplay.order.domain.OrderStatusHistory;
 import com.gameplay.order.domain.OrderTimeSlot;
 import com.gameplay.order.domain.PlayOrder;
+import com.gameplay.order.domain.OrderDeliveryEvidence;
 import com.gameplay.order.dto.CreateOrderRequest;
 import com.gameplay.order.dto.OrderStatusHistoryView;
 import com.gameplay.order.dto.OrderView;
+import com.gameplay.order.dto.DeliveryEvidenceRequest;
+import com.gameplay.order.dto.DeliveryEvidenceView;
 import com.gameplay.order.enums.SlotStatus;
 import com.gameplay.order.mapper.OrderStatusHistoryMapper;
+import com.gameplay.order.mapper.OrderDeliveryEvidenceMapper;
 import com.gameplay.order.mapper.OrderTimeSlotMapper;
 import com.gameplay.order.mapper.PlayOrderMapper;
 import com.gameplay.notification.service.NotificationService;
@@ -64,6 +68,7 @@ public class OrderService {
     private final PlayOrderMapper orderMapper;
     private final OrderTimeSlotMapper slotMapper;
     private final OrderStatusHistoryMapper historyMapper;
+    private final OrderDeliveryEvidenceMapper deliveryEvidenceMapper;
     private final CompanionServiceMapper companionServiceMapper;
     private final CompanionProfileMapper companionProfileMapper;
     private final GameMapper gameMapper;
@@ -290,6 +295,25 @@ public class OrderService {
     /** 结束服务（FR-P16）：订单转为待用户确认 */
     @Transactional
     public OrderView endService(Long companionUserId, Long orderId) {
+        return endService(companionUserId, orderId, List.of());
+    }
+
+    /** 结束服务并保存可选履约凭证（同一事务内完成）。 */
+    @Transactional
+    public OrderView endService(Long companionUserId, Long orderId, List<DeliveryEvidenceRequest> evidences) {
+        List<DeliveryEvidenceRequest> safeEvidences = evidences == null ? List.of() : evidences;
+        if (safeEvidences.size() > 5) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "履约凭证最多5张");
+        }
+        for (DeliveryEvidenceRequest evidence : safeEvidences) {
+            if (evidence.getFileUrl() == null || !evidence.getFileUrl().matches(
+                    "^/api/files/delivery/\\d{8}/[0-9a-fA-F]{32}\\.(jpg|jpeg|png|gif|webp)$")) {
+                throw new BusinessException(ErrorCode.VALIDATION_FAILED, "履约凭证文件地址无效");
+            }
+            if (evidence.getFileName() != null && evidence.getFileName().length() > 200) {
+                throw new BusinessException(ErrorCode.VALIDATION_FAILED, "文件名最长200字");
+            }
+        }
         PlayOrder order = requireCompanionOrder(companionUserId, orderId);
         if (!OrderStatus.IN_SERVICE.name().equals(order.getOrderStatus())) {
             throw new BusinessException(ErrorCode.ORDER_STATUS_INVALID);
@@ -297,6 +321,16 @@ public class OrderService {
         transition(order, OrderStatus.WAITING_CONFIRMATION, companionUserId, "COMPANION", "END", "结束服务");
         order.setEndedAt(LocalDateTime.now());
         orderMapper.updateById(order);
+        int sortNo = 0;
+        for (DeliveryEvidenceRequest evidence : safeEvidences) {
+            OrderDeliveryEvidence entity = new OrderDeliveryEvidence();
+            entity.setOrderId(order.getId());
+            entity.setCompanionUserId(companionUserId);
+            entity.setFileUrl(evidence.getFileUrl());
+            entity.setFileName(evidence.getFileName() == null ? "" : evidence.getFileName());
+            entity.setSortNo(sortNo++);
+            deliveryEvidenceMapper.insert(entity);
+        }
         notificationService.record(
                 order.getUserId(),
                 "ORDER_STATUS",
@@ -643,6 +677,18 @@ public class OrderService {
                         .actionCode(h.getActionCode())
                         .reason(h.getReason())
                         .createdAt(h.getCreatedAt())
+                        .build())
+                .toList());
+        view.setDeliveryEvidences(deliveryEvidenceMapper.selectList(
+                        new LambdaQueryWrapper<OrderDeliveryEvidence>()
+                                .eq(OrderDeliveryEvidence::getOrderId, order.getId())
+                                .orderByAsc(OrderDeliveryEvidence::getSortNo))
+                .stream()
+                .map(evidence -> DeliveryEvidenceView.builder()
+                        .id(evidence.getId())
+                        .fileUrl(evidence.getFileUrl())
+                        .fileName(evidence.getFileName())
+                        .createdAt(evidence.getCreatedAt())
                         .build())
                 .toList());
         return view;

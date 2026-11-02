@@ -40,7 +40,11 @@ const me = ref<CsAccountView | null>(null)
 const loading = ref(false)
 const sending = ref(false)
 const input = ref('')
+const sendError = ref('')
+const pendingClientMsgId = ref('')
+const pendingText = ref('')
 const msgListRef = ref<HTMLElement | null>(null)
+let sendAckTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 会话状态展示映射 */
 const statusMap: Record<string, { label: string; type: string }> = {
@@ -121,28 +125,48 @@ async function handleClaim() {
 
 // ==================== 发送回复（FR-C26） ====================
 
+function clearPendingSend() {
+  if (sendAckTimer) clearTimeout(sendAckTimer)
+  sendAckTimer = null
+  sending.value = false
+  sendError.value = ''
+  pendingClientMsgId.value = ''
+  pendingText.value = ''
+}
+
 function handleSend() {
   const content = input.value.trim()
   if (!content) return
-  if (!conv.value || isClosed.value) return
+  if (!conv.value || isClosed.value || sending.value) return
+  const clientMsgId = pendingClientMsgId.value && pendingText.value === content
+    ? pendingClientMsgId.value
+    : crypto.randomUUID()
+  pendingClientMsgId.value = clientMsgId
+  pendingText.value = content
+  sendError.value = ''
+  sending.value = true
   const ok = csSocket.sendMessage({
     conversationId: conv.value.id,
     content,
-    clientMsgId: crypto.randomUUID(),
+    clientMsgId,
   })
   if (ok) {
-    input.value = ''
-    sending.value = true
-    setTimeout(() => (sending.value = false), 500)
+    sendAckTimer = setTimeout(() => {
+      sending.value = false
+      sendError.value = '暂未收到服务器确认，消息仍保留在输入框中，可重试。'
+    }, 10000)
   } else {
     // WebSocket 不可用时 REST 兜底
-    sending.value = true
-    csReply(conv.value.id, content)
+    csReply(conv.value.id, content, clientMsgId)
       .then((m) => {
-        input.value = ''
         mergeMessage(m)
+        if (input.value.trim() === pendingText.value) input.value = ''
+        clearPendingSend()
       })
-      .finally(() => (sending.value = false))
+      .catch((err: unknown) => {
+        sending.value = false
+        sendError.value = err instanceof Error ? err.message : '消息发送失败，请重试。'
+      })
   }
 }
 
@@ -217,13 +241,25 @@ function onWsMessage(msg: Parameters<Parameters<typeof csSocket.onMessage>[0]>[0
   if (msg.type === 'MESSAGE_NEW') {
     if (conv.value && msg.data.conversationId === conv.value.id) {
       mergeMessage(msg.data)
+      if (msg.data.clientMsgId && msg.data.clientMsgId === pendingClientMsgId.value) {
+        if (input.value.trim() === pendingText.value) input.value = ''
+        clearPendingSend()
+      }
     }
   } else if (msg.type === 'CONVERSATION_CHANGED') {
     if (conv.value && msg.data.id === conv.value.id) {
       conv.value = msg.data
     }
   } else if (msg.type === 'ERROR') {
-    ElMessage.error(msg.data)
+    const data = typeof msg.data === 'string' ? { message: msg.data } : msg.data
+    if (data.conversationId === conv.value?.id && data.clientMsgId === pendingClientMsgId.value) {
+      if (sendAckTimer) clearTimeout(sendAckTimer)
+      sendAckTimer = null
+      sending.value = false
+      sendError.value = data.message
+      return
+    }
+    ElMessage.error(data.message)
   }
 }
 
@@ -237,6 +273,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (sendAckTimer) clearTimeout(sendAckTimer)
   unsubscribe?.()
   csSocket.close()
 })
@@ -304,11 +341,13 @@ watch(conversationId, () => load())
           type="textarea"
           :rows="2"
           maxlength="4000"
-          placeholder="输入回复内容，Enter 发送（Shift+Enter 换行）"
+          :placeholder="sendError || '输入回复内容，Enter 发送（Shift+Enter 换行）'"
+          :disabled="sending"
           @keydown.enter.exact.prevent="handleSend"
         />
         <el-button type="primary" :disabled="sending" @click="handleSend">发送</el-button>
       </div>
+      <div v-if="sendError" class="send-error" role="alert">{{ sendError }} 输入内容已保留，请点击发送重试。</div>
       <div v-else class="closed-tip">会话已关闭{{ conv.closedAt ? '于 ' + fmtTime(conv.closedAt) : '' }}</div>
     </el-card>
 

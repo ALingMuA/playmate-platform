@@ -273,6 +273,12 @@ class ReviewFlowTest {
      */
     private long setupCompletedOrder(String buyerToken, String companionToken,
                                      long companionUserId, long serviceId) throws Exception {
+        return setupCompletedOrder(buyerToken, companionToken, companionUserId, serviceId, null);
+    }
+
+    private long setupCompletedOrder(String buyerToken, String companionToken,
+                                     long companionUserId, long serviceId,
+                                     String deliveryEvidenceUrl) throws Exception {
         LocalDateTime start = LocalDateTime.now().plusMinutes(1);
         MvcResult created = mockMvc.perform(post("/api/play-orders")
                         .header("Authorization", "Bearer " + buyerToken)
@@ -307,16 +313,54 @@ class ReviewFlowTest {
                         .header("Authorization", "Bearer " + companionToken))
                 .andExpect(status().isOk())
                 .andReturn();
-        mockMvc.perform(post("/api/companion/orders/" + orderId + "/end")
-                        .header("Authorization", "Bearer " + companionToken))
-                .andExpect(status().isOk())
-                .andReturn();
+        var endRequest = post("/api/companion/orders/" + orderId + "/end")
+                .header("Authorization", "Bearer " + companionToken);
+        if (deliveryEvidenceUrl == null) {
+            mockMvc.perform(endRequest)
+                    .andExpect(status().isOk())
+                    .andReturn();
+        } else {
+            var evidence = objectMapper.createObjectNode()
+                    .put("fileUrl", deliveryEvidenceUrl)
+                    .put("fileName", "交付截图.png");
+            mockMvc.perform(endRequest
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.createObjectNode()
+                                    .set("evidences", objectMapper.createArrayNode().add(evidence)).toString()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.deliveryEvidences.length()").value(1))
+                    .andReturn();
+        }
         mockMvc.perform(post("/api/play-orders/" + orderId + "/confirm")
                         .header("Authorization", "Bearer " + buyerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.orderStatus").value("COMPLETED"))
                 .andReturn();
         return orderId;
+    }
+
+    @Test
+    @DisplayName("履约凭证：陪玩师可选上传且仅订单参与者可查看")
+    void delivery_evidence_is_saved_and_scoped_to_order_participants() throws Exception {
+        JsonNode parties = prepareParties();
+        long companionId = parties.path("companionId").asLong();
+        String buyerToken = parties.path("buyerToken").asText();
+        String companionToken = parties.path("companionToken").asText();
+        String day = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
+        String evidenceUrl = "/api/files/delivery/" + day + "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png";
+        long orderId = setupCompletedOrder(buyerToken, companionToken, companionId,
+                parties.path("serviceId").asLong(), evidenceUrl);
+
+        mockMvc.perform(get("/api/play-orders/" + orderId)
+                        .header("Authorization", "Bearer " + buyerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.deliveryEvidences.length()").value(1))
+                .andExpect(jsonPath("$.data.deliveryEvidences[0].fileUrl").value(evidenceUrl));
+
+        JsonNode outsider = registerAndLogin();
+        mockMvc.perform(get("/api/play-orders/" + orderId)
+                        .header("Authorization", "Bearer " + outsider.path("token").asText()))
+                .andExpect(status().isForbidden());
     }
 
     // ==================== 完整闭环（FR-U15~U19、FR-M08/M18/M19） ====================
