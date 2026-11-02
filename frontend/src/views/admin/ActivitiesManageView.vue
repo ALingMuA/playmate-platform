@@ -223,21 +223,21 @@ async function handleSave() {
 // ==================== 状态操作 ====================
 
 async function handlePublish(row: ActivityView) {
-  await ElMessageBox.confirm(`确定发布活动「${row.title}」吗？发布后用户端首页轮播和活动中心将可见。`, '发布活动', { type: 'info' })
+  try { await ElMessageBox.confirm(`确定发布活动「${row.title}」吗？发布后用户端首页轮播和活动中心将可见。`, '发布活动', { type: 'info' }) } catch { return }
   await adminPublishActivity(row.id)
   ElMessage.success('活动已发布')
   await load()
 }
 
 async function handleOffline(row: ActivityView) {
-  await ElMessageBox.confirm(`确定下线活动「${row.title}」吗？下线后用户端将不再展示。`, '下线活动', { type: 'warning' })
+  try { await ElMessageBox.confirm(`确定下线活动「${row.title}」吗？下线后用户端将不再展示。`, '下线活动', { type: 'warning' }) } catch { return }
   await adminOfflineActivity(row.id)
   ElMessage.success('活动已下线')
   await load()
 }
 
 async function handleDelete(row: ActivityView) {
-  await ElMessageBox.confirm(`确定删除活动「${row.title}」吗？删除后不可恢复。`, '删除活动', { type: 'warning' })
+  try { await ElMessageBox.confirm(`确定删除活动「${row.title}」吗？删除后不可恢复。`, '删除活动', { type: 'warning' }) } catch { return }
   await adminDeleteActivity(row.id)
   ElMessage.success('活动已删除')
   await load()

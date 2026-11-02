@@ -126,7 +126,7 @@ async function handleToggleEnabled(row: KnowledgeBaseView) {
 }
 
 async function handleDelete(row: KnowledgeBaseView) {
-  await ElMessageBox.confirm(`确定删除知识条目「${row.title}」吗？`, '删除知识条目', { type: 'warning' })
+  try { await ElMessageBox.confirm(`确定删除知识条目「${row.title}」吗？`, '删除知识条目', { type: 'warning' }) } catch { return }
   await adminDeleteKnowledge(row.id)
   ElMessage.success('已删除')
   await load()

@@ -37,13 +37,17 @@ onMounted(load)
 
 async function handleToggle(row: Review) {
   const hiding = row.displayStatus === 'VISIBLE'
-  await ElMessageBox.confirm(
-    hiding
-      ? '屏蔽后该评价不再公开展示，且不计入陪玩师评分，确定屏蔽？'
-      : '恢复后该评价重新公开展示，并重新参与评分计算，确定恢复？',
-    hiding ? '屏蔽评价' : '恢复评价',
-    { type: 'warning' },
-  )
+  try {
+    await ElMessageBox.confirm(
+      hiding
+        ? '屏蔽后该评价不再公开展示，且不计入陪玩师评分，确定屏蔽？'
+        : '恢复后该评价重新公开展示，并重新参与评分计算，确定恢复？',
+      hiding ? '屏蔽评价' : '恢复评价',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
   await adminSetReviewDisplay(row.id, hiding ? 'HIDDEN' : 'VISIBLE')
   ElMessage.success(hiding ? '已屏蔽' : '已恢复')
   await load()

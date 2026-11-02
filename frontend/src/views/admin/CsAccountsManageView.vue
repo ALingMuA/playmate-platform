@@ -142,7 +142,7 @@ async function handleDisable(row: CsAccountView) {
 }
 
 async function handleEnable(row: CsAccountView) {
-  await ElMessageBox.confirm(`确定恢复客服 ${row.csName} 的登录权限吗？`, '启用客服账号', { type: 'info' })
+  try { await ElMessageBox.confirm(`确定恢复客服 ${row.csName} 的登录权限吗？`, '启用客服账号', { type: 'info' }) } catch { return }
   await adminSetCsAccountStatus(row.id, 'ENABLED')
   ElMessage.success('客服账号已启用')
   await load()
