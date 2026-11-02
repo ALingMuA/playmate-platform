@@ -577,7 +577,7 @@ class OrderDeliveryEvidenceFlowTest {
         endWithEvidences(companionToken, orderId, List.of(evidenceUrl))
                 .andExpect(status().isOk());
 
-        String filePath = evidenceUrl.substring("/api".length());
+        String filePath = evidenceUrl;
         mockMvc.perform(get(filePath))
                 .andExpect(status().isUnauthorized());
 
