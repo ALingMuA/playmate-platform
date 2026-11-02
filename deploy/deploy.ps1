@@ -18,7 +18,14 @@
 param(
   [string]$Server = '<YOUR_ECS_IP>',
   [string]$SshKey = (Join-Path $env:USERPROFILE '.ssh\<YOUR_SSH_KEY>'),
-  [string]$Maven = '<LOCAL_MAVEN_CMD>',
+  [string]$Maven = $(
+    $candidates = @(
+      (Join-Path $env:USERPROFILE 'tools\apache-maven-3.9.16\bin\mvn.cmd'),
+      '<LOCAL_MAVEN_CMD>'
+    )
+    $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($found) { $found } else { 'mvn.cmd' }
+  ),
   [switch]$SkipBuild
 )
 
