@@ -14,6 +14,9 @@ import java.util.List;
  */
 public interface CompanionServiceMapper extends BaseMapper<CompanionService> {
 
+    @Select("SELECT * FROM companion_service WHERE id = #{id} AND deleted = 0 FOR UPDATE")
+    CompanionService selectByIdForUpdate(@Param("id") Long id);
+
     /** 统计陪玩师当前公开可预约服务的最低价格。 */
     @Select("""
             SELECT cs.price_cents AS starting_price_cents

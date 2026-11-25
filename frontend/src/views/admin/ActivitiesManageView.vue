@@ -3,7 +3,7 @@
  * 管理后台 - 平台活动管理
  */
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
 import dayjs from 'dayjs'
 import {
   adminActivities,
@@ -28,7 +28,7 @@ const uploadingBanner = ref(false)
 
 const couponTemplates = ref<CouponTemplateView[]>([])
 
-const statusMap: Record<string, { label: string; type: string }> = {
+const statusMap: Record<string, { label: string; type: TagProps['type'] }> = {
   DRAFT: { label: '草稿', type: 'info' },
   PUBLISHED: { label: '已发布', type: 'success' },
   OFFLINE: { label: '已下线', type: 'warning' },
@@ -60,6 +60,8 @@ async function load() {
     const result = await adminActivities(status.value, page.value, pageSize)
     list.value = result.records
     total.value = result.total
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     loading.value = false
   }
@@ -215,6 +217,8 @@ async function handleSave() {
     }
     editVisible.value = false
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     saving.value = false
   }
@@ -224,23 +228,35 @@ async function handleSave() {
 
 async function handlePublish(row: ActivityView) {
   try { await ElMessageBox.confirm(`确定发布活动「${row.title}」吗？发布后用户端首页轮播和活动中心将可见。`, '发布活动', { type: 'info' }) } catch { return }
-  await adminPublishActivity(row.id)
-  ElMessage.success('活动已发布')
-  await load()
+  try {
+    await adminPublishActivity(row.id)
+    ElMessage.success('活动已发布')
+    await load()
+  } catch {
+    // http.ts 已统一提示错误
+  }
 }
 
 async function handleOffline(row: ActivityView) {
   try { await ElMessageBox.confirm(`确定下线活动「${row.title}」吗？下线后用户端将不再展示。`, '下线活动', { type: 'warning' }) } catch { return }
-  await adminOfflineActivity(row.id)
-  ElMessage.success('活动已下线')
-  await load()
+  try {
+    await adminOfflineActivity(row.id)
+    ElMessage.success('活动已下线')
+    await load()
+  } catch {
+    // http.ts 已统一提示错误
+  }
 }
 
 async function handleDelete(row: ActivityView) {
   try { await ElMessageBox.confirm(`确定删除活动「${row.title}」吗？删除后不可恢复。`, '删除活动', { type: 'warning' }) } catch { return }
-  await adminDeleteActivity(row.id)
-  ElMessage.success('活动已删除')
-  await load()
+  try {
+    await adminDeleteActivity(row.id)
+    ElMessage.success('活动已删除')
+    await load()
+  } catch {
+    // http.ts 已统一提示错误
+  }
 }
 
 onMounted(() => {
@@ -322,7 +338,7 @@ onMounted(() => {
         </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="(statusMap[row.status]?.type as any) ?? 'info'">
+            <el-tag :type="statusMap[row.status]?.type ?? 'info'">
               {{ statusMap[row.status]?.label ?? row.status }}
             </el-tag>
           </template>

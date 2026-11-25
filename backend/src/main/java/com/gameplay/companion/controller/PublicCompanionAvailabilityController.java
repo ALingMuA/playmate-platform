@@ -27,7 +27,7 @@ public class PublicCompanionAvailabilityController {
     @GetMapping("/{userId}/availabilities")
     public ApiResponse<List<PublicAvailabilityView>> listAvailable(
             @PathVariable Long userId,
-            @RequestParam(defaultValue = "7") @Min(1) @Max(7) int days) {
+            @RequestParam(defaultValue = "7") @Min(1) @Max(28) int days) {
         return ApiResponse.ok(availabilityService.listAvailable(userId, days));
     }
 }

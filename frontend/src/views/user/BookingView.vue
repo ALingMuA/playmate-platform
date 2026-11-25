@@ -73,7 +73,7 @@ const customTimeStr = ref<string>('20:00')
 
 // ==================== 档期可约性预检（与后端档期完全覆盖规则一致） ====================
 
-/** 陪玩师未来 7 日公开可约档期；接口失败时为空且 loaded=false，前端预检跳过、由后端兜底 */
+/** 陪玩师未来 28 日公开可约档期；接口失败时为空且 loaded=false，前端预检跳过、由后端兜底 */
 const availabilities = ref<PublicAvailability[]>([])
 const availabilityLoaded = ref(false)
 
@@ -162,6 +162,14 @@ function selectFutureTimePreset(time: string) {
   updateAppointmentStart()
 }
 
+const rolledToTomorrow = computed(() => {
+  if (selectedDateKey.value !== 'today' || selectedTodayQuick.value !== 'exact' || !form.appointmentStart) {
+    return false
+  }
+  const start = dayjs(form.appointmentStart)
+  return start.isValid() && start.startOf('day').isAfter(dayjs().startOf('day'))
+})
+
 /** 友好展示已选开始时间 */
 const friendlyStartTime = computed(() => {
   if (!form.appointmentStart) return '未设置开始时间'
@@ -189,11 +197,13 @@ const couponLoading = ref(false)
 const initialFormSnapshot = ref('')
 const formSnapshot = () => JSON.stringify({ ...form, selectedCouponId: selectedCouponId.value })
 const formDirty = computed(() => initialFormSnapshot.value !== '' && initialFormSnapshot.value !== formSnapshot())
+let couponSeq = 0
+let previewSeq = 0
 
-/** 原价（分）= 单价 × 时长/60 */
+/** 原价（分）= 单价 × 时长/60（与后端 OrderService 向上取整一致） */
 const totalAmountCents = computed(() => {
   if (!selectedService.value || !form.durationMinutes) return 0
-  return Math.round((selectedService.value.priceCents * form.durationMinutes) / 60)
+  return Math.ceil((selectedService.value.priceCents * form.durationMinutes) / 60)
 })
 
 const finalPayableCents = computed(() => {
@@ -205,6 +215,7 @@ function fmtPrice(cents: number): string {
 }
 
 async function refreshCouponsAndPreview() {
+  const seq = ++couponSeq
   if (!form.serviceId || !form.durationMinutes) {
     userCoupons.value = []
     previewResult.value = null
@@ -213,45 +224,55 @@ async function refreshCouponsAndPreview() {
   couponLoading.value = true
   try {
     const list = await availableCoupons(form.serviceId, form.durationMinutes)
+    if (seq !== couponSeq) return
     userCoupons.value = list
-    // 若原先选中的券不再适用，重置
+    // 若原先选中的券不再适用，重置（重置本身会触发 selectedCouponId 监听刷新预览，避免重复请求）
+    let resetTriggeredWatch = false
     if (selectedCouponId.value) {
       const found = list.find((c) => c.id === selectedCouponId.value)
       if (!found || !found.isApplicable) {
         selectedCouponId.value = undefined
+        resetTriggeredWatch = true
       }
     }
-    await updatePreview()
+    if (!resetTriggeredWatch) {
+      await updatePreview()
+    }
   } catch {
-    userCoupons.value = []
+    if (seq === couponSeq) userCoupons.value = []
   } finally {
-    couponLoading.value = false
+    if (seq === couponSeq) couponLoading.value = false
   }
 }
 
 async function updatePreview() {
-  if (!form.serviceId || !form.durationMinutes) return
+  const seq = ++previewSeq
+  if (!form.serviceId || !form.durationMinutes) {
+    previewResult.value = null
+    return
+  }
   try {
     const res = await previewCoupon(form.serviceId, form.durationMinutes, selectedCouponId.value)
+    if (seq !== previewSeq) return
     previewResult.value = res
   } catch {
-    previewResult.value = null
+    if (seq === previewSeq) previewResult.value = null
   }
 }
 
 watch(
   () => [form.serviceId, form.durationMinutes],
   () => {
-    refreshCouponsAndPreview()
+    void refreshCouponsAndPreview()
   },
 )
 
 watch(selectedCouponId, () => {
-  updatePreview()
+  void updatePreview()
 })
 
 async function handleSubmit() {
-  if (invalidEntry.value) return
+  if (invalidEntry.value || submitting.value) return
   const service = selectedService.value
   if (!service) {
     ElMessage.warning('请先选择服务项目')
@@ -283,7 +304,9 @@ async function handleSubmit() {
     })
     ElMessage.success('订单已创建，请尽快支付')
     initialFormSnapshot.value = formSnapshot()
-    router.push(`/payment/${order.id}`)
+    await router.push(`/payment/${order.id}`)
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     submitting.value = false
   }
@@ -297,7 +320,7 @@ onMounted(async () => {
     return
   }
   // 档期预检数据：失败不影响下单流程（后端仍会兜底校验）
-  listPublicAvailabilities(companionUserId.value, 7)
+  listPublicAvailabilities(companionUserId.value, 28)
     .then((slots) => { availabilities.value = slots; availabilityLoaded.value = true })
     .catch(() => { availabilityLoaded.value = false })
   try {
@@ -328,6 +351,8 @@ onMounted(async () => {
     }
     await refreshCouponsAndPreview()
     initialFormSnapshot.value = formSnapshot()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     loading.value = false
   }
@@ -471,7 +496,12 @@ onBeforeRouteLeave(async () => {
                       style="width: 180px"
                       @change="updateAppointmentStart"
                     />
-                    <span class="text-muted" style="font-size: 0.8125rem">今天上号时间</span>
+                    <span
+                      class="text-muted"
+                      :style="{ fontSize: '0.8125rem', color: rolledToTomorrow ? '#d97706' : undefined }"
+                    >
+                      {{ rolledToTomorrow ? '今日该时段已过，已自动顺延至明天' : '今天上号时间' }}
+                    </span>
                   </div>
                 </div>
 
@@ -530,6 +560,7 @@ onBeforeRouteLeave(async () => {
                   <el-date-picker
                     v-model="form.appointmentStart"
                     type="datetime"
+                    value-format="YYYY-MM-DD HH:mm:ss"
                     placeholder="点击选择预约具体开始时间"
                     :disabled-date="(d: Date) => d.getTime() < dayjs().startOf('day').valueOf()"
                     style="width: 100%"

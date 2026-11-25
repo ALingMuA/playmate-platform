@@ -4,7 +4,10 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.gameplay.announcement.dto.AnnouncementView;
 import com.gameplay.announcement.service.AnnouncementService;
 import com.gameplay.common.api.ApiResponse;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 公告公开查看接口（FR-A08：仅已发布，游客可访问）。
  */
+@Validated
 @RestController
 @RequestMapping("/api/announcements")
 @RequiredArgsConstructor
@@ -23,8 +27,8 @@ public class AnnouncementController {
 
     /** 已发布公告分页 */
     @GetMapping
-    public ApiResponse<Page<AnnouncementView>> list(@RequestParam(defaultValue = "1") long page,
-                                                    @RequestParam(defaultValue = "10") long size) {
+    public ApiResponse<Page<AnnouncementView>> list(@RequestParam(defaultValue = "1") @Min(1) long page,
+                                                    @RequestParam(defaultValue = "10") @Min(1) @Max(100) long size) {
         return ApiResponse.ok(announcementService.publicPage(page, size));
     }
 

@@ -9,8 +9,8 @@
  */
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { csSocket } from '@/utils/ws'
+import { ElMessage, type TagProps } from 'element-plus'
+import { csSocket, type WsConnectionState } from '@/utils/ws'
 import {
   conversationDetail,
   conversationMessages,
@@ -38,6 +38,7 @@ const messages = ref<MessageView[]>([])
 const notes = ref<InternalNoteView[]>([])
 const me = ref<CsAccountView | null>(null)
 const loading = ref(false)
+const claiming = ref(false)
 const sending = ref(false)
 const input = ref('')
 const sendError = ref('')
@@ -45,9 +46,12 @@ const pendingClientMsgId = ref('')
 const pendingText = ref('')
 const msgListRef = ref<HTMLElement | null>(null)
 let sendAckTimer: ReturnType<typeof setTimeout> | null = null
+let loadSeq = 0
+let wsConnectedOnce = false
+let needResyncOnOpen = false
 
 /** 会话状态展示映射 */
-const statusMap: Record<string, { label: string; type: string }> = {
+const statusMap: Record<string, { label: string; type: TagProps['type'] }> = {
   AI_PROCESSING: { label: 'AI 处理中', type: 'warning' },
   WAITING_HUMAN: { label: '等待人工', type: 'info' },
   HUMAN_PROCESSING: { label: '人工处理中', type: 'primary' },
@@ -96,31 +100,61 @@ function mergeMessage(m: MessageView) {
 // ==================== 加载 ====================
 
 async function load() {
+  const id = conversationId.value
+  if (!Number.isFinite(id) || id <= 0) return
+  const seq = ++loadSeq
   loading.value = true
   try {
     const [detail, list, my, noteList] = await Promise.all([
-      conversationDetail(conversationId.value),
-      conversationMessages(conversationId.value),
+      conversationDetail(id),
+      conversationMessages(id),
       csMe(),
-      csNotes(conversationId.value),
+      csNotes(id),
     ])
+    if (seq !== loadSeq || conversationId.value !== id) return
     conv.value = detail
     messages.value = list
     me.value = my
     notes.value = noteList
     nextTick(scrollBottom)
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
+  }
+}
+
+async function syncMissedMessages() {
+  const id = conversationId.value
+  if (!conv.value || conv.value.id !== id) return
+  const lastId = messages.value.reduce((max, m) => Math.max(max, m.messageId), 0)
+  try {
+    const [detail, list] = await Promise.all([
+      conversationDetail(id, true),
+      conversationMessages(id, lastId, 50, true),
+    ])
+    if (conversationId.value !== id) return
+    conv.value = detail
+    list.forEach(mergeMessage)
+  } catch {
+    // 断线重连补拉失败时不额外弹窗打断操作
   }
 }
 
 // ==================== 领取（FR-C25） ====================
 
 async function handleClaim() {
-  if (!conv.value) return
-  await csClaim(conv.value.id, conv.value.version)
-  ElMessage.success('会话已领取')
-  await load()
+  if (!conv.value || claiming.value) return
+  claiming.value = true
+  try {
+    await csClaim(conv.value.id, conv.value.version)
+    ElMessage.success('会话已领取')
+    await load()
+  } catch {
+    // http.ts 已统一提示错误
+  } finally {
+    claiming.value = false
+  }
 }
 
 // ==================== 发送回复（FR-C26） ====================
@@ -177,6 +211,7 @@ const noteInput = ref('')
 const noteSubmitting = ref(false)
 
 async function handleAddNote() {
+  if (noteSubmitting.value) return
   if (!noteInput.value.trim()) {
     ElMessage.warning('请输入备注内容')
     return
@@ -187,6 +222,8 @@ async function handleAddNote() {
     noteInput.value = ''
     notes.value = await csNotes(conversationId.value)
     ElMessage.success('备注已添加')
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     noteSubmitting.value = false
   }
@@ -199,6 +236,7 @@ const escalateReason = ref('')
 const escalating = ref(false)
 
 async function handleEscalate() {
+  if (escalating.value) return
   if (!escalateReason.value.trim()) {
     ElMessage.warning('请填写转交原因')
     return
@@ -207,7 +245,10 @@ async function handleEscalate() {
   try {
     conv.value = await csEscalate(conversationId.value, escalateReason.value.trim())
     escalateVisible.value = false
+    escalateReason.value = ''
     ElMessage.success('已转交管理员处理')
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     escalating.value = false
   }
@@ -221,6 +262,7 @@ const closing = ref(false)
 const categoryOptions = ['已解决', '用户取消', '转线下处理', '未解决需跟进', '其他']
 
 async function handleClose() {
+  if (closing.value) return
   if (!closeForm.result.trim()) {
     ElMessage.warning('请填写处理结果')
     return
@@ -229,7 +271,10 @@ async function handleClose() {
   try {
     conv.value = await csClose(conversationId.value, closeForm.category, closeForm.result.trim())
     closeVisible.value = false
+    closeForm.result = ''
     ElMessage.success('会话已关闭')
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     closing.value = false
   }
@@ -264,22 +309,55 @@ function onWsMessage(msg: Parameters<Parameters<typeof csSocket.onMessage>[0]>[0
 }
 
 let unsubscribe: (() => void) | null = null
+let unsubscribeConnection: (() => void) | null = null
+
+function onConnectionState(state: WsConnectionState) {
+  if (state === 'OPEN') {
+    if (!wsConnectedOnce) {
+      wsConnectedOnce = true
+      return
+    }
+    if (needResyncOnOpen) {
+      needResyncOnOpen = false
+      void syncMissedMessages()
+    }
+    return
+  }
+  if (state === 'CLOSED' && wsConnectedOnce) {
+    needResyncOnOpen = true
+    if (sending.value) {
+      if (sendAckTimer) clearTimeout(sendAckTimer)
+      sendAckTimer = null
+      sending.value = false
+      sendError.value = '实时连接已断开，请点击发送重试。'
+    }
+  }
+}
 
 onMounted(() => {
   unsubscribe = csSocket.onMessage(onWsMessage)
+  unsubscribeConnection = csSocket.onConnectionState(onConnectionState)
   const token = localStorage.getItem('token')
   if (token) csSocket.connect(token)
-  load()
+  void load()
 })
 
 onUnmounted(() => {
   if (sendAckTimer) clearTimeout(sendAckTimer)
   unsubscribe?.()
+  unsubscribeConnection?.()
   csSocket.close()
 })
 
-// 路由参数变化（切换会话）时重新加载
-watch(conversationId, () => load())
+// 路由参数变化（切换会话）时重置临时状态并重新加载
+watch(conversationId, () => {
+  clearPendingSend()
+  input.value = ''
+  noteVisible.value = false
+  escalateVisible.value = false
+  closeVisible.value = false
+  void load()
+})
 </script>
 
 <template>
@@ -289,7 +367,7 @@ watch(conversationId, () => load())
       <div class="info-left">
         <el-button text @click="router.push('/cs/queue')">← 返回队列</el-button>
         <b class="conv-no">{{ conv.conversationNo }}</b>
-        <el-tag :type="(statusMap[conv.conversationStatus]?.type as any) ?? 'info'" size="small">
+        <el-tag :type="statusMap[conv.conversationStatus]?.type ?? 'info'" size="small">
           {{ statusMap[conv.conversationStatus]?.label ?? conv.conversationStatus }}
         </el-tag>
         <el-tag size="small" type="info" effect="plain">{{ sourceMap[conv.sourceType] ?? conv.sourceType }}</el-tag>
@@ -300,7 +378,7 @@ watch(conversationId, () => load())
         </span>
       </div>
       <div class="info-actions">
-        <el-button v-if="canClaim" type="primary" size="small" @click="handleClaim">领取会话</el-button>
+        <el-button v-if="canClaim" type="primary" size="small" :loading="claiming" :disabled="claiming" @click="handleClaim">领取会话</el-button>
         <el-button v-if="isMine && !isClosed" size="small" type="warning" plain @click="noteVisible = true">
           内部备注
         </el-button>
@@ -335,19 +413,21 @@ watch(conversationId, () => load())
       </div>
 
       <!-- 输入区 -->
-      <div class="input-bar" v-if="!isClosed">
-        <el-input
-          v-model="input"
-          type="textarea"
-          :rows="2"
-          maxlength="4000"
-          :placeholder="sendError || '输入回复内容，Enter 发送（Shift+Enter 换行）'"
-          :disabled="sending"
-          @keydown.enter.exact.prevent="handleSend"
-        />
-        <el-button type="primary" :disabled="sending" @click="handleSend">发送</el-button>
-      </div>
-      <div v-if="sendError" class="send-error" role="alert">{{ sendError }} 输入内容已保留，请点击发送重试。</div>
+      <template v-if="!isClosed">
+        <div class="input-bar">
+          <el-input
+            v-model="input"
+            type="textarea"
+            :rows="2"
+            maxlength="4000"
+            :placeholder="sendError || '输入回复内容，Enter 发送（Shift+Enter 换行）'"
+            :disabled="sending"
+            @keydown.enter.exact.prevent="handleSend"
+          />
+          <el-button type="primary" :disabled="sending" @click="handleSend">发送</el-button>
+        </div>
+        <div v-if="sendError" class="send-error" role="alert">{{ sendError }} 输入内容已保留，请点击发送重试。</div>
+      </template>
       <div v-else class="closed-tip">会话已关闭{{ conv.closedAt ? '于 ' + fmtTime(conv.closedAt) : '' }}</div>
     </el-card>
 
@@ -512,6 +592,11 @@ watch(conversationId, () => load())
 }
 .input-bar .el-textarea {
   flex: 1;
+}
+.send-error {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #f56c6c;
 }
 .closed-tip {
   margin-top: 12px;

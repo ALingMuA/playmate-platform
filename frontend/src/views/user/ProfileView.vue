@@ -89,6 +89,8 @@ async function load() {
     companionProfile.value = isCompanion.value ? await myProfile(true).catch(() => null) : null
     activeTab.value = readHashTab(route.hash)
     visitedTabs.value = new Set([...visitedTabs.value, activeTab.value])
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     loading.value = false
   }
@@ -127,20 +129,25 @@ async function handleAvatarUpload(file: File) {
 }
 
 async function handleSaveProfile() {
+  if (saving.value) return
   if (!editForm.nickname.trim()) {
     ElMessage.warning('昵称不能为空')
     return
   }
   saving.value = true
   try {
-    user.value = await updateProfile({
+    const updated = await updateProfile({
       nickname: editForm.nickname.trim(),
       avatarUrl: editForm.avatarUrl,
       gender: editForm.gender,
       introduction: editForm.introduction,
     })
+    user.value = updated
+    userStore.user = updated
     ElMessage.success('资料已更新')
     editVisible.value = false
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     saving.value = false
   }
@@ -152,7 +159,14 @@ const pwdVisible = ref(false)
 const changingPwd = ref(false)
 const pwdForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
 
+function resetPwdForm() {
+  pwdForm.oldPassword = ''
+  pwdForm.newPassword = ''
+  pwdForm.confirmPassword = ''
+}
+
 async function handleChangePassword() {
+  if (changingPwd.value) return
   if (!pwdForm.oldPassword || !pwdForm.newPassword) {
     ElMessage.warning('请填写完整')
     return
@@ -166,8 +180,12 @@ async function handleChangePassword() {
     const result = await changePassword(pwdForm.oldPassword, pwdForm.newPassword)
     userStore.setToken(result.token)
     user.value = result.user
+    userStore.user = result.user
     ElMessage.success('密码修改成功')
     pwdVisible.value = false
+    resetPwdForm()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     changingPwd.value = false
   }
@@ -175,20 +193,30 @@ async function handleChangePassword() {
 
 // ==================== 账号安全（FR-A06） ====================
 
+const loggingOutAll = ref(false)
+
 async function handleLogoutAll() {
+  if (loggingOutAll.value) return
+  loggingOutAll.value = true
   try {
-    await ElMessageBox.confirm(
-      '注销后所有设备的登录状态将立即失效，需要重新登录。确定继续吗？',
-      '注销全部会话',
-      { type: 'warning', confirmButtonText: '确定注销', cancelButtonText: '再想想' },
-    )
+    try {
+      await ElMessageBox.confirm(
+        '注销后所有设备的登录状态将立即失效，需要重新登录。确定继续吗？',
+        '注销全部会话',
+        { type: 'warning', confirmButtonText: '确定注销', cancelButtonText: '再想想' },
+      )
+    } catch {
+      return
+    }
+    await logoutAll()
+    userStore.logout()
+    ElMessage.success('已注销全部会话')
+    await router.push('/login')
   } catch {
-    return
+    // http.ts 已统一提示错误
+  } finally {
+    loggingOutAll.value = false
   }
-  await logoutAll()
-  userStore.logout()
-  ElMessage.success('已注销全部会话')
-  router.push('/login')
 }
 
 function handleLogout() {
@@ -344,7 +372,7 @@ watch(() => route.hash, (hash) => {
     </el-dialog>
 
     <!-- 修改密码对话框 -->
-    <el-dialog v-model="pwdVisible" title="修改密码" width="480px">
+    <el-dialog v-model="pwdVisible" title="修改密码" width="480px" @close="resetPwdForm">
       <el-form label-width="90px">
         <el-form-item label="原密码" required>
           <el-input v-model="pwdForm.oldPassword" type="password" show-password />

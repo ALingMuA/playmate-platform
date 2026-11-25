@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 找陪玩（对齐 frontend-prototype companions.html：筛选栏 + 陪玩师卡片 + 分页）。
+ * 找陪玩（对齐 docs/06-原型与架构图/frontend-prototype/companions.html：筛选栏 + 陪玩师卡片 + 分页）。
  *
  * <p>列表展示陪玩师维度（FR-U02）：只出现认证通过且存在在架可预约服务的陪玩师；
  * 支持按游戏筛选（该游戏下有在架服务）与分页，从游戏列表页携带 gameId 进入时自动预选。

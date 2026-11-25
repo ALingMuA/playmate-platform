@@ -23,17 +23,39 @@ public interface OrderTimeSlotMapper extends BaseMapper<OrderTimeSlot> {
             FROM order_time_slot
             WHERE companion_user_id = #{companionUserId}
               AND slot_status IN ('TEMPORARY', 'EFFECTIVE')
-              AND (expire_at IS NULL OR expire_at > NOW())
+              AND (slot_status = 'EFFECTIVE' OR expire_at IS NULL OR expire_at > #{now})
               AND start_at < #{endAt}
               AND end_at > #{startAt}
             FOR UPDATE
             """)
     List<OrderTimeSlot> selectConflictSlotsForUpdate(@Param("companionUserId") Long companionUserId,
                                                      @Param("startAt") LocalDateTime startAt,
-                                                     @Param("endAt") LocalDateTime endAt);
+                                                     @Param("endAt") LocalDateTime endAt,
+                                                     @Param("now") LocalDateTime now);
 
-    /** 按订单更新占用状态 */
-    @Update("UPDATE order_time_slot SET slot_status = #{status}, updated_at = NOW() WHERE order_id = #{orderId} AND slot_status = #{fromStatus}")
+    /** 只读查询与给定时段重叠的未释放占用记录（不加锁，供公开可约时段扣减） */
+    @Select("""
+            SELECT id, order_id, companion_user_id, start_at, end_at, slot_status, expire_at
+            FROM order_time_slot
+            WHERE companion_user_id = #{companionUserId}
+              AND slot_status IN ('TEMPORARY', 'EFFECTIVE')
+              AND (slot_status = 'EFFECTIVE' OR expire_at IS NULL OR expire_at > #{now})
+              AND start_at < #{endAt}
+              AND end_at > #{startAt}
+            """)
+    List<OrderTimeSlot> selectActiveSlots(@Param("companionUserId") Long companionUserId,
+                                          @Param("startAt") LocalDateTime startAt,
+                                          @Param("endAt") LocalDateTime endAt,
+                                          @Param("now") LocalDateTime now);
+
+    /** 按订单更新占用状态（转为 EFFECTIVE 时清空临时过期时间 expire_at） */
+    @Update("""
+            UPDATE order_time_slot
+            SET slot_status = #{status},
+                expire_at = CASE WHEN #{status} = 'EFFECTIVE' THEN NULL ELSE expire_at END,
+                updated_at = NOW()
+            WHERE order_id = #{orderId} AND slot_status = #{fromStatus}
+            """)
     int updateStatusByOrder(@Param("orderId") Long orderId,
                             @Param("fromStatus") String fromStatus,
                             @Param("status") String status);

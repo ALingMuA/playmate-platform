@@ -2,7 +2,7 @@
 /**
  * 用户端 - 投诉与售后详情页（FR-U19 售后进度）。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { complaintDetail, type Complaint } from '@/api/review'
 
@@ -57,8 +57,13 @@ function fmtMoney(cents?: number): string {
   return '¥' + (cents / 100).toFixed(2)
 }
 
+let loadSeq = 0
+
 async function load() {
-  if (!complaintId.value || isNaN(complaintId.value)) {
+  const id = complaintId.value
+  const seq = ++loadSeq
+  complaint.value = null
+  if (!id || isNaN(id)) {
     failed.value = true
     errorMessage.value = '无效的投诉编号'
     loading.value = false
@@ -67,16 +72,22 @@ async function load() {
   loading.value = true
   failed.value = false
   try {
-    complaint.value = await complaintDetail(complaintId.value)
-  } catch (err: any) {
+    const data = await complaintDetail(id)
+    if (seq !== loadSeq || complaintId.value !== id) return
+    complaint.value = data
+  } catch (err: unknown) {
+    if (seq !== loadSeq) return
     failed.value = true
-    errorMessage.value = err?.message || '投诉不存在或无权访问'
+    errorMessage.value = err instanceof Error ? err.message : '投诉不存在或无权访问'
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
 onMounted(load)
+watch(complaintId, () => {
+  void load()
+})
 </script>
 
 <template>

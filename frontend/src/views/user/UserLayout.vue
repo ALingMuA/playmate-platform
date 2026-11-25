@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 用户端统一布局（对齐 frontend-prototype 原型：site-header + site-footer）。
+ * 用户端统一布局（对齐 docs/06-原型与架构图/frontend-prototype/ 原型：site-header + site-footer）。
  *
  * <p>导航：首页 / 游戏 / 找陪玩 / 我的订单 / 客服；
  * 右侧按登录态展示登录按钮或用户菜单（个人中心、角色工作台入口、退出）。
@@ -73,9 +73,16 @@ onMounted(() => {
 
 function handleLogout() {
   userStore.logout()
-  notificationStore.clearUnread()
   ElMessage.success('已退出登录')
   router.push('/')
+}
+
+function handleUserMenuCommand(cmd: string) {
+  if (cmd === '__logout__') {
+    handleLogout()
+    return
+  }
+  router.push(cmd)
 }
 
 function goLogin() {
@@ -88,10 +95,10 @@ function goLogin() {
     <!-- 顶部导航（原型 site-header） -->
     <header class="site-header">
       <div class="container header-inner">
-        <div class="brand" @click="router.push('/')">
-          <span class="brand-icon">🎮</span>
+        <router-link to="/" class="brand" aria-label="返回首页">
+          <span class="brand-icon" aria-hidden="true">🎮</span>
           <span>游戏陪玩</span>
-        </div>
+        </router-link>
 
         <nav class="main-nav">
           <router-link to="/" :class="{ active: activeMenu === '/' }">首页</router-link>
@@ -109,23 +116,26 @@ function goLogin() {
           </template>
           <!-- 已登录：通知图标与用户菜单 -->
           <template v-else>
-            <div
-              class="bell-trigger"
-              title="消息中心"
-              @click="router.push('/messages?tab=notifications')"
-            >
+            <div class="bell-trigger">
               <el-badge :value="unreadCount" :max="99" :hidden="unreadCount === 0" class="bell-badge">
-                <el-button circle :icon="Bell" class="bell-btn" />
+                <el-button
+                  circle
+                  :icon="Bell"
+                  class="bell-btn"
+                  aria-label="消息中心"
+                  title="消息中心"
+                  @click="router.push('/messages?tab=notifications')"
+                />
               </el-badge>
             </div>
 
-            <el-dropdown trigger="click" @command="(cmd: string) => router.push(cmd)">
-              <div class="user-trigger">
+            <el-dropdown trigger="click" @command="handleUserMenuCommand">
+              <button type="button" class="user-trigger" aria-label="打开用户菜单">
                 <el-avatar :size="32" :src="user?.avatarUrl || undefined" class="user-avatar">
                   {{ user?.nickname?.charAt(0) ?? '游' }}
                 </el-avatar>
                 <span class="user-name">{{ user?.nickname ?? user?.username ?? '' }}</span>
-              </div>
+              </button>
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="/profile">个人中心</el-dropdown-item>
@@ -149,8 +159,8 @@ function goLogin() {
                   <el-dropdown-item v-for="w in workbenches" :key="w.path" :command="w.path" divided>
                     {{ w.label }}
                   </el-dropdown-item>
-                  <el-dropdown-item divided>
-                    <span class="logout-item" @click.stop="handleLogout">退出登录</span>
+                  <el-dropdown-item command="__logout__" divided>
+                    <span class="logout-item">退出登录</span>
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -217,11 +227,13 @@ main {
   align-items: center;
   gap: 12px;
 }
+.brand {
+  text-decoration: none;
+}
 .bell-trigger {
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
 }
 .bell-btn {
   border: 1px solid var(--border, #e2e8f0);
@@ -240,6 +252,9 @@ main {
   gap: 8px;
   cursor: pointer;
   padding: 4px 8px;
+  border: none;
+  background: transparent;
+  font: inherit;
   border-radius: var(--radius);
   transition: background 0.15s;
 }

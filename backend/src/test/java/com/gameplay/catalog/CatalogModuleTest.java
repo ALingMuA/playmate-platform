@@ -9,7 +9,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.transaction.AfterTransaction;
+import org.springframework.test.context.transaction.BeforeTransaction;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,6 +49,22 @@ class CatalogModuleTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private long maxOperationLogIdBeforeTx;
+
+    @BeforeTransaction
+    void snapshotOperationLogWatermark() {
+        Long maxId = jdbcTemplate.queryForObject("SELECT COALESCE(MAX(id), 0) FROM operation_log", Long.class);
+        maxOperationLogIdBeforeTx = maxId == null ? 0L : maxId;
+    }
+
+    @AfterTransaction
+    void cleanupOperationLogsCreatedDuringTest() {
+        jdbcTemplate.update("DELETE FROM operation_log WHERE id > ?", maxOperationLogIdBeforeTx);
+    }
 
     /** 生成唯一后缀，避免与种子/历史数据冲突 */
     private String uniqueSuffix() {
@@ -265,6 +284,40 @@ class CatalogModuleTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(tagBody("坏分类" + suffix, "INVALID_CAT", 0, 1, 1)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    @DisplayName("目录安全校验：含关联标签的游戏禁止删除，且拒绝非法图标 URL")
+    void game_with_tags_cannot_be_deleted_and_invalid_icon_url_rejected() throws Exception {
+        String token = adminToken();
+        String suffix = uniqueSuffix();
+
+        MvcResult createdGame = mockMvc.perform(post("/api/admin/games")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(gameBody("含标签游戏" + suffix, "", "测试", 1, 1)))
+                .andExpect(status().isOk())
+                .andReturn();
+        long gameId = objectMapper.readTree(createdGame.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/admin/tags")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(tagBody("专属标签" + suffix, "POSITION", gameId, 1, 1)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(delete("/api/admin/games/{id}", gameId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CATALOG_IN_USE"));
+
+        mockMvc.perform(post("/api/admin/games")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(gameBody("坏图标游戏" + suffix, "javascript:alert(1)", "测试", 1, 1)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
     }

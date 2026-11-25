@@ -7,6 +7,7 @@ import com.gameplay.auth.mapper.UserMapper;
 import com.gameplay.common.enums.OrderStatus;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
+import com.gameplay.coupon.service.CouponService;
 import com.gameplay.order.domain.PlayOrder;
 import com.gameplay.order.mapper.PlayOrderMapper;
 import com.gameplay.order.domain.OrderDeliveryEvidence;
@@ -31,7 +32,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 投诉与仲裁领域服务（FR-U17~U19、FR-M18/M19）。
@@ -53,6 +61,7 @@ public class ComplaintService {
     private final UserMapper userMapper;
     private final OrderService orderService;
     private final WalletService walletService;
+    private final CouponService couponService;
     private final NotificationService notificationService;
 
     /** 发起投诉（FR-U17/U18）：校验订单资格并转入售后 */
@@ -71,13 +80,13 @@ public class ComplaintService {
         if (!order.getUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.PERMISSION_DATA_SCOPE_DENIED);
         }
-        // 已有进行中的投诉时优先提示（同一订单只能有一条进行中投诉）
-        if (complaintMapper.countActiveByOrder(order.getId()) > 0) {
+        // 同一订单仅允许发起一次投诉（拦截进行中及已仲裁后的重复投诉）
+        if (complaintMapper.countByOrder(order.getId()) > 0) {
             throw new BusinessException(ErrorCode.COMPLAINT_ALREADY_EXISTS);
         }
-        // 资格：待确认完成 或 完成后72小时内（FR-U17）
+        // 资格：服务中、待确认完成 或 完成后72小时内（FR-U17）
         boolean eligible = switch (order.status()) {
-            case WAITING_CONFIRMATION -> true;
+            case IN_SERVICE, WAITING_CONFIRMATION -> true;
             case COMPLETED -> order.getConfirmedAt() != null
                     && LocalDateTime.now().isBefore(order.getConfirmedAt().plusHours(COMPLAINT_WINDOW_HOURS));
             default -> false;
@@ -120,11 +129,18 @@ public class ComplaintService {
 
     /** 我的投诉分页（FR-U19 售后进度） */
     public Page<ComplaintView> listMine(Long userId, long page, long size) {
-        Page<Complaint> p = complaintMapper.selectPage(
-                new Page<>(page, size),
-                new LambdaQueryWrapper<Complaint>()
-                        .eq(Complaint::getComplainantUserId, userId)
-                        .orderByDesc(Complaint::getId));
+        return listMine(userId, null, page, size);
+    }
+
+    /** 我的投诉分页（FR-U19 售后进度，支持状态筛选） */
+    public Page<ComplaintView> listMine(Long userId, String status, long page, long size) {
+        LambdaQueryWrapper<Complaint> wrapper = new LambdaQueryWrapper<Complaint>()
+                .eq(Complaint::getComplainantUserId, userId)
+                .orderByDesc(Complaint::getId);
+        if (status != null && !status.isBlank()) {
+            wrapper.eq(Complaint::getComplaintStatus, status.trim().toUpperCase());
+        }
+        Page<Complaint> p = complaintMapper.selectPage(new Page<>(page, size), wrapper);
         Page<ComplaintView> vp = toViewPage(p);
         vp.getRecords().forEach(v -> v.setHandledBy(null));
         return vp;
@@ -186,7 +202,7 @@ public class ComplaintService {
                 && !ComplaintStatus.PROCESSING.name().equals(complaint.getComplaintStatus())) {
             throw new BusinessException(ErrorCode.COMPLAINT_STATUS_INVALID);
         }
-        PlayOrder order = orderMapper.selectById(complaint.getOrderId());
+        PlayOrder order = orderMapper.selectByIdForUpdate(complaint.getOrderId());
         if (order == null) {
             throw new BusinessException(ErrorCode.ORDER_NOT_FOUND);
         }
@@ -201,17 +217,33 @@ public class ComplaintService {
                 orderService.resolveAfterSales(order.getId(), OrderStatus.COMPLETED, opinion, adminId);
             }
             case FULL_REFUND -> {
-                // 全额退款：已结算收益从陪玩师钱包扣回，订单关闭
+                // 全额退款：已结算收益从陪玩师钱包扣回，退还买家资金与已核销优惠券，订单关闭
                 if (walletService.isSettled(order)) {
                     walletService.deductSettledIncome(order, opinion, adminId);
                 }
                 walletService.refund(order, "投诉全额退款：" + opinion, adminId);
+                couponService.refundUsedCoupon(order.getId());
                 orderService.resolveAfterSales(order.getId(), OrderStatus.CLOSED, opinion, adminId);
             }
             case PARTIAL_REFUND -> {
-                // 部分退款：退还指定金额，订单回到已完成
-                walletService.refundAmount(order, req.getRefundAmountCents() == null
-                        ? 0L : req.getRefundAmountCents(), opinion, adminId);
+                long refundCents = req.getRefundAmountCents() == null ? 0L : req.getRefundAmountCents();
+                if (refundCents <= 0 || order.getTotalAmountCents() == null || refundCents > order.getTotalAmountCents()) {
+                    throw new BusinessException(ErrorCode.COMPLAINT_REFUND_AMOUNT_INVALID);
+                }
+                long settlementAmount = (order.getSettlementAmountCents() != null && order.getSettlementAmountCents() > 0)
+                        ? order.getSettlementAmountCents() : order.getTotalAmountCents();
+                walletService.refundAmount(order, refundCents, complaint.getId(), opinion, adminId);
+                if (!walletService.isSettled(order)) {
+                    long netShare = Math.max(0L, settlementAmount - refundCents);
+                    if (netShare > 0) {
+                        walletService.settleAmount(order, netShare, adminId);
+                    }
+                } else {
+                    long clawback = Math.min(refundCents, settlementAmount);
+                    if (clawback > 0) {
+                        walletService.deductSettledIncomeAmount(order, clawback, complaint.getId(), opinion, adminId);
+                    }
+                }
                 orderService.resolveAfterSales(order.getId(), OrderStatus.COMPLETED, opinion, adminId);
             }
             default -> throw new BusinessException(ErrorCode.VALIDATION_FAILED, "处理类型不合法");
@@ -244,7 +276,45 @@ public class ComplaintService {
 
     private Page<ComplaintView> toViewPage(Page<Complaint> p) {
         Page<ComplaintView> result = new Page<>(p.getCurrent(), p.getSize(), p.getTotal());
-        result.setRecords(p.getRecords().stream().map(c -> toView(c, false)).toList());
+        List<Complaint> records = p.getRecords();
+        if (records.isEmpty()) {
+            result.setRecords(List.of());
+            return result;
+        }
+        Set<Long> orderIds = records.stream().map(Complaint::getOrderId).filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, PlayOrder> orderMap = orderIds.isEmpty() ? Collections.emptyMap() :
+                orderMapper.selectBatchIds(orderIds).stream()
+                        .collect(Collectors.toMap(PlayOrder::getId, Function.identity(), (a, b) -> a));
+        Set<Long> userIds = new LinkedHashSet<>();
+        for (Complaint c : records) {
+            if (c.getComplainantUserId() != null) {
+                userIds.add(c.getComplainantUserId());
+            }
+        }
+        for (PlayOrder o : orderMap.values()) {
+            if (o.getCompanionUserId() != null) {
+                userIds.add(o.getCompanionUserId());
+            }
+        }
+        Map<Long, User> userMap = userIds.isEmpty() ? Collections.emptyMap() :
+                userMapper.selectBatchIds(userIds).stream()
+                        .collect(Collectors.toMap(User::getId, Function.identity(), (a, b) -> a));
+
+        Set<Long> complaintIds = records.stream().map(Complaint::getId).filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, List<ComplaintEvidence>> evidenceMap = complaintIds.isEmpty() ? Collections.emptyMap() :
+                evidenceMapper.selectList(new LambdaQueryWrapper<ComplaintEvidence>()
+                                .in(ComplaintEvidence::getComplaintId, complaintIds)
+                                .orderByAsc(ComplaintEvidence::getSortNo))
+                        .stream()
+                        .collect(Collectors.groupingBy(ComplaintEvidence::getComplaintId));
+
+        result.setRecords(records.stream().map(c -> {
+            PlayOrder order = orderMap.get(c.getOrderId());
+            User complainant = userMap.get(c.getComplainantUserId());
+            User companion = order == null ? null : userMap.get(order.getCompanionUserId());
+            List<ComplaintEvidence> evidences = evidenceMap.getOrDefault(c.getId(), List.of());
+            return buildView(c, order, complainant, companion, evidences, List.of());
+        }).toList());
         return result;
     }
 
@@ -268,6 +338,11 @@ public class ComplaintService {
                         .createdAt(e.getCreatedAt())
                         .build())
                 .toList() : List.of();
+        return buildView(c, order, complainant, companion, evidences, deliveryEvidences);
+    }
+
+    private ComplaintView buildView(Complaint c, PlayOrder order, User complainant, User companion,
+                                    List<ComplaintEvidence> evidences, List<DeliveryEvidenceView> deliveryEvidences) {
         return ComplaintView.builder()
                 .id(c.getId())
                 .orderId(c.getOrderId())

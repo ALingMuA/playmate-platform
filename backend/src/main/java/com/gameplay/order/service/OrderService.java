@@ -1,6 +1,7 @@
 package com.gameplay.order.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.gameplay.auth.entity.User;
 import com.gameplay.auth.mapper.UserMapper;
@@ -44,9 +45,16 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 订单领域服务：唯一状态迁移入口（概要设计 4.3、详细设计 3.1）。
@@ -101,11 +109,14 @@ public class OrderService {
         if (req.getCompanionUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.ORDER_SELF_BOOKING_FORBIDDEN);
         }
-        // 3. 陪玩师状态校验
-        CompanionProfile profile = companionProfileMapper.selectOne(
-                new LambdaQueryWrapper<CompanionProfile>()
-                        .eq(CompanionProfile::getUserId, req.getCompanionUserId()));
+        // 3. 陪玩师账号与接单资质校验（行锁陪玩师资料，串行化同一陪玩师的并发下单与档期变更）
+        User companionUser = userMapper.selectById(req.getCompanionUserId());
+        if (companionUser == null || !"ENABLED".equals(companionUser.getAccountStatus())) {
+            throw new BusinessException(ErrorCode.COMPANION_NOT_AVAILABLE);
+        }
+        CompanionProfile profile = companionProfileMapper.selectByUserIdForUpdate(req.getCompanionUserId());
         if (profile == null
+                || !"APPROVED".equals(profile.getCertificationStatus())
                 || !CompanionServiceStatus.AVAILABLE.name().equals(profile.getServiceStatus())) {
             throw new BusinessException(ErrorCode.COMPANION_NOT_AVAILABLE);
         }
@@ -122,13 +133,10 @@ public class OrderService {
         LocalDateTime endAt = startAt.plusMinutes(req.getDurationMinutes());
 
         // 5. 档期校验：可约档期须完全覆盖预约区间，且无有效订单占用冲突（详细设计 7.1）
-        checkAvailabilityAndSlotConflict(req.getCompanionUserId(), startAt, endAt);
+        checkAvailabilityAndSlotConflict(req.getCompanionUserId(), startAt, endAt, now);
 
-        // 6. 金额计算（按分钟比例计费，向上取整到分）
-        long originalAmount = service.getPriceCents() * req.getDurationMinutes() / 60L;
-        if (service.getPriceCents() * req.getDurationMinutes() % 60L != 0) {
-            originalAmount += 1;
-        }
+        // 6. 金额计算（按分钟比例计费，向上取整到分，防溢出）
+        long originalAmount = couponService.calculateOriginalAmount(service.getPriceCents(), req.getDurationMinutes());
 
         // 优惠券核算
         long discountAmount = 0L;
@@ -192,7 +200,7 @@ public class OrderService {
         return detailView(order);
     }
 
-    /** 模拟支付（FR-U09）：虚拟余额扣款，档期占用转有效 */
+    /** 模拟支付（FR-U09）：按 play_order -> companion_profile -> order_time_slot 锁序校验并发防重占，扣款后档期转有效 */
     @Transactional
     public OrderView pay(Long userId, Long orderId) {
         PlayOrder order = orderMapper.selectByIdForUpdate(orderId);
@@ -203,17 +211,40 @@ public class OrderService {
             throw new BusinessException(ErrorCode.PERMISSION_DATA_SCOPE_DENIED);
         }
         if (!OrderStatus.PENDING_PAYMENT.name().equals(order.getOrderStatus())) {
+            if (OrderStatus.CLOSED.name().equals(order.getOrderStatus())) {
+                throw new BusinessException(ErrorCode.ORDER_STATUS_INVALID, "订单已关闭，无法支付");
+            }
             throw new BusinessException(ErrorCode.ORDER_ALREADY_PAID);
         }
-        if (LocalDateTime.now().isAfter(order.getPayExpireAt())) {
+        LocalDateTime now = LocalDateTime.now();
+        if (now.isAfter(order.getPayExpireAt())) {
             throw new BusinessException(ErrorCode.ORDER_PAYMENT_EXPIRED);
         }
+        companionProfileMapper.selectByUserIdForUpdate(order.getCompanionUserId());
+        List<OrderTimeSlot> conflicts = slotMapper.selectConflictSlotsForUpdate(
+                order.getCompanionUserId(), order.getAppointmentStartAt(), order.getAppointmentEndAt(), now);
+        boolean hasOtherConflict = conflicts.stream().anyMatch(s -> !order.getId().equals(s.getOrderId()));
+        if (hasOtherConflict) {
+            throw new BusinessException(ErrorCode.SLOT_CONFLICT, "预约时段已被其他订单占用");
+        }
+        OrderTimeSlot ownSlot = slotMapper.selectOne(new LambdaQueryWrapper<OrderTimeSlot>()
+                .eq(OrderTimeSlot::getOrderId, order.getId()));
+        if (ownSlot == null || !SlotStatus.TEMPORARY.name().equals(ownSlot.getSlotStatus())) {
+            throw new BusinessException(ErrorCode.SLOT_CONFLICT, "订单档期占用已失效，无法支付");
+        }
         walletService.pay(order, userId);
+        int slotUpdated = slotMapper.updateStatusByOrder(
+                order.getId(), SlotStatus.TEMPORARY.name(), SlotStatus.EFFECTIVE.name());
+        if (slotUpdated != 1) {
+            throw new BusinessException(ErrorCode.SLOT_CONFLICT, "订单档期占用已失效，无法支付");
+        }
         couponService.useForOrder(order.getId());
         transition(order, OrderStatus.WAITING_ACCEPTANCE, userId, "USER", "PAY", "模拟支付成功");
-        order.setAcceptExpireAt(LocalDateTime.now().plusMinutes(ACCEPT_EXPIRE_MINUTES));
-        orderMapper.updateById(order);
-        slotMapper.updateStatusByOrder(order.getId(), SlotStatus.TEMPORARY.name(), SlotStatus.EFFECTIVE.name());
+        LocalDateTime acceptExpireAt = now.plusMinutes(ACCEPT_EXPIRE_MINUTES);
+        orderMapper.update(null, new LambdaUpdateWrapper<PlayOrder>()
+                .eq(PlayOrder::getId, order.getId())
+                .set(PlayOrder::getAcceptExpireAt, acceptExpireAt));
+        order.setAcceptExpireAt(acceptExpireAt);
         notificationService.record(
                 order.getCompanionUserId(),
                 "ORDER_STATUS",
@@ -231,6 +262,12 @@ public class OrderService {
     /** 接受订单（FR-P13，详细设计 2.4） */
     @Transactional
     public OrderView accept(Long companionUserId, Long orderId) {
+        return accept(companionUserId, orderId, null);
+    }
+
+    /** 接受订单（FR-P13，支持记录陪玩师接单备注） */
+    @Transactional
+    public OrderView accept(Long companionUserId, Long orderId, String companionRemark) {
         PlayOrder order = requireCompanionOrder(companionUserId, orderId);
         if (!OrderStatus.WAITING_ACCEPTANCE.name().equals(order.getOrderStatus())) {
             throw new BusinessException(ErrorCode.ORDER_STATUS_INVALID);
@@ -238,7 +275,10 @@ public class OrderService {
         if (LocalDateTime.now().isAfter(order.getAcceptExpireAt())) {
             throw new BusinessException(ErrorCode.ORDER_ACCEPT_EXPIRED);
         }
-        transition(order, OrderStatus.WAITING_SERVICE, companionUserId, "COMPANION", "ACCEPT", "接单成功");
+        String actionReason = (companionRemark != null && !companionRemark.isBlank())
+                ? "接单成功：" + companionRemark.trim()
+                : "接单成功";
+        transition(order, OrderStatus.WAITING_SERVICE, companionUserId, "COMPANION", "ACCEPT", actionReason);
         notificationService.record(
                 order.getUserId(),
                 "ORDER_STATUS",
@@ -251,7 +291,7 @@ public class OrderService {
         return detailView(order);
     }
 
-    /** 拒绝订单（FR-P14）：订单关闭并退还用户余额，释放档期 */
+    /** 拒绝订单（FR-P14）：订单关闭并退还用户余额与优惠券，释放档期 */
     @Transactional
     public OrderView reject(Long companionUserId, Long orderId, String reason) {
         PlayOrder order = requireCompanionOrder(companionUserId, orderId);
@@ -259,15 +299,19 @@ public class OrderService {
             throw new BusinessException(ErrorCode.ORDER_STATUS_INVALID);
         }
         walletService.refund(order, reason, companionUserId);
+        couponService.refundUsedCoupon(order.getId());
         transition(order, OrderStatus.CLOSED, companionUserId, "COMPANION", "REJECT", reason);
-        order.setClosedReason(reason);
-        orderMapper.updateById(order);
+        String safeReason = reason == null ? "" : reason;
+        orderMapper.update(null, new LambdaUpdateWrapper<PlayOrder>()
+                .eq(PlayOrder::getId, order.getId())
+                .set(PlayOrder::getClosedReason, safeReason));
+        order.setClosedReason(safeReason);
         releaseSlot(order.getId());
         notificationService.record(
                 order.getUserId(),
                 "ORDER_STATUS",
                 "订单已被陪玩师婉拒",
-                "您的订单【" + order.getOrderNo() + "】已被陪玩师婉拒，款项已全额退回您的钱包。原因：" + (reason == null ? "" : reason),
+                "您的订单【" + order.getOrderNo() + "】已被陪玩师婉拒，款项已全额退回您的钱包。原因：" + safeReason,
                 "ORDER",
                 order.getId(),
                 "ORDER:" + order.getId() + ":REJECTED"
@@ -282,13 +326,20 @@ public class OrderService {
         if (!OrderStatus.WAITING_SERVICE.name().equals(order.getOrderStatus())) {
             throw new BusinessException(ErrorCode.ORDER_STATUS_INVALID);
         }
-        if (LocalDateTime.now().isBefore(order.getAppointmentStartAt().minusMinutes(START_EARLY_MINUTES))) {
+        LocalDateTime now = LocalDateTime.now();
+        if (now.isBefore(order.getAppointmentStartAt().minusMinutes(START_EARLY_MINUTES))) {
             throw new BusinessException(ErrorCode.ORDER_START_TIME_INVALID,
                     "预约开始时间前 " + START_EARLY_MINUTES + " 分钟内才能开始服务");
         }
+        if (now.isAfter(order.getAppointmentEndAt().plusHours(24))) {
+            throw new BusinessException(ErrorCode.ORDER_START_TIME_INVALID,
+                    "已超过允许开始服务的最晚时间");
+        }
         transition(order, OrderStatus.IN_SERVICE, companionUserId, "COMPANION", "START", "开始服务");
-        order.setStartedAt(LocalDateTime.now());
-        orderMapper.updateById(order);
+        orderMapper.update(null, new LambdaUpdateWrapper<PlayOrder>()
+                .eq(PlayOrder::getId, order.getId())
+                .set(PlayOrder::getStartedAt, now));
+        order.setStartedAt(now);
         return detailView(order);
     }
 
@@ -319,8 +370,11 @@ public class OrderService {
             throw new BusinessException(ErrorCode.ORDER_STATUS_INVALID);
         }
         transition(order, OrderStatus.WAITING_CONFIRMATION, companionUserId, "COMPANION", "END", "结束服务");
-        order.setEndedAt(LocalDateTime.now());
-        orderMapper.updateById(order);
+        LocalDateTime endedAt = LocalDateTime.now();
+        orderMapper.update(null, new LambdaUpdateWrapper<PlayOrder>()
+                .eq(PlayOrder::getId, order.getId())
+                .set(PlayOrder::getEndedAt, endedAt));
+        order.setEndedAt(endedAt);
         int sortNo = 0;
         for (DeliveryEvidenceRequest evidence : safeEvidences) {
             OrderDeliveryEvidence entity = new OrderDeliveryEvidence();
@@ -358,16 +412,13 @@ public class OrderService {
         }
         walletService.settle(order, userId);
         transition(order, OrderStatus.COMPLETED, userId, "USER", "CONFIRM", "用户确认完成");
-        order.setConfirmedAt(LocalDateTime.now());
-        orderMapper.updateById(order);
-        // 累计陪玩师已完成订单数
-        CompanionProfile profile = companionProfileMapper.selectOne(
-                new LambdaQueryWrapper<CompanionProfile>()
-                        .eq(CompanionProfile::getUserId, order.getCompanionUserId()));
-        if (profile != null) {
-            profile.setCompletedOrderCount(profile.getCompletedOrderCount() + 1);
-            companionProfileMapper.updateById(profile);
-        }
+        LocalDateTime confirmedAt = LocalDateTime.now();
+        orderMapper.update(null, new LambdaUpdateWrapper<PlayOrder>()
+                .eq(PlayOrder::getId, order.getId())
+                .set(PlayOrder::getConfirmedAt, confirmedAt));
+        order.setConfirmedAt(confirmedAt);
+        // 原子累计陪玩师已完成订单数
+        companionProfileMapper.incrementCompletedOrderCount(order.getCompanionUserId());
         notificationService.record(
                 order.getCompanionUserId(),
                 "ORDER_STATUS",
@@ -392,26 +443,29 @@ public class OrderService {
         }
         boolean paid = switch (order.status()) {
             case PENDING_PAYMENT -> false; // 未支付：直接关闭，无需退款
-            case WAITING_ACCEPTANCE, WAITING_SERVICE -> true; // 已支付：全额退款
+            case WAITING_ACCEPTANCE, WAITING_SERVICE -> true; // 已支付：全额退款并退还优惠券
             default -> throw new BusinessException(ErrorCode.ORDER_STATUS_INVALID,
                     "当前状态不可取消，如有疑问请联系客服");
         };
         String reasonText = reason == null || reason.isBlank() ? "用户取消订单" : reason;
         if (paid) {
             walletService.refund(order, reasonText, userId);
+            couponService.refundUsedCoupon(order.getId());
         } else {
             couponService.releaseFromOrder(order.getId());
         }
         transition(order, OrderStatus.CLOSED, userId, "USER", "CANCEL", reasonText);
+        orderMapper.update(null, new LambdaUpdateWrapper<PlayOrder>()
+                .eq(PlayOrder::getId, order.getId())
+                .set(PlayOrder::getClosedReason, reasonText));
         order.setClosedReason(reasonText);
-        orderMapper.updateById(order);
         releaseSlot(order.getId());
         return detailView(order);
     }
 
     // ==================== 售后仲裁（review 模块调用，FR-U17/FR-M18） ====================
 
-    /** 订单进入售后（发起投诉，FR-U17）：仅 WAITING_CONFIRMATION 或 COMPLETED 可转入 AFTER_SALES */
+    /** 订单进入售后（发起投诉，FR-U17）：仅 IN_SERVICE、WAITING_CONFIRMATION 或 COMPLETED 可转入 AFTER_SALES */
     @Transactional
     public void enterAfterSales(Long userId, Long orderId, String reason) {
         PlayOrder order = orderMapper.selectByIdForUpdate(orderId);
@@ -422,7 +476,9 @@ public class OrderService {
             throw new BusinessException(ErrorCode.PERMISSION_DATA_SCOPE_DENIED);
         }
         OrderStatus current = order.status();
-        if (current != OrderStatus.WAITING_CONFIRMATION && current != OrderStatus.COMPLETED) {
+        if (current != OrderStatus.IN_SERVICE
+                && current != OrderStatus.WAITING_CONFIRMATION
+                && current != OrderStatus.COMPLETED) {
             throw new BusinessException(ErrorCode.ORDER_STATUS_INVALID, "当前订单状态不支持发起投诉");
         }
         transition(order, OrderStatus.AFTER_SALES, userId, "USER", "COMPLAINT", reason);
@@ -441,10 +497,25 @@ public class OrderService {
         if (order.status() != OrderStatus.AFTER_SALES) {
             throw new BusinessException(ErrorCode.ORDER_STATUS_INVALID, "订单不在售后中，无法仲裁");
         }
+        boolean wasConfirmed = (order.getConfirmedAt() != null);
         transition(order, target, adminId, "ADMIN", "ARBITRATE", reason);
         if (target == OrderStatus.CLOSED) {
-            order.setClosedReason(reason);
-            orderMapper.updateById(order);
+            String safeReason = reason == null ? "" : reason;
+            orderMapper.update(null, new LambdaUpdateWrapper<PlayOrder>()
+                    .eq(PlayOrder::getId, order.getId())
+                    .set(PlayOrder::getClosedReason, safeReason));
+            order.setClosedReason(safeReason);
+            releaseSlot(order.getId());
+            if (wasConfirmed) {
+                companionProfileMapper.decrementCompletedOrderCount(order.getCompanionUserId());
+            }
+        } else if (!wasConfirmed) {
+            LocalDateTime confirmedAt = LocalDateTime.now();
+            orderMapper.update(null, new LambdaUpdateWrapper<PlayOrder>()
+                    .eq(PlayOrder::getId, order.getId())
+                    .set(PlayOrder::getConfirmedAt, confirmedAt));
+            order.setConfirmedAt(confirmedAt);
+            companionProfileMapper.incrementCompletedOrderCount(order.getCompanionUserId());
         }
     }
 
@@ -459,8 +530,10 @@ public class OrderService {
         }
         couponService.releaseFromOrder(order.getId());
         transition(order, OrderStatus.CLOSED, 0L, "SYSTEM", "CLOSE_EXPIRED_PAYMENT", "支付超时自动关闭");
+        orderMapper.update(null, new LambdaUpdateWrapper<PlayOrder>()
+                .eq(PlayOrder::getId, order.getId())
+                .set(PlayOrder::getClosedReason, "支付超时自动关闭"));
         order.setClosedReason("支付超时自动关闭");
-        orderMapper.updateById(order);
         releaseSlot(order.getId());
     }
 
@@ -472,9 +545,12 @@ public class OrderService {
             return;
         }
         walletService.refund(order, "接单超时自动退款", 0L);
+        couponService.refundUsedCoupon(order.getId());
         transition(order, OrderStatus.CLOSED, 0L, "SYSTEM", "CLOSE_EXPIRED_ACCEPTANCE", "接单超时自动关闭");
+        orderMapper.update(null, new LambdaUpdateWrapper<PlayOrder>()
+                .eq(PlayOrder::getId, order.getId())
+                .set(PlayOrder::getClosedReason, "接单超时自动关闭并退款"));
         order.setClosedReason("接单超时自动关闭并退款");
-        orderMapper.updateById(order);
         releaseSlot(order.getId());
     }
 
@@ -487,15 +563,12 @@ public class OrderService {
         }
         walletService.settle(order, 0L);
         transition(order, OrderStatus.COMPLETED, 0L, "SYSTEM", "AUTO_CONFIRM", "超过24小时自动确认完成");
-        order.setConfirmedAt(LocalDateTime.now());
-        orderMapper.updateById(order);
-        CompanionProfile profile = companionProfileMapper.selectOne(
-                new LambdaQueryWrapper<CompanionProfile>()
-                        .eq(CompanionProfile::getUserId, order.getCompanionUserId()));
-        if (profile != null) {
-            profile.setCompletedOrderCount(profile.getCompletedOrderCount() + 1);
-            companionProfileMapper.updateById(profile);
-        }
+        LocalDateTime confirmedAt = LocalDateTime.now();
+        orderMapper.update(null, new LambdaUpdateWrapper<PlayOrder>()
+                .eq(PlayOrder::getId, order.getId())
+                .set(PlayOrder::getConfirmedAt, confirmedAt));
+        order.setConfirmedAt(confirmedAt);
+        companionProfileMapper.incrementCompletedOrderCount(order.getCompanionUserId());
     }
 
     // ==================== 查询 ====================
@@ -589,7 +662,8 @@ public class OrderService {
      * 连续全天/周期生成档期可跨边界预约）；存在临时/有效订单占用则冲突（详细设计 7.1）。
      */
     private void checkAvailabilityAndSlotConflict(Long companionUserId,
-                                                  LocalDateTime startAt, LocalDateTime endAt) {
+                                                  LocalDateTime startAt, LocalDateTime endAt,
+                                                  LocalDateTime now) {
         List<CompanionAvailability> overlap = availabilityMapper.selectList(
                 new LambdaQueryWrapper<CompanionAvailability>()
                         .eq(CompanionAvailability::getCompanionUserId, companionUserId)
@@ -607,7 +681,7 @@ public class OrderService {
                     "预约时段不在陪玩师可约档期内");
         }
         List<OrderTimeSlot> orderConflicts = slotMapper.selectConflictSlotsForUpdate(
-                companionUserId, startAt, endAt);
+                companionUserId, startAt, endAt, now);
         if (!orderConflicts.isEmpty()) {
             throw new BusinessException(ErrorCode.SLOT_CONFLICT, "预约时段已被其他订单占用");
         }
@@ -637,7 +711,7 @@ public class OrderService {
 
     private String generateOrderNo() {
         return "PO" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"))
-                + String.format("%04d", ThreadLocalRandom.current().nextInt(10000));
+                + UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase(Locale.ROOT);
     }
 
     /** status 逗号分隔多状态过滤 */
@@ -657,14 +731,28 @@ public class OrderService {
 
     private Page<OrderView> toViewPage(Page<PlayOrder> p, boolean withHistory) {
         Page<OrderView> result = new Page<>(p.getCurrent(), p.getSize(), p.getTotal());
-        result.setRecords(p.getRecords().stream()
-                .map(order -> withHistory ? detailView(order) : summaryView(order))
+        List<PlayOrder> records = p.getRecords();
+        if (records.isEmpty()) {
+            result.setRecords(List.of());
+            return result;
+        }
+        Set<Long> userIds = records.stream().map(PlayOrder::getUserId).filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, User> userMap = userIds.isEmpty() ? Collections.emptyMap() :
+                userMapper.selectBatchIds(userIds).stream().collect(Collectors.toMap(User::getId, Function.identity(), (a, b) -> a));
+        result.setRecords(records.stream()
+                .map(order -> withHistory
+                        ? detailView(order, userMap.get(order.getUserId()))
+                        : summaryView(order, userMap.get(order.getUserId())))
                 .toList());
         return result;
     }
 
     private OrderView detailView(PlayOrder order) {
-        OrderView view = summaryView(order);
+        return detailView(order, userMapper.selectById(order.getUserId()));
+    }
+
+    private OrderView detailView(PlayOrder order, User user) {
+        OrderView view = summaryView(order, user);
         List<OrderStatusHistory> histories = historyMapper.selectList(
                 new LambdaQueryWrapper<OrderStatusHistory>()
                         .eq(OrderStatusHistory::getOrderId, order.getId())
@@ -694,8 +782,7 @@ public class OrderService {
         return view;
     }
 
-    private OrderView summaryView(PlayOrder order) {
-        User user = userMapper.selectById(order.getUserId());
+    private OrderView summaryView(PlayOrder order, User user) {
         return OrderView.builder()
                 .id(order.getId())
                 .orderNo(order.getOrderNo())

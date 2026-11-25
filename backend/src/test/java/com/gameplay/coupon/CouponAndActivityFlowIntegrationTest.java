@@ -456,4 +456,191 @@ class CouponAndActivityFlowIntegrationTest {
         assertThat(uc.getStatus()).isEqualTo(UserCouponStatus.AVAILABLE.name());
         assertThat(uc.getLockedOrderId()).isNull();
     }
+
+    @Test
+    @DisplayName("已支付订单被拒单或全额退款仲裁后，已核销优惠券退回为 AVAILABLE 且可再次使用")
+    void testPaidOrderRejectAndFullRefundRollbackUsedCoupon() throws Exception {
+        String adminTok = adminToken();
+        JsonNode companion = prepareCompanion(adminTok);
+        long compUserId = companion.path("userId").asLong();
+        String compTok = companion.path("token").asText();
+        long serviceId = companion.path("serviceId").asLong();
+
+        JsonNode custUser = registerAndLogin(uniqueUser());
+        String custTok = custUser.path("token").asText();
+        long custUserId = custUser.path("user").path("id").asLong();
+
+        jdbcTemplate.update("INSERT INTO wallet_account (user_id, balance_cents, frozen_cents, total_income_cents, version) VALUES (?, 50000, 0, 0, 0) " +
+                        "ON DUPLICATE KEY UPDATE balance_cents = balance_cents + 50000", custUserId);
+
+        // 领取新人券 (id=1, 减20元 = 2000分)
+        MvcResult claimRes = mockMvc.perform(post("/api/coupons/1/claim")
+                        .header("Authorization", bearer(custTok)))
+                .andExpect(status().isOk())
+                .andReturn();
+        long userCouponId = objectMapper.readTree(claimRes.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        // 1. 下单并支付，券变为 USED，随后陪玩师拒单
+        LocalDateTime startAt1 = LocalDateTime.now().plusHours(1);
+        MvcResult o1Res = mockMvc.perform(post("/api/play-orders")
+                        .header("Authorization", bearer(custTok))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("companionUserId", compUserId)
+                                .put("companionServiceId", serviceId)
+                                .put("durationMinutes", 60)
+                                .put("appointmentStartAt", startAt1.format(FMT))
+                                .put("couponId", userCouponId)
+                                .toString()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long order1Id = objectMapper.readTree(o1Res.getResponse().getContentAsString()).path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/play-orders/" + order1Id + "/pay")
+                        .header("Authorization", bearer(custTok)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.orderStatus").value("WAITING_ACCEPTANCE"));
+        assertThat(userCouponMapper.selectById(userCouponId).getStatus()).isEqualTo(UserCouponStatus.USED.name());
+
+        mockMvc.perform(post("/api/companion/orders/" + order1Id + "/reject")
+                        .header("Authorization", bearer(compTok))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode().put("reason", "档期临时变动").toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.orderStatus").value("CLOSED"));
+
+        UserCoupon afterReject = userCouponMapper.selectById(userCouponId);
+        assertThat(afterReject.getStatus()).isEqualTo(UserCouponStatus.AVAILABLE.name());
+        assertThat(afterReject.getUsedOrderId()).isNull();
+        assertThat(afterReject.getLockedOrderId()).isNull();
+        Long balAfterReject = jdbcTemplate.queryForObject(
+                "SELECT balance_cents FROM wallet_account WHERE user_id = ?", Long.class, custUserId);
+        assertThat(balAfterReject).isEqualTo(50000L);
+
+        // 2. 退回的券再次下单 -> 支付 -> 接单/履约完成 -> 投诉全额退款仲裁后也应退回优惠券
+        LocalDateTime startAt2 = LocalDateTime.now().plusMinutes(2);
+        MvcResult o2Res = mockMvc.perform(post("/api/play-orders")
+                        .header("Authorization", bearer(custTok))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("companionUserId", compUserId)
+                                .put("companionServiceId", serviceId)
+                                .put("durationMinutes", 60)
+                                .put("appointmentStartAt", startAt2.format(FMT))
+                                .put("couponId", userCouponId)
+                                .toString()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long order2Id = objectMapper.readTree(o2Res.getResponse().getContentAsString()).path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/play-orders/" + order2Id + "/pay")
+                        .header("Authorization", bearer(custTok)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/companion/orders/" + order2Id + "/accept")
+                        .header("Authorization", bearer(compTok))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"confirm\":true}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/companion/orders/" + order2Id + "/start")
+                        .header("Authorization", bearer(compTok)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/companion/orders/" + order2Id + "/end")
+                        .header("Authorization", bearer(compTok)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/play-orders/" + order2Id + "/confirm")
+                        .header("Authorization", bearer(custTok)))
+                .andExpect(status().isOk());
+
+        MvcResult complaintRes = mockMvc.perform(post("/api/complaints")
+                        .header("Authorization", bearer(custTok))
+                        .param("orderId", String.valueOf(order2Id))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("complaintType", "OTHER")
+                                .put("description", "测试全额退款退券")
+                                .toString()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long complaintId = objectMapper.readTree(complaintRes.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/admin/complaints/" + complaintId + "/handle")
+                        .header("Authorization", bearer(adminTok))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("resolutionType", "FULL_REFUND")
+                                .put("handlingOpinion", "同意全额退款")
+                                .toString()))
+                .andExpect(status().isOk());
+
+        UserCoupon afterRefund = userCouponMapper.selectById(userCouponId);
+        assertThat(afterRefund.getStatus()).isEqualTo(UserCouponStatus.AVAILABLE.name());
+        assertThat(afterRefund.getUsedOrderId()).isNull();
+        assertThat(afterRefund.getLockedOrderId()).isNull();
+        Long balAfterRefund = jdbcTemplate.queryForObject(
+                "SELECT balance_cents FROM wallet_account WHERE user_id = ?", Long.class, custUserId);
+        assertThat(balAfterRefund).isEqualTo(50000L);
+    }
+
+    @Test
+    @DisplayName("未到生效时间(validFrom)的优惠券模板禁止领取，未生效用户券禁止预览核销")
+    void testFutureValidFromCouponRejectedOnClaimAndPreview() throws Exception {
+        String adminTok = adminToken();
+        JsonNode companion = prepareCompanion(adminTok);
+        long serviceId = companion.path("serviceId").asLong();
+
+        JsonNode custUser = registerAndLogin(uniqueUser());
+        String custTok = custUser.path("token").asText();
+        long custUserId = custUser.path("user").path("id").asLong();
+
+        ObjectNode cpnReq = objectMapper.createObjectNode()
+                .put("name", "未开始优惠券")
+                .put("couponType", "FIXED")
+                .put("thresholdCents", 0L)
+                .put("discountCents", 1000L)
+                .put("scopeType", "ALL")
+                .put("totalQuantity", 10)
+                .put("perUserLimit", 1)
+                .put("validFrom", LocalDateTime.now().plusDays(1).format(FMT))
+                .put("validUntil", LocalDateTime.now().plusDays(7).format(FMT));
+        MvcResult createRes = mockMvc.perform(post("/api/admin/coupons")
+                        .header("Authorization", bearer(adminTok))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(cpnReq.toString()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long futureTplId = objectMapper.readTree(createRes.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/admin/coupons/" + futureTplId + "/publish")
+                        .header("Authorization", bearer(adminTok)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/coupons/" + futureTplId + "/claim")
+                        .header("Authorization", bearer(custTok)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("COUPON_EXPIRED"));
+
+        UserCoupon uc = new UserCoupon();
+        uc.setTemplateId(futureTplId);
+        uc.setUserId(custUserId);
+        uc.setCouponCode("TESTFUTURE001");
+        uc.setStatus(UserCouponStatus.AVAILABLE.name());
+        uc.setValidFrom(LocalDateTime.now().plusDays(1));
+        uc.setValidUntil(LocalDateTime.now().plusDays(7));
+        uc.setClaimedAt(LocalDateTime.now());
+        userCouponMapper.insert(uc);
+
+        mockMvc.perform(post("/api/coupons/preview")
+                        .header("Authorization", bearer(custTok))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("companionServiceId", serviceId)
+                                .put("durationMinutes", 60)
+                                .put("couponId", uc.getId())
+                                .toString()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("COUPON_EXPIRED"));
+    }
 }

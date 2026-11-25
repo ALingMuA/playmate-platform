@@ -13,6 +13,10 @@ import java.math.BigDecimal;
  */
 public interface ReviewMapper extends BaseMapper<Review> {
 
+    /** 加行锁查询评价 */
+    @Select("SELECT * FROM review WHERE id = #{id} FOR UPDATE")
+    Review selectByIdForUpdate(@Param("id") Long id);
+
     /** 陪玩师有效评价聚合：平均分与数量（仅统计 VISIBLE，FR-U16） */
     @Select("""
             SELECT COALESCE(ROUND(AVG(score), 1), 0) AS avg_score,

@@ -80,9 +80,9 @@ async function loadData() {
     total.value = res.total || 0
     // 同步刷新全局未读数
     notificationStore.fetchUnread()
-  } catch (err: any) {
+  } catch (err: unknown) {
     failed.value = true
-    errorMessage.value = err?.message || '加载通知失败，请稍后重试'
+    errorMessage.value = err instanceof Error ? err.message : '加载通知失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -99,8 +99,8 @@ async function handleMarkRead(item: NotificationView): Promise<boolean> {
     // 递减全局未读计数
     notificationStore.decrementUnread()
     return true
-  } catch (err: any) {
-    ElMessage.error(err?.message || '标记已读失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '标记已读失败')
     return false
   } finally {
     const next = new Set(markingReadIds.value)
@@ -121,8 +121,8 @@ async function handleMarkAllRead() {
     // 清空全局未读计数
     notificationStore.clearUnread()
     ElMessage.success('全部通知已标记为已读')
-  } catch (err: any) {
-    ElMessage.error(err?.message || '全部标记已读失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '全部标记已读失败')
   } finally {
     markingAll.value = false
   }

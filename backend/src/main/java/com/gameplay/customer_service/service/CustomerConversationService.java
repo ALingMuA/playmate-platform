@@ -2,6 +2,7 @@ package com.gameplay.customer_service.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.gameplay.ai.enums.AiDecision;
 import com.gameplay.ai.strategy.AiProcessResult;
 import com.gameplay.ai.task.domain.AiReplyTask;
@@ -14,6 +15,7 @@ import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.customer_service.domain.ConversationAssignment;
 import com.gameplay.customer_service.domain.CustomerConversation;
 import com.gameplay.customer_service.domain.CustomerServiceAccount;
+import com.gameplay.customer_service.domain.CustomerServiceMessage;
 import com.gameplay.customer_service.domain.ServiceEvaluation;
 import com.gameplay.customer_service.dto.AiResponseView;
 import com.gameplay.customer_service.dto.CloseConversationRequest;
@@ -31,6 +33,7 @@ import com.gameplay.customer_service.enums.SenderType;
 import com.gameplay.customer_service.mapper.ConversationAssignmentMapper;
 import com.gameplay.customer_service.mapper.CustomerConversationMapper;
 import com.gameplay.customer_service.mapper.CustomerServiceAccountMapper;
+import com.gameplay.customer_service.mapper.CustomerServiceMessageMapper;
 import com.gameplay.customer_service.mapper.ServiceEvaluationMapper;
 import com.gameplay.order.domain.PlayOrder;
 import com.gameplay.order.mapper.PlayOrderMapper;
@@ -44,8 +47,13 @@ import org.springframework.util.StringUtils;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 /**
  * 客服会话领域服务（FR-C07~C29）。
@@ -58,9 +66,11 @@ import java.util.Locale;
 public class CustomerConversationService {
 
     private static final DateTimeFormatter NO_FORMAT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    private static final AtomicInteger CONVERSATION_SEQ = new AtomicInteger();
 
     private final CustomerConversationMapper conversationMapper;
     private final ConversationAssignmentMapper assignmentMapper;
+    private final CustomerServiceMessageMapper messageMapper;
     private final ServiceEvaluationMapper evaluationMapper;
     private final CustomerServiceAccountMapper csAccountMapper;
     private final CustomerMessageService messageService;
@@ -77,8 +87,8 @@ public class CustomerConversationService {
     @Transactional
     public ConversationView create(Long userId, ConversationCreateRequest req) {
         validateRelatedOrder(userId, req.getSourceType(), req.getRelatedOrderId());
+        LocalDateTime now = LocalDateTime.now();
         CustomerConversation conversation = new CustomerConversation();
-        conversation.setConversationNo(nextConversationNo());
         conversation.setInitiatorUserId(userId);
         conversation.setSourceType(req.getSourceType());
         conversation.setRelatedOrderId(req.getRelatedOrderId() == null ? 0L : req.getRelatedOrderId());
@@ -88,15 +98,29 @@ public class CustomerConversationService {
         conversation.setTransferReason("");
         conversation.setUnresolvedCount(0);
         conversation.setVersion(0);
-        conversationMapper.insert(conversation);
-        // 首条消息
+        conversation.setCreatedAt(now);
+        conversation.setUpdatedAt(now);
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            conversation.setConversationNo(nextConversationNo());
+            try {
+                conversationMapper.insert(conversation);
+                break;
+            } catch (DuplicateKeyException ex) {
+                if (attempt == 2) {
+                    throw ex;
+                }
+            }
+        }
+
         if (StringUtils.hasText(req.getFirstContent())) {
-            MessageView firstMessage = messageService.saveMessage(conversation.getId(), java.util.UUID.randomUUID().toString(),
+            MessageView firstMessage = messageService.saveMessage(conversation.getId(),
+                    java.util.UUID.randomUUID().toString(),
                     SenderType.USER, userId, req.getFirstContent(), false);
             aiTaskService.enqueue(conversation, firstMessage.getMessageId(), conversation.getRelatedOrderId());
             notifyMessage(conversation, firstMessage);
         }
-        return toView(conversation);
+        return toView(requireConversation(conversation.getId()));
     }
 
     /** 保存用户消息并排入持久任务队列，模型请求由独立工作线程执行。 */
@@ -106,7 +130,6 @@ public class CustomerConversationService {
         CustomerConversation conversation = lockConversation(conversationId);
         assertInitiator(conversation, userId);
         assertNotClosed(conversation);
-        // 关联订单仅限本人（FR-C13）
         Long relatedOrderId = req.getRelatedOrderId() == null ? conversation.getRelatedOrderId() : req.getRelatedOrderId();
         if (relatedOrderId != null && relatedOrderId > 0) {
             assertOrderOwner(userId, relatedOrderId);
@@ -120,9 +143,10 @@ public class CustomerConversationService {
         } else if (ConversationStatus.AI_PROCESSING.name().equals(conversation.getConversationStatus())) {
             task = aiTaskService.enqueue(conversation, userMessage.getMessageId(), relatedOrderId);
         }
-        notifyMessage(conversation, userMessage);
-        ConversationView view = toView(requireConversation(conversationId));
-        notifyAll(conversation, view);
+        CustomerConversation refreshed = requireConversation(conversationId);
+        notifyMessage(refreshed, userMessage);
+        ConversationView view = toView(refreshed);
+        notifyAll(refreshed, view);
         return AiResponseView.builder()
                 .conversationId(conversationId)
                 .conversationStatus(view.getConversationStatus())
@@ -167,7 +191,8 @@ public class CustomerConversationService {
             }
         }
         aiTaskService.notifyStatus(task, conversation.getInitiatorUserId());
-        notifyAll(conversation, toView(requireConversation(conversation.getId())));
+        CustomerConversation refreshed = requireConversation(conversation.getId());
+        notifyAll(refreshed, toView(refreshed));
     }
 
     /** 用户主动转人工（FR-C10） */
@@ -177,8 +202,9 @@ public class CustomerConversationService {
         assertInitiator(conversation, userId);
         assertNotClosed(conversation);
         transferToHuman(conversation, StringUtils.hasText(reason) ? reason : "用户主动要求转人工");
-        ConversationView view = toView(requireConversation(conversationId));
-        notifyAll(conversation, view);
+        CustomerConversation refreshed = requireConversation(conversationId);
+        ConversationView view = toView(refreshed);
+        notifyAll(refreshed, view);
         return view;
     }
 
@@ -188,6 +214,11 @@ public class CustomerConversationService {
                         .eq(CustomerConversation::getInitiatorUserId, userId)
                         .orderByDesc(CustomerConversation::getId))
                 .stream().map(this::toView).toList();
+    }
+
+    /** 按 ID 查询会话（只读，供 WS 路由器使用） */
+    public CustomerConversation findById(Long conversationId) {
+        return conversationMapper.selectById(conversationId);
     }
 
     /** 会话详情（数据范围：发起人/当前客服/管理员） */
@@ -200,7 +231,6 @@ public class CustomerConversationService {
     /** 会话消息（数据范围校验后按游标补拉） */
     public List<MessageView> listMessages(Long conversationId, Long afterId, int size,
                                           Long operatorId, List<String> roles) {
-        requireConversation(conversationId);
         CustomerConversation conversation = requireConversation(conversationId);
         assertDataScope(conversation, operatorId, roles);
         return messageService.listMessages(conversationId, afterId, size);
@@ -233,36 +263,50 @@ public class CustomerConversationService {
 
     // ==================== 客服侧：工作台 ====================
 
-    /** 人工会话队列（FR-C24）：等待人工接待的会话，含排队时长 */
+    /** 人工会话队列（FR-C24）：等待人工接待的会话，批量获取最新用户消息与排队时长 */
     public List<QueueItemView> queue(Long csUserId) {
         csAccountService.assertAvailable(csUserId);
         List<CustomerConversation> waiting = conversationMapper.selectList(
                 new LambdaQueryWrapper<CustomerConversation>()
                         .eq(CustomerConversation::getConversationStatus, ConversationStatus.WAITING_HUMAN.name())
                         .orderByAsc(CustomerConversation::getId));
+        if (waiting.isEmpty()) {
+            return List.of();
+        }
+        List<Long> ids = waiting.stream().map(CustomerConversation::getId).toList();
+        Map<Long, String> latestTopics = messageMapper.selectLatestUserMessages(ids).stream()
+                .collect(Collectors.toMap(CustomerServiceMessage::getConversationId,
+                        CustomerServiceMessage::getContent, (a, b) -> b));
+        Map<Long, LocalDateTime> queuedTimes = assignmentMapper.selectLatestQueueTimes(ids).stream()
+                .filter(row -> row.getQueuedAt() != null)
+                .collect(Collectors.toMap(ConversationAssignmentMapper.ConversationQueuedAt::getConversationId,
+                        ConversationAssignmentMapper.ConversationQueuedAt::getQueuedAt, (a, b) -> b));
+
         LocalDateTime now = LocalDateTime.now();
-        return waiting.stream().map(c -> toQueueItem(c, now)).toList();
+        return waiting.stream()
+                .map(c -> toQueueItem(c, latestTopics.get(c.getId()), queuedTimes.get(c.getId()), now))
+                .sorted(Comparator.comparing(QueueItemView::getQueueSeconds, Comparator.reverseOrder())
+                        .thenComparing(QueueItemView::getConversationId))
+                .toList();
     }
 
-    /** 领取会话（FR-C25）：乐观锁 + 容量校验 */
+    /** 领取会话（FR-C25）：先锁定客服行再校验容量并锁定会话，避免并发超上限或锁序死锁 */
     @Transactional
     public ConversationView claim(Long csUserId, Long conversationId, ConversationClaimRequest req) {
-        CustomerServiceAccount account = csAccountService.assertAvailable(csUserId);
+        CustomerServiceAccount account = csAccountService.lockAndAssertAvailable(csUserId);
+        long active = conversationMapper.selectCount(new LambdaQueryWrapper<CustomerConversation>()
+                .eq(CustomerConversation::getCurrentCsAccountId, account.getId())
+                .eq(CustomerConversation::getConversationStatus, ConversationStatus.HUMAN_PROCESSING.name()));
+        if (active >= account.getMaxActiveConversations()) {
+            throw new BusinessException(ErrorCode.CS_AGENT_CAPACITY_EXCEEDED);
+        }
+
         CustomerConversation conversation = lockConversation(conversationId);
         if (!ConversationStatus.WAITING_HUMAN.name().equals(conversation.getConversationStatus())) {
             throw new BusinessException(ErrorCode.CS_CONVERSATION_ALREADY_CLAIMED, "会话不在等待人工状态");
         }
         if (!req.getExpectedVersion().equals(conversation.getVersion())) {
             throw new BusinessException(ErrorCode.CS_CONVERSATION_VERSION_CONFLICT);
-        }
-        // 容量校验：处理中（人工/管理员）会话数不能超过上限
-        long active = conversationMapper.selectCount(new LambdaQueryWrapper<CustomerConversation>()
-                .eq(CustomerConversation::getCurrentCsAccountId, account.getId())
-                .in(CustomerConversation::getConversationStatus,
-                        ConversationStatus.HUMAN_PROCESSING.name(),
-                        ConversationStatus.ESCALATED_ADMIN.name()));
-        if (active >= account.getMaxActiveConversations()) {
-            throw new BusinessException(ErrorCode.CS_AGENT_CAPACITY_EXCEEDED);
         }
         int updated = conversationMapper.update(null, new LambdaUpdateWrapper<CustomerConversation>()
                 .set(CustomerConversation::getConversationStatus, ConversationStatus.HUMAN_PROCESSING.name())
@@ -277,30 +321,37 @@ public class CustomerConversationService {
         }
         recordAssignment(conversationId, AssignmentType.CLAIM, 0L, account.getId(), csUserId,
                 req.getClaimRemark() == null ? "" : req.getClaimRemark());
-        ConversationView view = toView(requireConversation(conversationId));
-        notifyAll(conversation, view);
+        CustomerConversation refreshed = requireConversation(conversationId);
+        ConversationView view = toView(refreshed);
+        notifyAll(refreshed, view);
         return view;
     }
 
-    /** 客服回复消息（FR-C26）：仅当前处理客服 */
+    /** 客服回复消息（FR-C26）：仅当前启用客服且处于 HUMAN_PROCESSING */
     @Transactional
     public MessageView reply(Long csUserId, Long conversationId, MessageSendRequest req) {
         validateMessageRequest(req);
         CustomerConversation conversation = lockConversation(conversationId);
         csAccountService.assertCurrentHandler(csUserId, conversation.getCurrentCsAccountId());
         assertNotClosed(conversation);
+        if (!ConversationStatus.HUMAN_PROCESSING.name().equals(conversation.getConversationStatus())) {
+            throw new BusinessException(ErrorCode.CS_CONVERSATION_STATUS_INVALID, "仅人工处理中的会话允许客服回复");
+        }
         MessageView message = messageService.saveMessage(conversationId, req.getClientMsgId(),
                 SenderType.CS, csUserId, req.getContent(), false);
         notifyMessage(conversation, message);
         return message;
     }
 
-    /** 关闭会话（FR-C29）：处理分类 + 结果 */
+    /** 关闭会话（FR-C29）：处理分类 + 结果（仅 HUMAN_PROCESSING） */
     @Transactional
     public ConversationView close(Long csUserId, Long conversationId, CloseConversationRequest req) {
         CustomerConversation conversation = lockConversation(conversationId);
         csAccountService.assertCurrentHandler(csUserId, conversation.getCurrentCsAccountId());
         assertNotClosed(conversation);
+        if (!ConversationStatus.HUMAN_PROCESSING.name().equals(conversation.getConversationStatus())) {
+            throw new BusinessException(ErrorCode.CS_CONVERSATION_STATUS_INVALID, "仅人工处理中的会话允许客服关闭");
+        }
         aiTaskService.cancelActive(conversation);
         conversationMapper.update(null, new LambdaUpdateWrapper<CustomerConversation>()
                 .set(CustomerConversation::getConversationStatus, ConversationStatus.CLOSED.name())
@@ -310,39 +361,49 @@ public class CustomerConversationService {
                 .setSql("version = version + 1")
                 .eq(CustomerConversation::getId, conversationId)
                 .eq(CustomerConversation::getVersion, conversation.getVersion()));
-        messageService.saveMessage(conversationId, "sys-close-" + java.util.UUID.randomUUID(),
+        MessageView closeMsg = messageService.saveMessage(conversationId, "sys-close-" + java.util.UUID.randomUUID(),
                 SenderType.SYSTEM, 0L, "会话已关闭：" + req.getCategory(), false);
-        ConversationView view = toView(requireConversation(conversationId));
-        notifyAll(conversation, view);
+        CustomerConversation refreshed = requireConversation(conversationId);
+        notifyMessage(refreshed, closeMsg);
+        ConversationView view = toView(refreshed);
+        notifyAll(refreshed, view);
         return view;
     }
 
-    /** 转交管理员（FR-C28）：退款/投诉仲裁/封禁申诉等超权限事项 */
+    /** 转交管理员（FR-C28）：清空 currentCsAccountId 并释放客服接待名额 */
     @Transactional
     public ConversationView escalate(Long csUserId, Long conversationId, EscalateRequest req) {
         CustomerConversation conversation = lockConversation(conversationId);
         csAccountService.assertCurrentHandler(csUserId, conversation.getCurrentCsAccountId());
-        if (ConversationStatus.CLOSED.name().equals(conversation.getConversationStatus())
-                || ConversationStatus.ESCALATED_ADMIN.name().equals(conversation.getConversationStatus())) {
+        if (!ConversationStatus.HUMAN_PROCESSING.name().equals(conversation.getConversationStatus())) {
             throw new BusinessException(ErrorCode.CS_CONVERSATION_STATUS_INVALID, "当前状态不允许转交管理员");
         }
-        conversationMapper.update(null, new LambdaUpdateWrapper<CustomerConversation>()
+        Long fromCsAccountId = conversation.getCurrentCsAccountId();
+        int updated = conversationMapper.update(null, new LambdaUpdateWrapper<CustomerConversation>()
                 .set(CustomerConversation::getConversationStatus, ConversationStatus.ESCALATED_ADMIN.name())
                 .set(CustomerConversation::getReceptionMode, ReceptionMode.ADMIN.name())
+                .set(CustomerConversation::getCurrentCsAccountId, 0L)
                 .set(CustomerConversation::getTransferReason, req.getReason())
                 .setSql("version = version + 1")
                 .eq(CustomerConversation::getId, conversationId)
-                .eq(CustomerConversation::getVersion, conversation.getVersion()));
+                .eq(CustomerConversation::getVersion, conversation.getVersion())
+                .eq(CustomerConversation::getConversationStatus, ConversationStatus.HUMAN_PROCESSING.name()));
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.CS_CONVERSATION_VERSION_CONFLICT);
+        }
         recordAssignment(conversationId, AssignmentType.ESCALATE_ADMIN,
-                conversation.getCurrentCsAccountId(), 0L, csUserId, req.getReason());
-        messageService.saveMessage(conversationId, "sys-escalate-" + java.util.UUID.randomUUID(),
+                fromCsAccountId, 0L, csUserId, req.getReason());
+        MessageView escalateMsg = messageService.saveMessage(conversationId,
+                "sys-escalate-" + java.util.UUID.randomUUID(),
                 SenderType.SYSTEM, 0L, "会话已转交管理员处理：" + req.getReason(), false);
-        ConversationView view = toView(requireConversation(conversationId));
-        notifyAll(conversation, view);
+        CustomerConversation refreshed = requireConversation(conversationId);
+        messageNotifier.notifyMessage(escalateMsg, refreshed.getInitiatorUserId(), csUserId);
+        ConversationView view = toView(refreshed);
+        messageNotifier.notifyConversationChanged(view, refreshed.getInitiatorUserId(), csUserId);
         return view;
     }
 
-    /** 我的处理中会话（客服） */
+    /** 我的处理中会话（客服：仅 HUMAN_PROCESSING） */
     public List<ConversationView> listAssigned(Long csUserId) {
         CustomerServiceAccount account = csAccountService.getByUserId(csUserId);
         if (account == null) {
@@ -350,11 +411,71 @@ public class CustomerConversationService {
         }
         return conversationMapper.selectList(new LambdaQueryWrapper<CustomerConversation>()
                         .eq(CustomerConversation::getCurrentCsAccountId, account.getId())
-                        .in(CustomerConversation::getConversationStatus,
-                                ConversationStatus.HUMAN_PROCESSING.name(),
-                                ConversationStatus.ESCALATED_ADMIN.name())
+                        .eq(CustomerConversation::getConversationStatus, ConversationStatus.HUMAN_PROCESSING.name())
                         .orderByDesc(CustomerConversation::getId))
                 .stream().map(this::toView).toList();
+    }
+
+    // ==================== 管理端：升级会话处理 ====================
+
+    /** 管理端分页查询升级给管理员的会话 */
+    public Page<ConversationView> listEscalated(String status, long page, long size) {
+        String target = StringUtils.hasText(status) ? status.trim() : ConversationStatus.ESCALATED_ADMIN.name();
+        if (!ConversationStatus.ESCALATED_ADMIN.name().equals(target)
+                && !ConversationStatus.CLOSED.name().equals(target)) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "不支持的升级会话状态过滤");
+        }
+        LambdaQueryWrapper<CustomerConversation> wrapper = new LambdaQueryWrapper<CustomerConversation>()
+                .eq(CustomerConversation::getConversationStatus, target)
+                .orderByDesc(CustomerConversation::getId);
+        if (ConversationStatus.CLOSED.name().equals(target)) {
+            wrapper.eq(CustomerConversation::getReceptionMode, ReceptionMode.ADMIN.name());
+        }
+        Page<CustomerConversation> p = conversationMapper.selectPage(new Page<>(page, size), wrapper);
+        Page<ConversationView> vp = new Page<>(p.getCurrent(), p.getSize(), p.getTotal());
+        vp.setRecords(p.getRecords().stream().map(this::toView).toList());
+        return vp;
+    }
+
+    /** 管理员回复已升级会话 */
+    @Transactional
+    public MessageView adminReply(Long adminUserId, Long conversationId, MessageSendRequest req) {
+        validateMessageRequest(req);
+        CustomerConversation conversation = lockConversation(conversationId);
+        assertNotClosed(conversation);
+        if (!ConversationStatus.ESCALATED_ADMIN.name().equals(conversation.getConversationStatus())) {
+            throw new BusinessException(ErrorCode.CS_CONVERSATION_STATUS_INVALID, "仅已升级管理员的会话允许管理员回复");
+        }
+        MessageView message = messageService.saveMessage(conversationId, req.getClientMsgId(),
+                SenderType.ADMIN, adminUserId, req.getContent(), false);
+        messageNotifier.notifyMessage(message, conversation.getInitiatorUserId(), adminUserId);
+        return message;
+    }
+
+    /** 管理员关闭已升级会话 */
+    @Transactional
+    public ConversationView adminClose(Long adminUserId, Long conversationId, CloseConversationRequest req) {
+        CustomerConversation conversation = lockConversation(conversationId);
+        assertNotClosed(conversation);
+        if (!ConversationStatus.ESCALATED_ADMIN.name().equals(conversation.getConversationStatus())) {
+            throw new BusinessException(ErrorCode.CS_CONVERSATION_STATUS_INVALID, "仅已升级管理员的会话允许管理员关闭");
+        }
+        aiTaskService.cancelActive(conversation);
+        conversationMapper.update(null, new LambdaUpdateWrapper<CustomerConversation>()
+                .set(CustomerConversation::getConversationStatus, ConversationStatus.CLOSED.name())
+                .set(CustomerConversation::getClosedCategory, req.getCategory())
+                .set(CustomerConversation::getClosedResult, req.getResult())
+                .set(CustomerConversation::getClosedAt, LocalDateTime.now())
+                .setSql("version = version + 1")
+                .eq(CustomerConversation::getId, conversationId)
+                .eq(CustomerConversation::getVersion, conversation.getVersion()));
+        MessageView closeMsg = messageService.saveMessage(conversationId, "sys-close-" + java.util.UUID.randomUUID(),
+                SenderType.SYSTEM, 0L, "会话已由管理员关闭：" + req.getCategory(), false);
+        CustomerConversation refreshed = requireConversation(conversationId);
+        messageNotifier.notifyMessage(closeMsg, refreshed.getInitiatorUserId(), adminUserId);
+        ConversationView view = toView(refreshed);
+        messageNotifier.notifyConversationChanged(view, refreshed.getInitiatorUserId(), adminUserId);
+        return view;
     }
 
     // ==================== 内部方法 ====================
@@ -374,7 +495,7 @@ public class CustomerConversationService {
     private void transferToHuman(CustomerConversation conversation, String reason) {
         aiTaskService.cancelActive(conversation);
         if (!ConversationStatus.AI_PROCESSING.name().equals(conversation.getConversationStatus())) {
-            return; // 已转人工或已关闭，不重复处理
+            return;
         }
         conversationMapper.update(null, new LambdaUpdateWrapper<CustomerConversation>()
                 .set(CustomerConversation::getConversationStatus, ConversationStatus.WAITING_HUMAN.name())
@@ -384,7 +505,8 @@ public class CustomerConversationService {
                 .eq(CustomerConversation::getId, conversation.getId())
                 .eq(CustomerConversation::getVersion, conversation.getVersion()));
         recordAssignment(conversation.getId(), AssignmentType.AI_TRANSFER, 0L, 0L, 0L, reason);
-        MessageView message = messageService.saveMessage(conversation.getId(), "sys-transfer-" + java.util.UUID.randomUUID(),
+        MessageView message = messageService.saveMessage(conversation.getId(),
+                "sys-transfer-" + java.util.UUID.randomUUID(),
                 SenderType.SYSTEM, 0L, "已转人工客服，请稍候，客服人员将尽快接入。", false);
         notifyMessage(conversation, message);
     }
@@ -398,6 +520,7 @@ public class CustomerConversationService {
         assignment.setToCsAccountId(toCsId == null ? 0L : toCsId);
         assignment.setOperatorId(operatorId == null ? 0L : operatorId);
         assignment.setReason(reason == null ? "" : reason);
+        assignment.setCreatedAt(LocalDateTime.now());
         assignmentMapper.insert(assignment);
     }
 
@@ -420,10 +543,12 @@ public class CustomerConversationService {
         return account == null ? 0L : account.getUserId();
     }
 
-    /** 会话编号：CS + 时间戳 + 序号 */
+    /** 会话编号：CS + 时间戳 + 6 位非负并发安全序号 */
     private String nextConversationNo() {
+        int seq = Math.floorMod(CONVERSATION_SEQ.getAndIncrement(), 1000);
+        int rand = ThreadLocalRandom.current().nextInt(1000);
         return "CS" + LocalDateTime.now().format(NO_FORMAT)
-                + String.format(Locale.ROOT, "%03d", System.nanoTime() % 1000);
+                + String.format(Locale.ROOT, "%03d%03d", seq, rand);
     }
 
     private void validateRelatedOrder(Long userId, String sourceType, Long relatedOrderId) {
@@ -490,11 +615,12 @@ public class CustomerConversationService {
         throw new BusinessException(ErrorCode.PERMISSION_DATA_SCOPE_DENIED);
     }
 
-    private QueueItemView toQueueItem(CustomerConversation c, LocalDateTime now) {
-        String topic = messageService.listMessages(c.getId(), null, 1).stream()
-                .filter(m -> SenderType.USER.name().equals(m.getSenderType()))
-                .map(MessageView::getContent)
-                .findFirst().orElse(c.getSourceType());
+    private QueueItemView toQueueItem(CustomerConversation c, String latestTopic,
+                                      LocalDateTime queuedAt, LocalDateTime now) {
+        String topic = StringUtils.hasText(latestTopic) ? latestTopic : c.getSourceType();
+        LocalDateTime since = queuedAt != null ? queuedAt
+                : (c.getCreatedAt() != null ? c.getCreatedAt() : now);
+        long waitSeconds = Math.max(0L, Duration.between(since, now).getSeconds());
         return QueueItemView.builder()
                 .conversationId(c.getId())
                 .conversationNo(c.getConversationNo())
@@ -503,7 +629,7 @@ public class CustomerConversationService {
                 .relatedOrderId(c.getRelatedOrderId())
                 .transferReason(c.getTransferReason())
                 .version(c.getVersion())
-                .queueSeconds(Duration.between(c.getCreatedAt(), now).getSeconds())
+                .queueSeconds(waitSeconds)
                 .createdAt(c.getCreatedAt())
                 .build();
     }

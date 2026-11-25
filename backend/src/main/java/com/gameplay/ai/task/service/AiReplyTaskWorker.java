@@ -1,6 +1,5 @@
 package com.gameplay.ai.task.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.gameplay.ai.config.AiModelProperties;
 import com.gameplay.ai.service.AiResponseFacade;
@@ -42,9 +41,7 @@ public class AiReplyTaskWorker {
     private final TransactionTemplate transactions;
 
     public List<AiReplyTask> pending(int limit) {
-        return taskMapper.selectList(new LambdaQueryWrapper<AiReplyTask>()
-                .eq(AiReplyTask::getStatus, "PENDING").orderByAsc(AiReplyTask::getId)
-                .last("LIMIT " + Math.min(Math.max(limit, 1), 32)));
+        return taskMapper.selectPending(Math.min(Math.max(limit, 1), 32));
     }
 
     public void process(Long taskId) {
@@ -115,10 +112,8 @@ public class AiReplyTaskWorker {
     /** 超时遗留任务只终止并转人工，避免进程重启后重复请求模型产生额外费用。 */
     public void recoverExpired() {
         LocalDateTime now = LocalDateTime.now();
-        List<AiReplyTask> candidates = taskMapper.selectList(new LambdaQueryWrapper<AiReplyTask>()
-                .in(AiReplyTask::getStatus, "PENDING", "RUNNING")
-                .lt(AiReplyTask::getUpdatedAt, now.minusSeconds(135))
-                .orderByAsc(AiReplyTask::getId).last("LIMIT 100"));
+        List<AiReplyTask> candidates = taskMapper.selectExpiredCandidates(
+                now.minusSeconds(135), now.minusMinutes(2), 20);
         for (AiReplyTask candidate : candidates) {
             try {
                 recoverExpired(candidate.getId());
@@ -141,9 +136,9 @@ public class AiReplyTaskWorker {
                 return;
             }
             boolean expired = "RUNNING".equals(task.getStatus()) && task.getStartedAt() != null
-                    // 管理员降低超时时不能提前终止使用旧配置的在途请求。
                     && task.getStartedAt().isBefore(now.minusSeconds(135));
-            expired |= "PENDING".equals(task.getStatus()) && task.getCreatedAt().isBefore(now.minusMinutes(2));
+            expired |= "PENDING".equals(task.getStatus()) && task.getCreatedAt() != null
+                    && task.getCreatedAt().isBefore(now.minusMinutes(2));
             if (expired) {
                 conversationService.completeAiTask(task.getId(), null, "TASK_TIMEOUT");
             }

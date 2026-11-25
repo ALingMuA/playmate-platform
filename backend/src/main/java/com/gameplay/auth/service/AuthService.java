@@ -11,6 +11,7 @@ import com.gameplay.auth.entity.Role;
 import com.gameplay.auth.entity.User;
 import com.gameplay.auth.entity.UserRole;
 import com.gameplay.auth.event.PasswordChangedEvent;
+import com.gameplay.auth.event.SessionInvalidatedEvent;
 import com.gameplay.auth.mapper.RoleMapper;
 import com.gameplay.auth.mapper.UserMapper;
 import com.gameplay.auth.mapper.UserRoleMapper;
@@ -49,30 +50,41 @@ public class AuthService {
     @Transactional
     public UserProfileView register(RegisterRequest req) {
         // 联系方式至少一项（需求 5.1：可使用用户名、手机号或邮箱注册）
-        if (!StringUtils.hasText(req.getMobile()) && !StringUtils.hasText(req.getEmail())) {
+        String username = req.getUsername();
+        String mobile = StringUtils.hasText(req.getMobile()) ? req.getMobile() : null;
+        String email = StringUtils.hasText(req.getEmail()) ? req.getEmail() : null;
+        if (mobile == null && email == null) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "手机号与邮箱至少填写一项");
         }
-        // 唯一性校验
+        // 禁止用户名伪装成其他用户的手机号格式，防止 findByAccount 登录标识碰撞
+        if (username.matches("^1\\d{10}$") && !username.equals(mobile)) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "用户名不能使用他人手机号格式");
+        }
+        // 唯一性校验（包含用户名与手机号交叉校验）
         if (userMapper.selectCount(new LambdaQueryWrapper<User>()
-                .eq(User::getUsername, req.getUsername())) > 0) {
+                .eq(User::getUsername, username)) > 0
+                || userMapper.selectCount(new LambdaQueryWrapper<User>()
+                .eq(User::getMobile, username)) > 0) {
             throw new BusinessException(ErrorCode.ACCOUNT_USERNAME_EXISTS);
         }
-        if (StringUtils.hasText(req.getMobile()) && userMapper.selectCount(new LambdaQueryWrapper<User>()
-                .eq(User::getMobile, req.getMobile())) > 0) {
+        if (mobile != null && (userMapper.selectCount(new LambdaQueryWrapper<User>()
+                .eq(User::getMobile, mobile)) > 0
+                || userMapper.selectCount(new LambdaQueryWrapper<User>()
+                .eq(User::getUsername, mobile)) > 0)) {
             throw new BusinessException(ErrorCode.ACCOUNT_MOBILE_EXISTS);
         }
-        if (StringUtils.hasText(req.getEmail()) && userMapper.selectCount(new LambdaQueryWrapper<User>()
-                .eq(User::getEmail, req.getEmail())) > 0) {
+        if (email != null && userMapper.selectCount(new LambdaQueryWrapper<User>()
+                .eq(User::getEmail, email)) > 0) {
             throw new BusinessException(ErrorCode.ACCOUNT_EMAIL_EXISTS);
         }
 
         User user = new User();
-        user.setUsername(req.getUsername());
+        user.setUsername(username);
         user.setPasswordHash(passwordEncoder.encode(req.getPassword()));
         user.setNickname(req.getNickname());
         // 联系方式可选：空值存 NULL，避免 '' 与唯一索引冲突（uk_user_mobile/uk_user_email）
-        user.setMobile(StringUtils.hasText(req.getMobile()) ? req.getMobile() : null);
-        user.setEmail(StringUtils.hasText(req.getEmail()) ? req.getEmail() : null);
+        user.setMobile(mobile);
+        user.setEmail(email);
         user.setAvatarUrl("");
         user.setGender(0);
         user.setIntroduction("");
@@ -133,15 +145,24 @@ public class AuthService {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "新密码不能与原密码相同");
         }
 
-        int newVersion = user.getTokenVersion() + 1;
-        userMapper.update(null, new LambdaUpdateWrapper<User>()
+        int currentVersion = user.getTokenVersion() == null ? 1 : user.getTokenVersion();
+        int updated = userMapper.update(null, new LambdaUpdateWrapper<User>()
                 .set(User::getPasswordHash, passwordEncoder.encode(req.getNewPassword()))
-                .set(User::getTokenVersion, newVersion)
-                .eq(User::getId, userId));
+                .setSql("token_version = token_version + 1")
+                .eq(User::getId, userId)
+                .eq(User::getTokenVersion, currentVersion));
+        if (updated != 1) {
+            throw new BusinessException(ErrorCode.AUTH_TOKEN_VERSION_MISMATCH, "账号状态已变更，请重新登录后再试");
+        }
+        User refreshed = userMapper.selectById(userId);
+        int newVersion = (refreshed != null && refreshed.getTokenVersion() != null)
+                ? refreshed.getTokenVersion()
+                : currentVersion + 1;
 
         List<String> roles = loadRoles(userId);
-        // 发布密码变更事件（客服账号据此清除"强制改密"标志，FR-C04）
+        // 发布密码变更与会话失效事件（清除客服"强制改密"标志并断开长连接）
         eventPublisher.publishEvent(new PasswordChangedEvent(userId));
+        eventPublisher.publishEvent(new SessionInvalidatedEvent(userId));
         String token = jwtTokenService.createToken(userId, user.getUsername(), roles, newVersion);
         return new AuthResponse(token, "Bearer", jwtTokenService.getExpireSeconds(), toProfile(user, roles));
     }

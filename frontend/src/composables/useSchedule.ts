@@ -27,12 +27,6 @@ import {
 } from '@/utils/schedule'
 
 export function useSchedule() {
-  const today = dayjs().startOf('day')
-  const anchorDate = ref<Dayjs>(today)
-  const loading = ref(false)
-  const templatesLoading = ref(false)
-  const saving = ref(false)
-
   const overview = ref<ScheduleOverview>({
     availabilities: [],
     bookedSlots: [],
@@ -43,6 +37,13 @@ export function useSchedule() {
   const serverNow = computed<Dayjs>(() => {
     return overview.value.serverNow ? dayjs(overview.value.serverNow) : dayjs()
   })
+
+  // 动态计算当日零点，避免跨午夜后 stale today
+  const today = computed<Dayjs>(() => serverNow.value.startOf('day'))
+  const anchorDate = ref<Dayjs>(dayjs().startOf('day'))
+  const loading = ref(false)
+  const templatesLoading = ref(false)
+  const saving = ref(false)
 
   // 已滚动安排截止日期
   const generatedUntil = computed<string | undefined>(() => {
@@ -71,16 +72,16 @@ export function useSchedule() {
 
   // 导航限制：范围限定在 [今日, 今日 + 28天]
   const canPrev = computed<boolean>(() => {
-    return anchorDate.value.isAfter(today)
+    return anchorDate.value.isAfter(today.value)
   })
 
   const canNext = computed<boolean>(() => {
     // 保证 anchorDate + 6 不超过 today + 28
-    return anchorDate.value.isBefore(today.add(28 - 7, 'day'))
+    return anchorDate.value.isBefore(today.value.add(28 - 7, 'day'))
   })
 
   const isCurrentWeek = computed<boolean>(() => {
-    return anchorDate.value.isSame(today, 'day')
+    return anchorDate.value.isSame(today.value, 'day')
   })
 
   // 加载 7 天概览
@@ -92,8 +93,8 @@ export function useSchedule() {
       const endAt = days[6]!.endOf('day').format('YYYY-MM-DD HH:mm:ss')
       const res = await getScheduleOverview(startAt, endAt)
       overview.value = res
-    } catch (e: any) {
-      ElMessage.error(e?.message || '加载周日程失败')
+    } catch {
+      // http.ts 已统一提示错误
     } finally {
       loading.value = false
     }
@@ -104,8 +105,8 @@ export function useSchedule() {
     templatesLoading.value = true
     try {
       templates.value = await listAvailabilityTemplates()
-    } catch (e: any) {
-      ElMessage.error(e?.message || '加载作息模板失败')
+    } catch {
+      // http.ts 已统一提示错误
     } finally {
       templatesLoading.value = false
     }
@@ -119,19 +120,19 @@ export function useSchedule() {
   // 导航
   function prevWeek() {
     if (!canPrev.value) return
-    anchorDate.value = clampAnchorDate(anchorDate.value.subtract(7, 'day'), today)
-    fetchSchedule()
+    anchorDate.value = clampAnchorDate(anchorDate.value.subtract(7, 'day'), today.value)
+    void fetchSchedule()
   }
 
   function nextWeek() {
     if (!canNext.value) return
-    anchorDate.value = clampAnchorDate(anchorDate.value.add(7, 'day'), today)
-    fetchSchedule()
+    anchorDate.value = clampAnchorDate(anchorDate.value.add(7, 'day'), today.value)
+    void fetchSchedule()
   }
 
   function jumpToToday() {
-    anchorDate.value = today
-    fetchSchedule()
+    anchorDate.value = today.value
+    void fetchSchedule()
   }
 
   // 一键切换整天休息/可约
@@ -142,8 +143,7 @@ export function useSchedule() {
       ElMessage.success(isOff ? '已设为整天休息' : '已设为整天可约')
       await fetchSchedule()
       return true
-    } catch (e: any) {
-      ElMessage.error(e?.message || '设置失败')
+    } catch {
       return false
     } finally {
       saving.value = false
@@ -158,8 +158,7 @@ export function useSchedule() {
       ElMessage.success('已恢复常规作息')
       await fetchSchedule()
       return res
-    } catch (e: any) {
-      ElMessage.error(e?.message || '恢复失败')
+    } catch {
       return null
     } finally {
       saving.value = false
@@ -174,8 +173,7 @@ export function useSchedule() {
       ElMessage.success('已添加可约时段')
       await fetchSchedule()
       return true
-    } catch (e: any) {
-      ElMessage.error(e?.message || '添加失败')
+    } catch {
       return false
     } finally {
       saving.value = false
@@ -190,8 +188,7 @@ export function useSchedule() {
       ElMessage.success('已标记不可约时段')
       await fetchSchedule()
       return true
-    } catch (e: any) {
-      ElMessage.error(e?.message || '标记失败')
+    } catch {
       return false
     } finally {
       saving.value = false
@@ -206,8 +203,7 @@ export function useSchedule() {
       ElMessage.success('已删除档期')
       await fetchSchedule()
       return true
-    } catch (e: any) {
-      ElMessage.error(e?.message || '删除失败')
+    } catch {
       return false
     } finally {
       saving.value = false
@@ -227,8 +223,7 @@ export function useSchedule() {
       }
       await refresh()
       return true
-    } catch (e: any) {
-      ElMessage.error(e?.message || '保存失败')
+    } catch {
       return false
     } finally {
       saving.value = false
@@ -243,8 +238,7 @@ export function useSchedule() {
       ElMessage.success(enabled ? '已启用作息模板' : '已暂停作息模板')
       await refresh()
       return true
-    } catch (e: any) {
-      ElMessage.error(e?.message || '操作失败')
+    } catch {
       return false
     } finally {
       saving.value = false
@@ -259,8 +253,7 @@ export function useSchedule() {
       ElMessage.success('作息模板已删除')
       await refresh()
       return true
-    } catch (e: any) {
-      ElMessage.error(e?.message || '删除失败')
+    } catch {
       return false
     } finally {
       saving.value = false

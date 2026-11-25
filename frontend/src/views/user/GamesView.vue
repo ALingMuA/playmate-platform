@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 游戏列表（对齐 frontend-prototype games.html：页头 + 服务类型 + 游戏卡片网格）。
+ * 游戏列表（对齐 docs/06-原型与架构图/frontend-prototype/games.html：页头 + 服务类型 + 游戏卡片网格）。
  *
  * <p>展示已启用的游戏卡片（图标、名称、简介），并展示服务类型标签；
  * 点击卡片跳转对应游戏的陪玩师列表。数据来自 catalog 模块公开接口，游客可访问。</p>

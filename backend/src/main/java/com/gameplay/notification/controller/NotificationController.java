@@ -7,8 +7,11 @@ import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.notification.dto.NotificationView;
 import com.gameplay.notification.service.NotificationService;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -21,6 +24,7 @@ import java.util.Map;
 /**
  * 用户端站内通知接口（FR-A07）。
  */
+@Validated
 @RestController
 @RequestMapping("/api/notifications")
 @RequiredArgsConstructor
@@ -30,8 +34,8 @@ public class NotificationController {
 
     /** 我的通知分页 */
     @GetMapping
-    public ApiResponse<Page<NotificationView>> list(@RequestParam(defaultValue = "1") long page,
-                                                    @RequestParam(defaultValue = "10") long size,
+    public ApiResponse<Page<NotificationView>> list(@RequestParam(defaultValue = "1") @Min(1) long page,
+                                                    @RequestParam(defaultValue = "10") @Min(1) @Max(100) long size,
                                                     @RequestParam(required = false) Integer readStatus,
                                                     Authentication authentication) {
         if (readStatus != null && readStatus != 0 && readStatus != 1) {

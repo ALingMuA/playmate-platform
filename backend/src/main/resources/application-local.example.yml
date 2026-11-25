@@ -1,0 +1,14 @@
+# 本机开发配置模板：复制为 application-local.yml 后填写真实值（application-local.yml 已被 gitignore，勿提交）
+# 说明：application.yml 中 spring.profiles.active=local 默认激活本 profile
+spring:
+  datasource:
+    password: "你的MySQL密码"
+
+jwt:
+  # 至少 32 字节随机串，可用 `openssl rand -base64 48` 生成
+  secret: "在这里粘贴随机生成的JWT密钥"
+
+app:
+  cors:
+    # Vite 开发环境默认值；多个来源用英文逗号分隔
+    allowed-origins: "http://localhost:5173"

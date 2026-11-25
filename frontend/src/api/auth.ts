@@ -48,8 +48,13 @@ export function register(data: {
 }
 
 /** 当前用户信息（FR-A05） */
-export function fetchMe(): Promise<LoginUser> {
-  return request<LoginUser>({ url: '/auth/me', method: 'get' })
+export function fetchMe(options?: { silentError?: boolean; skipAuthRedirect?: boolean }): Promise<LoginUser> {
+  return request<LoginUser>({
+    url: '/auth/me',
+    method: 'get',
+    silentError: options?.silentError,
+    skipAuthRedirect: options?.skipAuthRedirect,
+  })
 }
 
 /** 更新个人资料（FR-A05）：昵称、头像、性别、简介，字段可选 */

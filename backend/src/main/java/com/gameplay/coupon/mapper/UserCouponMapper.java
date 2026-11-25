@@ -15,6 +15,12 @@ public interface UserCouponMapper extends BaseMapper<UserCoupon> {
     @Select("SELECT * FROM user_coupon WHERE locked_order_id = #{orderId} FOR UPDATE")
     UserCoupon selectByLockedOrderIdForUpdate(@Param("orderId") Long orderId);
 
+    @Select("SELECT * FROM user_coupon WHERE used_order_id = #{orderId} FOR UPDATE")
+    UserCoupon selectByUsedOrderIdForUpdate(@Param("orderId") Long orderId);
+
     @org.apache.ibatis.annotations.Update("UPDATE user_coupon SET status = #{status}, locked_order_id = NULL, locked_at = NULL WHERE id = #{id}")
     int releaseLock(@Param("id") Long id, @Param("status") String status);
+
+    @org.apache.ibatis.annotations.Update("UPDATE user_coupon SET status = #{status}, locked_order_id = NULL, locked_at = NULL, used_order_id = NULL, used_at = NULL WHERE id = #{id}")
+    int rollbackUsed(@Param("id") Long id, @Param("status") String status);
 }

@@ -389,4 +389,130 @@ class CompanionScheduleEnhancementTest {
     void renew_task_runs_cleanly() {
         renewTask.renewAll();
     }
+
+    @Test
+    @DisplayName("取消全天休息(isOff=false)存在既有可约档期时自动补全空隙；批量创建过去日期返回 422")
+    void toggle_day_off_false_merges_gaps_and_batch_rejects_past() throws Exception {
+        String token = createApprovedCompanion();
+        LocalDate targetDate = LocalDate.now().plusDays(3);
+
+        // 先创建一段手动可约档期与一段不可约档期
+        mockMvc.perform(post("/api/companion/availabilities")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("startAt", FMT.format(targetDate.atTime(10, 0)))
+                                .put("endAt", FMT.format(targetDate.atTime(14, 0)))
+                                .put("remark", "午间可约")
+                                .toString()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/companion/availabilities/unavailable")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("startAt", FMT.format(targetDate.atTime(16, 0)))
+                                .put("endAt", FMT.format(targetDate.atTime(18, 0)))
+                                .put("remark", "临时有事")
+                                .toString()))
+                .andExpect(status().isOk());
+
+        // isOff=false 不应因已有 AVAILABLE 而报 SLOT_CONFLICT，应清除 UNAVAILABLE 并补全剩余空隙
+        mockMvc.perform(post("/api/companion/availabilities/toggle-day-off")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("date", targetDate.toString())
+                                .put("isOff", false)
+                                .put("remark", "恢复全天可约")
+                                .toString()))
+                .andExpect(status().isOk());
+
+        Long companionUserId = objectMapper.readTree(
+                mockMvc.perform(get("/api/companion/profile")
+                                .header("Authorization", "Bearer " + token))
+                        .andExpect(status().isOk())
+                        .andReturn().getResponse().getContentAsString())
+                .path("data").path("userId").asLong();
+
+        Long unavailableRemaining = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM companion_availability WHERE companion_user_id = ? AND availability_status = 'UNAVAILABLE' AND start_at < ? AND end_at > ?",
+                Long.class, companionUserId, targetDate.plusDays(1).atStartOfDay(), targetDate.atStartOfDay());
+        assertThat(unavailableRemaining).isZero();
+
+        Long availableSegments = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM companion_availability WHERE companion_user_id = ? AND availability_status = 'AVAILABLE' AND start_at < ? AND end_at > ?",
+                Long.class, companionUserId, targetDate.plusDays(1).atStartOfDay(), targetDate.atStartOfDay());
+        assertThat(availableSegments).isGreaterThanOrEqualTo(3L);
+
+        // 批量创建过去日期应返回 422 AVAILABILITY_PAST_TIME
+        mockMvc.perform(post("/api/companion/availabilities/batch")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("startDate", LocalDate.now().minusDays(1).toString())
+                                .put("endDate", LocalDate.now().plusDays(1).toString())
+                                .put("allDay", true)
+                                .toString()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("AVAILABILITY_PAST_TIME"));
+    }
+
+    @Test
+    @DisplayName("restore-day 在部分模板时段被订单锁定时保留锁定段并自动补齐剩余常规时段")
+    void restore_day_preserves_partial_locked_template_slot_and_fills_gap() throws Exception {
+        String token = createApprovedCompanion();
+        LocalDate targetDate = LocalDate.now().plusDays(5);
+
+        Long companionUserId = objectMapper.readTree(
+                mockMvc.perform(get("/api/companion/profile")
+                                .header("Authorization", "Bearer " + token))
+                        .andExpect(status().isOk())
+                        .andReturn().getResponse().getContentAsString())
+                .path("data").path("userId").asLong();
+
+        // 1. 创建当天 10:00-18:00 的常规模板并触发生成
+        ObjectNode createReq = objectMapper.createObjectNode();
+        createReq.put("templateName", "白天全段");
+        createReq.put("dayOfWeek", String.valueOf(targetDate.getDayOfWeek().getValue()));
+        createReq.put("allDay", false);
+        createReq.put("startTime", "10:00:00");
+        createReq.put("endTime", "18:00:00");
+        createReq.put("effectiveFrom", LocalDate.now().toString());
+
+        mockMvc.perform(post("/api/companion/availability-templates")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createReq.toString()))
+                .andExpect(status().isOk());
+
+        // 2. 将生成的模板档期截断为 10:00-12:00 并插入订单占用锁定，再添加一条手动不可约记录 18:00-20:00
+        jdbcTemplate.update(
+                "UPDATE companion_availability SET end_at = ? WHERE companion_user_id = ? AND source_type = 'RECURRENCE' AND start_at = ?",
+                targetDate.atTime(12, 0), companionUserId, targetDate.atTime(10, 0));
+        jdbcTemplate.update(
+                "INSERT INTO order_time_slot (order_id, companion_user_id, start_at, end_at, slot_status) VALUES (?, ?, ?, ?, ?)",
+                99998L, companionUserId, targetDate.atTime(10, 0), targetDate.atTime(12, 0), "EFFECTIVE");
+
+        mockMvc.perform(post("/api/companion/availabilities/unavailable")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("startAt", FMT.format(targetDate.atTime(18, 0)))
+                                .put("endAt", FMT.format(targetDate.atTime(20, 0)))
+                                .put("remark", "晚上休息")
+                                .toString()))
+                .andExpect(status().isOk());
+
+        // 3. restore-day 应清除手动不可约记录，保留锁定模板段 10:00-12:00 并自动补齐 12:00-18:00 空隙
+        mockMvc.perform(post("/api/companion/availabilities/restore-day")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("date", targetDate.toString())
+                                .toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.removedManual").value(1))
+                .andExpect(jsonPath("$.data.regenerated").value(2));
+    }
 }

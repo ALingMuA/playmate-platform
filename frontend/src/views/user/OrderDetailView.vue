@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * 订单详情（对齐 frontend-prototype order-detail.html：时间线 + 服务信息 + 操作）。
+ * 订单详情（对齐 docs/06-原型与架构图/frontend-prototype/order-detail.html：时间线 + 服务信息 + 操作）。
  *
  * <p>展示订单状态轨迹（FR-U11），按状态提供支付/取消/确认完成/评价/投诉入口，
  * 分别跳转支付页、评价页、投诉页。</p>
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
 import { cancelOrder, confirmOrder, userOrderDetail, type Order } from '@/api/order'
 import { loadPrivateImage } from '@/api/file'
 
@@ -20,8 +20,9 @@ const loading = ref(true)
 const acting = ref(false)
 const deliveryImageUrls = ref<Record<string, string>>({})
 const deliveryImageErrors = ref<Record<string, boolean>>({})
+let loadSeq = 0
 
-const statusMap: Record<string, { label: string; type: string }> = {
+const statusMap: Record<string, { label: string; type: TagProps['type'] }> = {
   PENDING_PAYMENT: { label: '待支付', type: 'warning' },
   WAITING_ACCEPTANCE: { label: '待接单', type: 'info' },
   WAITING_SERVICE: { label: '待服务', type: 'primary' },
@@ -67,20 +68,36 @@ function fmtMoney(cents: number): string {
 }
 
 async function load() {
+  const id = orderId.value
+  const seq = ++loadSeq
   loading.value = true
+  order.value = null
+  deliveryImageUrls.value = {}
+  deliveryImageErrors.value = {}
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    loading.value = false
+    return
+  }
   try {
-    order.value = await userOrderDetail(orderId.value)
-    deliveryImageUrls.value = {}
-    deliveryImageErrors.value = {}
-    await Promise.all((order.value.deliveryEvidences ?? []).map(async (evidence) => {
+    const detail = await userOrderDetail(id)
+    if (seq !== loadSeq || orderId.value !== id) return
+    order.value = detail
+    await Promise.all((detail.deliveryEvidences ?? []).map(async (evidence) => {
       try {
-        deliveryImageUrls.value[evidence.fileUrl] = await loadPrivateImage(evidence.fileUrl)
+        const url = await loadPrivateImage(evidence.fileUrl)
+        if (seq === loadSeq && orderId.value === id) {
+          deliveryImageUrls.value[evidence.fileUrl] = url
+        }
       } catch {
-        deliveryImageErrors.value[evidence.fileUrl] = true
+        if (seq === loadSeq && orderId.value === id) {
+          deliveryImageErrors.value[evidence.fileUrl] = true
+        }
       }
     }))
+  } catch {
+    if (seq === loadSeq) order.value = null
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -89,51 +106,60 @@ async function handlePay() {
 }
 
 async function handleCancel() {
-  if (!order.value) return
-  let reason = ''
-  try {
-    const result = await ElMessageBox.prompt(
-      order.value.orderStatus === 'PENDING_PAYMENT' ? '订单未支付，取消后将直接关闭。' : '订单已支付，取消后将全额退回虚拟余额。',
-      `取消订单 ${order.value.orderNo}`,
-      {
-        confirmButtonText: '确认取消',
-        cancelButtonText: '再想想',
-        inputPlaceholder: '取消原因（选填）',
-      },
-    )
-    reason = result.value
-  } catch {
-    return
-  }
+  if (!order.value || acting.value) return
+  const target = order.value
   acting.value = true
   try {
-    const wasPaid = order.value.orderStatus !== 'PENDING_PAYMENT'
-    await cancelOrder(order.value.id, reason)
+    let reason = ''
+    try {
+      const result = await ElMessageBox.prompt(
+        target.orderStatus === 'PENDING_PAYMENT' ? '订单未支付，取消后将直接关闭。' : '订单已支付，取消后将全额退回虚拟余额。',
+        `取消订单 ${target.orderNo}`,
+        {
+          confirmButtonText: '确认取消',
+          cancelButtonText: '再想想',
+          inputPlaceholder: '取消原因（选填）',
+        },
+      )
+      reason = result.value
+    } catch {
+      return
+    }
+    const wasPaid = target.orderStatus !== 'PENDING_PAYMENT'
+    await cancelOrder(target.id, reason)
     ElMessage.success(wasPaid ? '订单已取消，款项已全额退回虚拟钱包' : '订单已取消')
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     acting.value = false
   }
 }
 
 async function handleConfirm() {
-  if (!order.value) return
-  try {
-    await ElMessageBox.confirm('确认服务已完成？确认后陪玩师将收到收益。', '确认完成', { type: 'info' })
-  } catch {
-    return
-  }
+  if (!order.value || acting.value) return
+  const targetId = order.value.id
   acting.value = true
   try {
-    await confirmOrder(order.value.id)
+    try {
+      await ElMessageBox.confirm('确认服务已完成？确认后陪玩师将收到收益。', '确认完成', { type: 'info' })
+    } catch {
+      return
+    }
+    await confirmOrder(targetId)
     ElMessage.success('已完成')
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     acting.value = false
   }
 }
 
 onMounted(load)
+watch(orderId, () => {
+  void load()
+})
 </script>
 
 <template>
@@ -145,7 +171,7 @@ onMounted(load)
           <h1 class="page-title">订单详情</h1>
           <p class="page-subtitle">订单号：{{ order.orderNo }}</p>
         </div>
-        <el-tag :type="(statusMap[order.orderStatus]?.type as any) ?? 'info'">
+        <el-tag :type="statusMap[order.orderStatus]?.type ?? 'info'">
           {{ statusMap[order.orderStatus]?.label ?? order.orderStatus }}
         </el-tag>
       </div>

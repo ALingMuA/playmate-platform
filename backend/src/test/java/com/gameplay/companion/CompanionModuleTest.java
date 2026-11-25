@@ -1,9 +1,12 @@
 package com.gameplay.companion;
 
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.gameplay.companion.domain.CompanionProfile;
 import com.gameplay.companion.domain.CompanionService;
+import com.gameplay.companion.mapper.CompanionProfileMapper;
 import com.gameplay.companion.mapper.CompanionServiceMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -61,6 +64,9 @@ class CompanionModuleTest {
 
     @Autowired
     private CompanionServiceMapper companionServiceMapper;
+
+    @Autowired
+    private CompanionProfileMapper companionProfileMapper;
 
     private String uniqueUser() {
         return "cmp" + System.currentTimeMillis() + "_" + SEQ.incrementAndGet();
@@ -676,7 +682,11 @@ class CompanionModuleTest {
         assertThat(fields).containsExactlyInAnyOrder("startAt", "endAt");
 
         mockMvc.perform(get("/api/companion-profiles/{userId}/availabilities", companionUserId)
-                        .param("days", "8"))
+                        .param("days", "28"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/companion-profiles/{userId}/availabilities", companionUserId)
+                        .param("days", "29"))
                 .andExpect(status().isBadRequest());
 
         jdbcTemplate.update("UPDATE companion_profile SET service_status = 'BUSY' WHERE user_id = ?", companionUserId);
@@ -1344,13 +1354,13 @@ class CompanionModuleTest {
     @Test
     @DisplayName("权限校验：非陪玩师不能提交服务/档期；非本人不能查看他人申请")
     void permission_checks() throws Exception {
-        // 普通用户（非陪玩师）调用陪玩师接口 → 403
+        // 普通用户（非陪玩师）调用陪玩师接口 → 403 PERMISSION_DENIED
         JsonNode normal = registerAndLogin(uniqueUser());
         String nToken = normal.path("token").asText();
         mockMvc.perform(get("/api/companion/profile")
                         .header("Authorization", bearer(nToken)))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("COMPANION_NOT_APPROVED"));
+                .andExpect(jsonPath("$.code").value("PERMISSION_DENIED"));
 
         // 申请详情只能本人查看
         String admin = adminToken();
@@ -1534,5 +1544,123 @@ class CompanionModuleTest {
             }
         }
         return false;
+    }
+
+    @Test
+    @DisplayName("陪玩师暂停后禁止修改接单状态/服务/上下架且不可被下单；禁止创建未认证游戏服务")
+    void suspended_and_uncertified_service_booking_guards() throws Exception {
+        String admin = adminToken();
+        JsonNode companion = prepareCompanion(admin);
+        String compToken = companion.path("token").asText();
+        long compUserId = companion.path("userId").asLong();
+        long certifiedGameId = firstGameId();
+        long serviceTypeId = firstServiceTypeId();
+
+        // 1. 插入一个已启用但不在陪玩师 capabilityJson 中的游戏，创建服务应返回 422
+        String uncertifiedGameName = uniqueUser() + "_uncertified_game";
+        jdbcTemplate.update("INSERT INTO game (game_name, enabled) VALUES (?, 1)", uncertifiedGameName);
+        Long uncertifiedGameId = jdbcTemplate.queryForObject(
+                "SELECT id FROM game WHERE game_name = ?", Long.class, uncertifiedGameName);
+        mockMvc.perform(post("/api/companion/services")
+                        .header("Authorization", bearer(compToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("gameId", uncertifiedGameId)
+                                .put("serviceTypeId", serviceTypeId)
+                                .put("title", "未认证游戏服务")
+                                .put("description", "不应通过")
+                                .put("priceCents", 5000)
+                                .put("minDurationMinutes", 60)
+                                .toString()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("COMPANION_SERVICE_INVALID_PARAM"));
+
+        // 2. 创建、审核并上架已认证游戏服务，且设置为可接单和有可约档期
+        MvcResult svcRes = mockMvc.perform(post("/api/companion/services")
+                        .header("Authorization", bearer(compToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("gameId", certifiedGameId)
+                                .put("serviceTypeId", serviceTypeId)
+                                .put("title", "已认证游戏服务")
+                                .put("description", "稳定上分，包赢包C")
+                                .put("priceCents", 5000)
+                                .put("minDurationMinutes", 60)
+                                .toString()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long serviceId = objectMapper.readTree(svcRes.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+        auditApproveService(admin, serviceId);
+        mockMvc.perform(put("/api/companion/profile/service-status")
+                        .header("Authorization", bearer(compToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode().put("serviceStatus", "AVAILABLE").toString()))
+                .andExpect(status().isOk());
+        mockMvc.perform(put("/api/companion/services/" + serviceId + "/shelf")
+                        .header("Authorization", bearer(compToken))
+                        .param("onShelf", "true"))
+                .andExpect(status().isOk());
+
+        LocalDateTime now = LocalDateTime.now();
+        mockMvc.perform(post("/api/companion/availabilities")
+                        .header("Authorization", bearer(compToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("startAt", now.format(FMT))
+                                .put("endAt", now.plusHours(4).format(FMT))
+                                .toString()))
+                .andExpect(status().isOk());
+        assertThat(publicListHasService(serviceId, compUserId)).isTrue();
+
+        // 3. 暂停陪玩师资格与接单状态（经由 MyBatis Mapper 更新以保持测试事务内 L1 缓存一致）
+        companionProfileMapper.update(null, new LambdaUpdateWrapper<CompanionProfile>()
+                .eq(CompanionProfile::getUserId, compUserId)
+                .set(CompanionProfile::getCertificationStatus, "SUSPENDED")
+                .set(CompanionProfile::getServiceStatus, "SUSPENDED"));
+
+        mockMvc.perform(put("/api/companion/profile/service-status")
+                        .header("Authorization", bearer(compToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode().put("serviceStatus", "AVAILABLE").toString()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("COMPANION_PROFILE_SUSPENDED"));
+
+        mockMvc.perform(post("/api/companion/services")
+                        .header("Authorization", bearer(compToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("gameId", certifiedGameId)
+                                .put("serviceTypeId", serviceTypeId)
+                                .put("title", "暂停后创建服务")
+                                .put("description", "不应通过")
+                                .put("priceCents", 5000)
+                                .put("minDurationMinutes", 60)
+                                .toString()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("COMPANION_PROFILE_SUSPENDED"));
+
+        mockMvc.perform(put("/api/companion/services/" + serviceId + "/shelf")
+                        .header("Authorization", bearer(compToken))
+                        .param("onShelf", "false"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("COMPANION_PROFILE_SUSPENDED"));
+
+        // 公开列表过滤已暂停陪玩师的服务，下单也应被拦截
+        assertThat(publicListHasService(serviceId, compUserId)).isFalse();
+
+        JsonNode buyer = registerAndLogin(uniqueUser());
+        String buyerToken = buyer.path("token").asText();
+        mockMvc.perform(post("/api/play-orders")
+                        .header("Authorization", bearer(buyerToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("companionUserId", compUserId)
+                                .put("companionServiceId", serviceId)
+                                .put("durationMinutes", 60)
+                                .put("appointmentStartAt", now.plusMinutes(10).format(FMT))
+                                .toString()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("COMPANION_NOT_AVAILABLE"));
     }
 }

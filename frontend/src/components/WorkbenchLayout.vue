@@ -149,12 +149,12 @@ function handleLogout() {
       <el-header class="header">
         <div class="header-left">
           <el-tooltip v-if="isMobile" content="打开导航" placement="bottom">
-            <el-button text circle class="menu-btn" @click="drawerVisible = true">
+            <el-button text circle class="menu-btn" aria-label="打开导航" @click="drawerVisible = true">
               <el-icon><Menu /></el-icon>
             </el-button>
           </el-tooltip>
           <el-tooltip v-if="canGoBack" content="返回上一页" placement="bottom">
-            <el-button text circle class="back-btn" @click="goBack">
+            <el-button text circle class="back-btn" aria-label="返回上一页" @click="goBack">
               <el-icon><ArrowLeft /></el-icon>
             </el-button>
           </el-tooltip>
@@ -169,10 +169,10 @@ function handleLogout() {
             {{ userStore.user.nickname }}
           </el-tag>
           <el-tooltip content="返回用户端" placement="bottom">
-            <el-button text circle @click="router.push('/')"><el-icon><HomeFilled /></el-icon></el-button>
+            <el-button text circle aria-label="返回用户端" @click="router.push('/')"><el-icon><HomeFilled /></el-icon></el-button>
           </el-tooltip>
           <el-tooltip content="退出登录" placement="bottom">
-            <el-button text circle type="danger" @click="handleLogout"><el-icon><SwitchButton /></el-icon></el-button>
+            <el-button text circle type="danger" aria-label="退出登录" @click="handleLogout"><el-icon><SwitchButton /></el-icon></el-button>
           </el-tooltip>
         </div>
       </el-header>

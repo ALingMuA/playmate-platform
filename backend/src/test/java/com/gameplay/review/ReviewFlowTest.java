@@ -140,12 +140,20 @@ class ReviewFlowTest {
 
     /** 提交入驻申请并由管理员审核通过 */
     private void approveCompanionApplication(String companionToken, long gameId) throws Exception {
+        var positionTagIds = objectMapper.createArrayNode();
+        MvcResult tagsRes = mockMvc.perform(get("/api/tags").param("gameId", String.valueOf(gameId)))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode tagsData = objectMapper.readTree(tagsRes.getResponse().getContentAsString()).path("data");
+        if (tagsData.isArray() && tagsData.size() > 0) {
+            positionTagIds.add(tagsData.get(0).path("id").asLong());
+        }
         com.fasterxml.jackson.databind.node.ObjectNode capability = objectMapper.createObjectNode()
                 .put("gameId", gameId)
                 .put("gameName", "测试游戏")
                 .put("server", "微信区")
                 .put("rank", "王者");
-        capability.set("positionTagIds", objectMapper.createArrayNode().add(1));
+        capability.set("positionTagIds", positionTagIds);
         com.fasterxml.jackson.databind.node.ObjectNode applicationBody = objectMapper.createObjectNode()
                 .put("realName", "测试陪玩")
                 .put("contactMobile", "1" + (5_000_000_000L + SEQ.incrementAndGet()))
@@ -583,5 +591,297 @@ class ReviewFlowTest {
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("COMPLAINT_ORDER_NOT_ELIGIBLE"))
                 .andReturn();
+    }
+
+    @Test
+    @DisplayName("部分退款仲裁（未结算/已结算）闭环与结案后禁止重复投诉")
+    void complaint_partial_refund_and_block_repeat_after_resolved() throws Exception {
+        String adminToken = loginAndGetToken(ADMIN_ACCOUNT, ADMIN_PASSWORD);
+
+        // 场景 A：待确认状态（未结算）发起投诉 -> PARTIAL_REFUND：买家部分退款、陪玩师按净额结算且计入完成单数
+        JsonNode p1 = prepareParties();
+        long buyer1Id = p1.path("buyerId").asLong();
+        String buyer1Token = p1.path("buyerToken").asText();
+        long comp1Id = p1.path("companionId").asLong();
+        String comp1Token = p1.path("companionToken").asText();
+        long svc1Id = p1.path("serviceId").asLong();
+
+        LocalDateTime start1 = LocalDateTime.now().plusMinutes(2);
+        MvcResult created1 = mockMvc.perform(post("/api/play-orders")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("companionUserId", comp1Id)
+                                .put("companionServiceId", svc1Id)
+                                .put("durationMinutes", 60)
+                                .put("appointmentStartAt", start1.format(FMT))
+                                .toString()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long order1Id = objectMapper.readTree(created1.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/play-orders/" + order1Id + "/pay")
+                        .header("Authorization", "Bearer " + buyer1Token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/companion/orders/" + order1Id + "/accept")
+                        .header("Authorization", "Bearer " + comp1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"confirm\":true}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/companion/orders/" + order1Id + "/start")
+                        .header("Authorization", "Bearer " + comp1Token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/companion/orders/" + order1Id + "/end")
+                        .header("Authorization", "Bearer " + comp1Token))
+                .andExpect(status().isOk());
+
+        MvcResult c1Res = mockMvc.perform(post("/api/complaints")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .param("orderId", String.valueOf(order1Id))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("complaintType", "MISMATCH")
+                                .put("description", "体验未达预期")
+                                .toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.complaintStatus").value("PENDING"))
+                .andReturn();
+        long complaint1Id = objectMapper.readTree(c1Res.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/admin/complaints/" + complaint1Id + "/handle")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("resolutionType", "PARTIAL_REFUND")
+                                .put("refundAmountCents", 2000)
+                                .put("handlingOpinion", "部分退款20元，其余结算陪玩师")
+                                .toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.complaintStatus").value("RESOLVED"))
+                .andExpect(jsonPath("$.data.resolutionType").value("PARTIAL_REFUND"))
+                .andExpect(jsonPath("$.data.refundAmountCents").value(2000));
+
+        mockMvc.perform(get("/api/play-orders/" + order1Id)
+                        .header("Authorization", "Bearer " + buyer1Token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.orderStatus").value("COMPLETED"));
+
+        WalletAccount buyer1Wallet = walletAccountMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<WalletAccount>()
+                        .eq(WalletAccount::getUserId, buyer1Id));
+        assertThat(buyer1Wallet.getBalanceCents()).isEqualTo(96_000L);
+
+        WalletAccount comp1Wallet = walletAccountMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<WalletAccount>()
+                        .eq(WalletAccount::getUserId, comp1Id));
+        assertThat(comp1Wallet.getBalanceCents()).isEqualTo(4_000L);
+        assertThat(comp1Wallet.getTotalIncomeCents()).isEqualTo(4_000L);
+
+        CompanionProfile comp1Profile = companionProfileMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<CompanionProfile>()
+                        .eq(CompanionProfile::getUserId, comp1Id));
+        assertThat(comp1Profile.getCompletedOrderCount()).isEqualTo(1);
+
+        // 仲裁结案后禁止同一订单再次发起投诉
+        mockMvc.perform(post("/api/complaints")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .param("orderId", String.valueOf(order1Id))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("complaintType", "OTHER")
+                                .put("description", "结案后二次投诉")
+                                .toString()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("COMPLAINT_ALREADY_EXISTS"));
+
+        // 场景 B：已确认完成（已结算）发起投诉 -> PARTIAL_REFUND：同时扣回陪玩师余额与 totalIncomeCents
+        JsonNode p2 = prepareParties();
+        long buyer2Id = p2.path("buyerId").asLong();
+        String buyer2Token = p2.path("buyerToken").asText();
+        long comp2Id = p2.path("companionId").asLong();
+        String comp2Token = p2.path("companionToken").asText();
+        long svc2Id = p2.path("serviceId").asLong();
+        long order2Id = setupCompletedOrder(buyer2Token, comp2Token, comp2Id, svc2Id);
+
+        MvcResult c2Res = mockMvc.perform(post("/api/complaints")
+                        .header("Authorization", "Bearer " + buyer2Token)
+                        .param("orderId", String.valueOf(order2Id))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("complaintType", "LATE")
+                                .put("description", "已结算订单部分退款")
+                                .toString()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long complaint2Id = objectMapper.readTree(c2Res.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/admin/complaints/" + complaint2Id + "/handle")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("resolutionType", "PARTIAL_REFUND")
+                                .put("refundAmountCents", 1500)
+                                .put("handlingOpinion", "扣回15元")
+                                .toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.complaintStatus").value("RESOLVED"));
+
+        WalletAccount buyer2Wallet = walletAccountMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<WalletAccount>()
+                        .eq(WalletAccount::getUserId, buyer2Id));
+        assertThat(buyer2Wallet.getBalanceCents()).isEqualTo(95_500L);
+
+        WalletAccount comp2Wallet = walletAccountMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<WalletAccount>()
+                        .eq(WalletAccount::getUserId, comp2Id));
+        assertThat(comp2Wallet.getBalanceCents()).isEqualTo(4_500L);
+        assertThat(comp2Wallet.getTotalIncomeCents()).isEqualTo(4_500L);
+
+        mockMvc.perform(get("/api/complaints/mine")
+                        .header("Authorization", "Bearer " + buyer2Token)
+                        .param("status", "RESOLVED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.records[0].orderId").value(order2Id));
+
+        mockMvc.perform(get("/api/complaints/mine")
+                        .header("Authorization", "Bearer " + buyer2Token)
+                        .param("status", "PENDING"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0));
+    }
+
+    @Test
+    @DisplayName("服务中订单允许投诉、非法路径遍历证据被拒，且全额退款释放档期并回退完成单数")
+    void complaint_in_service_evidence_validation_and_full_refund_cleanup() throws Exception {
+        String adminToken = loginAndGetToken(ADMIN_ACCOUNT, ADMIN_PASSWORD);
+        JsonNode p1 = prepareParties();
+        String buyer1Token = p1.path("buyerToken").asText();
+        long comp1Id = p1.path("companionId").asLong();
+        String comp1Token = p1.path("companionToken").asText();
+        long svc1Id = p1.path("serviceId").asLong();
+
+        LocalDateTime start = LocalDateTime.now().plusMinutes(2);
+        MvcResult created = mockMvc.perform(post("/api/play-orders")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("companionUserId", comp1Id)
+                                .put("companionServiceId", svc1Id)
+                                .put("durationMinutes", 60)
+                                .put("appointmentStartAt", start.format(FMT))
+                                .toString()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long orderId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/play-orders/" + orderId + "/pay")
+                        .header("Authorization", "Bearer " + buyer1Token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/companion/orders/" + orderId + "/accept")
+                        .header("Authorization", "Bearer " + comp1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"confirm\":true}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/companion/orders/" + orderId + "/start")
+                        .header("Authorization", "Bearer " + comp1Token))
+                .andExpect(status().isOk());
+
+        // 非法证据路径（含 .. 遍历）应被 DTO 校验拒绝 -> 400
+        com.fasterxml.jackson.databind.node.ObjectNode badBody = objectMapper.createObjectNode()
+                .put("complaintType", "OTHER")
+                .put("description", "非法路径证据");
+        badBody.set("evidences", objectMapper.createArrayNode().add(
+                objectMapper.createObjectNode()
+                        .put("fileUrl", "/api/files/evidence/20260811/../secret.jpg")
+                        .put("fileName", "secret.jpg")));
+        mockMvc.perform(post("/api/complaints")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .param("orderId", String.valueOf(orderId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(badBody.toString()))
+                .andExpect(status().isBadRequest());
+
+        // IN_SERVICE 状态允许正常投诉并进入售后
+        MvcResult cRes = mockMvc.perform(post("/api/complaints")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .param("orderId", String.valueOf(orderId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("complaintType", "ATTITUDE")
+                                .put("description", "服务中途投诉")
+                                .toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.complaintStatus").value("PENDING"))
+                .andReturn();
+        long complaintId = objectMapper.readTree(cRes.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/admin/complaints/" + complaintId + "/handle")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("resolutionType", "FULL_REFUND")
+                                .put("handlingOpinion", "服务中止全额退款")
+                                .toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.complaintStatus").value("RESOLVED"));
+
+        // 全额退款释放时段占用后，同一时段应可重新下单
+        mockMvc.perform(post("/api/play-orders")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("companionUserId", comp1Id)
+                                .put("companionServiceId", svc1Id)
+                                .put("durationMinutes", 60)
+                                .put("appointmentStartAt", start.format(FMT))
+                                .toString()))
+                .andExpect(status().isOk());
+
+        // 已确认完成订单全额退款时，应扣减陪玩师累计收益并回退 completedOrderCount
+        JsonNode p2 = prepareParties();
+        String buyer2Token = p2.path("buyerToken").asText();
+        long comp2Id = p2.path("companionId").asLong();
+        String comp2Token = p2.path("companionToken").asText();
+        long svc2Id = p2.path("serviceId").asLong();
+        long order2Id = setupCompletedOrder(buyer2Token, comp2Token, comp2Id, svc2Id);
+
+        MvcResult c2Res = mockMvc.perform(post("/api/complaints")
+                        .header("Authorization", "Bearer " + buyer2Token)
+                        .param("orderId", String.valueOf(order2Id))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("complaintType", "OTHER")
+                                .put("description", "已确认订单全额退款")
+                                .toString()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long c2Id = objectMapper.readTree(c2Res.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/admin/complaints/" + c2Id + "/handle")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("resolutionType", "FULL_REFUND")
+                                .put("handlingOpinion", "全额退单回退统计")
+                                .toString()))
+                .andExpect(status().isOk());
+
+        WalletAccount comp2Wallet = walletAccountMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<WalletAccount>()
+                        .eq(WalletAccount::getUserId, comp2Id));
+        assertThat(comp2Wallet.getBalanceCents()).isZero();
+        assertThat(comp2Wallet.getTotalIncomeCents()).isZero();
+
+        CompanionProfile comp2Profile = companionProfileMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<CompanionProfile>()
+                        .eq(CompanionProfile::getUserId, comp2Id));
+        assertThat(comp2Profile.getCompletedOrderCount()).isZero();
     }
 }

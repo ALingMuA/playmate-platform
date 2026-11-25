@@ -108,6 +108,7 @@ onMounted(async () => {
 })
 
 async function handleStatus(value: string | number | boolean | undefined) {
+  if (statusSaving.value) return
   const status = String(value)
   if (status === profile.value?.serviceStatus) return
   statusSaving.value = true
@@ -115,12 +116,15 @@ async function handleStatus(value: string | number | boolean | undefined) {
     profile.value = await updateServiceStatus(status)
     emit('updated', profile.value)
     ElMessage.success('接单状态已更新')
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     statusSaving.value = false
   }
 }
 
 async function handleSave() {
+  if (saving.value) return
   if (!form.displayName.trim()) {
     ElMessage.warning('请填写展示名')
     return
@@ -137,6 +141,8 @@ async function handleSave() {
     })
     emit('updated', profile.value)
     ElMessage.success('陪玩主页资料已更新，公开主页同步展示')
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     saving.value = false
   }
@@ -179,7 +185,7 @@ function removeCapability(index: number) {
 
 async function handleProofUpload(file: File) {
   try {
-    const result = await uploadFile(file, 'proof')
+    const result = await uploadFile(file, 'certification')
     changeForm.proofUrls.push(result.url)
   } catch {
     // 拦截器已提示
@@ -188,6 +194,7 @@ async function handleProofUpload(file: File) {
 }
 
 async function handleSubmitChange() {
+  if (changeSaving.value) return
   if (changeForm.capabilities.length === 0) {
     ElMessage.warning('至少保留一项游戏能力')
     return
@@ -210,6 +217,8 @@ async function handleSubmitChange() {
     })
     changeVisible.value = false
     ElMessage.success('能力变更申请已提交，等待平台审核')
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     changeSaving.value = false
   }

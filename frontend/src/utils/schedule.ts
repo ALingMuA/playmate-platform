@@ -163,7 +163,7 @@ export function buildDaySchedule(
         availability: a,
         remark: a.remark || '休息',
       })
-      if (clipped.startMinute <= 30 && clipped.endMinute >= 1410) {
+      if (clipped.startMinute <= (isToday ? Math.min(1439, currentMinute + 30) : 30) && clipped.endMinute >= 1410) {
         isAllDayOff = true
       }
     } else {

@@ -60,15 +60,17 @@ done
 ls -la "$BACKUP_DIR"
 
 log "4/7 切换到新版本"
+id -u gameplay >/dev/null 2>&1 || useradd -r -s /sbin/nologin gameplay
 mv "$APP_DIR/frontend.new" "$APP_DIR/frontend"
 mv "$APP_DIR/$JAR.new" "$APP_DIR/$JAR"
 install -m 600 "$STAGE/gameplay.env" "$APP_DIR/gameplay.env"
 install -m 644 "$STAGE/application-prod.yml" "$APP_DIR/application-prod.yml"
 mkdir -p "$APP_DIR/uploads"
-chown -R root:root "$APP_DIR/frontend" "$APP_DIR/$JAR" "$APP_DIR/uploads"
 # tar 解包可能带出 777 权限，Web 根目录必须收紧
 find "$APP_DIR/frontend" -type d -exec chmod 755 {} +
 find "$APP_DIR/frontend" -type f -exec chmod 644 {} +
+chown -R gameplay:gameplay "$APP_DIR"
+chmod 600 "$APP_DIR/gameplay.env"
 
 log "5/7 检查数据库 $DB_NAME"
 set -a; . "$STAGE/gameplay.env"; set +a
@@ -82,8 +84,13 @@ if mysql -uroot -N -e "select 1 from information_schema.tables where table_schem
   # 预置历史已执行迁移版本，避免重复执行非幂等老脚本
   mysql -uroot "$DB_NAME" -e "INSERT IGNORE INTO schema_version (version) VALUES ('20260908_ai_model.sql'), ('20260913_ai_settings.sql');"
   if [ -d "$STAGE/migrations" ]; then
-    for mf in $(ls -1 "$STAGE/migrations"/*.sql 2>/dev/null | sort); do
+    for mf in "$STAGE/migrations"/*.sql; do
+      [ -e "$mf" ] || continue
       vname=$(basename "$mf")
+      if [ "$vname" = "20261103_demo_test_accounts.sql" ]; then
+        echo "    [生产跳过演示账号迁移] $vname"
+        continue
+      fi
       if mysql -uroot -N "$DB_NAME" -e "SELECT 1 FROM schema_version WHERE version='$vname';" | grep -q 1; then
         echo "    [跳过已执行] $vname"
       else
@@ -93,14 +100,15 @@ if mysql -uroot -N -e "select 1 from information_schema.tables where table_schem
       fi
     done
   fi
-  # 增量补充种子数据（INSERT IGNORE 幂等）
+  # 增量补充生产基础种子数据（INSERT IGNORE 幂等，严禁导入 data-demo.sql）
   mysql -uroot "$DB_NAME" < "$STAGE/data.sql"
 else
-  echo "  首次部署，执行 schema.sql 与 data.sql"
+  echo "  首次部署，执行 schema.sql 与 data.sql（严禁导入 data-demo.sql）"
   mysql -uroot < "$STAGE/schema.sql"
   mysql -uroot < "$STAGE/data.sql"
   if [ -d "$STAGE/migrations" ]; then
-    for mf in $(ls -1 "$STAGE/migrations"/*.sql 2>/dev/null | sort); do
+    for mf in "$STAGE/migrations"/*.sql; do
+      [ -e "$mf" ] || continue
       mysql -uroot "$DB_NAME" -e "INSERT IGNORE INTO schema_version (version) VALUES ('$(basename "$mf")');"
     done
   fi
@@ -140,14 +148,15 @@ fi
 
 echo
 echo "=== 健康检查 ==="
-printf '  首页        : '; curl -s -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1/
-printf '  后端直连    : '; curl -s -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:8080/api/announcements
-printf '  登录(admin) : '; curl -s -o /dev/null -w 'HTTP %{http_code}\n' -X POST http://127.0.0.1/api/auth/login -H 'Content-Type: application/json' -d '{"account":"admin","password":"Admin@123456"}'
-TOKEN=$(curl -s -X POST http://127.0.0.1:8080/api/auth/login -H 'Content-Type: application/json' -d '{"account":"admin","password":"Admin@123456"}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
-printf '  受保护接口  : '; curl -s -o /dev/null -w 'HTTP %{http_code}\n' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/admin/stats/overview
-# 握手成功后连接会保持，curl 到 --max-time 超时退出（码 28）；必须吞掉退出码，
-# 否则 set -e 会把"健康检查成功"误判为部署失败
-printf '  WebSocket   : '; curl -s -o /dev/null --max-time 3 -w 'HTTP %{http_code}\n' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "http://127.0.0.1/ws/cs?token=$TOKEN" || true
+HOME_CODE=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/)
+PUBLIC_API_CODE=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/announcements)
+PROTECTED_API_CODE=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/admin/stats/overview)
+printf '  首页              : HTTP %s\n' "$HOME_CODE"
+printf '  公开接口(期望200) : HTTP %s\n' "$PUBLIC_API_CODE"
+printf '  受保护接口(期望401): HTTP %s\n' "$PROTECTED_API_CODE"
+[ "$PUBLIC_API_CODE" = "200" ] || die "公开接口健康检查失败: HTTP $PUBLIC_API_CODE"
+[ "$PROTECTED_API_CODE" = "401" ] || die "受保护接口鉴权检查失败: HTTP $PROTECTED_API_CODE"
+
 # 只保留最近 5 份备份，避免磁盘堆积（每份含 jar 与前端，约 40M）
 KEEP=5
 OLD_BACKUPS=$(ls -1dt /opt/backup-* 2>/dev/null | tail -n +$((KEEP + 1)) || true)

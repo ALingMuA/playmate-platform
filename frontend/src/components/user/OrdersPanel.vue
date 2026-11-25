@@ -77,44 +77,50 @@ function goDetail(row: Order) {
 }
 
 async function handleCancel(row: Order) {
-  let reason = ''
-  try {
-    const result = await ElMessageBox.prompt(
-      row.orderStatus === 'PENDING_PAYMENT' ? '订单未支付，取消后将直接关闭。' : '订单已支付，取消后将全额退回虚拟余额。',
-      `取消订单 ${row.orderNo}`,
-      {
-        confirmButtonText: '确认取消',
-        cancelButtonText: '再想想',
-        inputPlaceholder: '取消原因（选填）',
-      },
-    )
-    reason = result.value
-  } catch {
-    return
-  }
+  if (acting.value) return
   acting.value = true
   try {
+    let reason = ''
+    try {
+      const result = await ElMessageBox.prompt(
+        row.orderStatus === 'PENDING_PAYMENT' ? '订单未支付，取消后将直接关闭。' : '订单已支付，取消后将全额退回虚拟余额。',
+        `取消订单 ${row.orderNo}`,
+        {
+          confirmButtonText: '确认取消',
+          cancelButtonText: '再想想',
+          inputPlaceholder: '取消原因（选填）',
+        },
+      )
+      reason = result.value
+    } catch {
+      return
+    }
     await cancelOrder(row.id, reason)
     ElMessage.success(row.orderStatus === 'PENDING_PAYMENT'
       ? '订单已取消'
       : '订单已取消，款项已全额退回虚拟钱包')
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     acting.value = false
   }
 }
 
 async function handleConfirm(row: Order) {
-  try {
-    await ElMessageBox.confirm('确认服务已完成？确认后陪玩师将收到收益。', '确认完成', { type: 'info' })
-  } catch {
-    return
-  }
+  if (acting.value) return
   acting.value = true
   try {
+    try {
+      await ElMessageBox.confirm('确认服务已完成？确认后陪玩师将收到收益。', '确认完成', { type: 'info' })
+    } catch {
+      return
+    }
     await confirmOrder(row.id)
     ElMessage.success('已完成')
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     acting.value = false
   }

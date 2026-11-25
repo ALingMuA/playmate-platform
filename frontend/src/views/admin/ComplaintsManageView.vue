@@ -97,7 +97,7 @@ function openHandle(row: Complaint) {
 }
 
 async function handleSubmit() {
-  if (!current.value) return
+  if (!current.value || handling.value) return
   if (!handleForm.handlingOpinion.trim()) {
     ElMessage.warning('请填写处理意见')
     return
@@ -115,17 +115,17 @@ async function handleSubmit() {
   }
   const label = { KEEP: '维持订单', FULL_REFUND: '全额退款', PARTIAL_REFUND: '部分退款' }[handleForm.resolutionType]
   const refundAmountCents = Math.round(Number(handleForm.refundAmountYuan.toFixed(2)) * 100)
-  try {
-    await ElMessageBox.confirm(
-      `确认以「${label}」处理该投诉${handleForm.resolutionType === 'PARTIAL_REFUND' ? `，退款 ¥${(refundAmountCents / 100).toFixed(2)}` : ''}？处理后将生成资金流水且不可撤销。`,
-      '投诉仲裁',
-      { type: 'warning' },
-    )
-  } catch {
-    return
-  }
   handling.value = true
   try {
+    try {
+      await ElMessageBox.confirm(
+        `确认以「${label}」处理该投诉${handleForm.resolutionType === 'PARTIAL_REFUND' ? `，退款 ¥${(refundAmountCents / 100).toFixed(2)}` : ''}？处理后将生成资金流水且不可撤销。`,
+        '投诉仲裁',
+        { type: 'warning' },
+      )
+    } catch {
+      return
+    }
     await adminHandleComplaint(current.value.id, {
       resolutionType: handleForm.resolutionType,
       refundAmountCents: handleForm.resolutionType === 'PARTIAL_REFUND' ? refundAmountCents : undefined,
@@ -135,6 +135,8 @@ async function handleSubmit() {
     handleVisible.value = false
     detailVisible.value = false
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     handling.value = false
   }
@@ -259,7 +261,7 @@ const fmtMoney = (cents: number) => '¥' + (cents / 100).toFixed(2)
         <el-descriptions-item label="投诉时间">{{ current.createdAt?.slice(0, 16) }}</el-descriptions-item>
       </el-descriptions>
       <template v-if="current && ['PENDING', 'PROCESSING'].includes(current.complaintStatus)" #footer>
-        <el-button type="primary" @click="handleVisible = true; detailVisible = false">去处理</el-button>
+        <el-button type="primary" @click="detailVisible = false; openHandle(current)">去处理</el-button>
       </template>
     </el-drawer>
 

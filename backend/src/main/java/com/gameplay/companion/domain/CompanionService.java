@@ -1,6 +1,8 @@
 package com.gameplay.companion.domain;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
@@ -56,6 +58,7 @@ public class CompanionService {
     private String auditReason;
 
     /** 审核时间 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDateTime auditAt;
 
     /** 逻辑删除：0否，1是 */

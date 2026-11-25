@@ -14,6 +14,10 @@ public interface ComplaintMapper extends BaseMapper<Complaint> {
     @Select("SELECT * FROM complaint WHERE id = #{id} FOR UPDATE")
     Complaint selectByIdForUpdate(@org.apache.ibatis.annotations.Param("id") Long id);
 
+    /** 某订单是否存在任何投诉记录（含已处理完），防止一单反复投诉套现 */
+    @Select("SELECT COUNT(*) FROM complaint WHERE order_id = #{orderId}")
+    long countByOrder(@Param("orderId") Long orderId);
+
     /** 某订单是否存在进行中（未处理完）的投诉，供发起投诉时校验（FR-U17） */
     @Select("""
             SELECT COUNT(*) FROM complaint

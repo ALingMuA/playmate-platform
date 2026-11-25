@@ -8,8 +8,10 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -25,7 +27,7 @@ class AiReplyTaskRecoveryTest {
         first.setId(1L);
         AiReplyTask second = new AiReplyTask();
         second.setId(2L);
-        when(mapper.selectList(any())).thenReturn(List.of(first, second));
+        when(mapper.selectExpiredCandidates(any(), any(), anyInt())).thenReturn(List.of(first, second));
         AiReplyTaskWorker worker = spy(new AiReplyTaskWorker(mapper, null, null, null, null,
                 null, null, null, new AiModelProperties(), null));
         doThrow(new IllegalStateException("故障任务")).when(worker).recoverExpired(1L);
@@ -33,5 +35,17 @@ class AiReplyTaskRecoveryTest {
 
         assertThatCode(worker::recoverExpired).doesNotThrowAnyException();
         verify(worker).recoverExpired(2L);
+    }
+
+    @Test
+    void pendingQueriesExplicitMapperWithoutLambdaCache() {
+        AiReplyTaskMapper mapper = mock(AiReplyTaskMapper.class);
+        AiReplyTask task = new AiReplyTask();
+        task.setId(7L);
+        when(mapper.selectPending(8)).thenReturn(List.of(task));
+        AiReplyTaskWorker worker = new AiReplyTaskWorker(mapper, null, null, null, null,
+                null, null, null, new AiModelProperties(), null);
+
+        assertThat(worker.pending(8)).containsExactly(task);
     }
 }

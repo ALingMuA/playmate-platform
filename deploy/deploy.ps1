@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   游戏陪玩系统 —— 一键部署到阿里云 ECS。
 
@@ -37,7 +37,7 @@ $jar = Join-Path $repo 'backend\target\gameplay-backend-0.1.0-SNAPSHOT.jar'
 $dist = Join-Path $repo 'frontend\dist'
 $remote = '/tmp/gameplay-deploy'
 
-$sshOpts = @('-i', $SshKey, '-o', 'StrictHostKeyChecking=no', '-o', 'BatchMode=yes', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-o', 'ConnectTimeout=10')
+$sshOpts = @('-i', $SshKey, '-o', 'StrictHostKeyChecking=accept-new', '-o', 'BatchMode=yes', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-o', 'ConnectTimeout=10')
 $target = "root@$Server"
 
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -61,56 +61,60 @@ Step "准备暂存目录 $staging"
 if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
 
-Copy-Item $jar (Join-Path $staging 'gameplay-backend.jar') -Force
-Copy-Item (Join-Path $repo 'sql\schema.sql') $staging -Force
-Copy-Item (Join-Path $repo 'sql\data.sql') $staging -Force
-if (Test-Path (Join-Path $repo 'sql\migrations')) {
-  $stagingMigrations = Join-Path $staging 'migrations'
-  if (Test-Path $stagingMigrations) { Remove-Item $stagingMigrations -Recurse -Force }
-  Copy-Item (Join-Path $repo 'sql\migrations') $stagingMigrations -Recurse -Force
-}
-foreach ($f in 'gameplay.service', 'application-prod.yml', 'nginx-gamemate.conf') {
-  Copy-Item (Join-Path $PSScriptRoot $f) $staging -Force
-}
-# shell 脚本强制 LF：Windows 检出后若为 CRLF，Linux 上 bash 会报 $'\\r': command not found
-$shText = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'remote-deploy.sh')) -replace ([string][char]13 + [string][char]10), [string][char]10
-[System.IO.File]::WriteAllText((Join-Path $staging 'remote-deploy.sh'), $shText, (New-Object System.Text.UTF8Encoding($false)))
-Copy-Item $envFile (Join-Path $staging 'gameplay.env') -Force
-
-Step '打包前端 dist'
-$tarExe = if (Test-Path "$env:WINDIR\System32\tar.exe") { "$env:WINDIR\System32\tar.exe" } else { 'tar' }
-& $tarExe -czf (Join-Path $staging 'frontend.tar.gz') -C $dist .
-if ($LASTEXITCODE -ne 0) { throw 'tar 打包失败' }
-
-Step "上传到 $target 的 $remote"
-& ssh @sshOpts $target "rm -rf $remote && mkdir -p $remote"
-$items = Get-ChildItem $staging
-foreach ($item in $items) {
-  if ($item.PSIsContainer) {
-    Write-Host "    $($item.Name)/ (目录)"
-  } else {
-    Write-Host "    $($item.Name) ($([math]::Round($item.Length/1KB)) KB)"
+try {
+  Copy-Item $jar (Join-Path $staging 'gameplay-backend.jar') -Force
+  Copy-Item (Join-Path $repo 'sql\schema.sql') $staging -Force
+  Copy-Item (Join-Path $repo 'sql\data.sql') $staging -Force
+  if (Test-Path (Join-Path $repo 'sql\migrations')) {
+    $stagingMigrations = Join-Path $staging 'migrations'
+    if (Test-Path $stagingMigrations) { Remove-Item $stagingMigrations -Recurse -Force }
+    Copy-Item (Join-Path $repo 'sql\migrations') $stagingMigrations -Recurse -Force
   }
-}
-# 注意：必须写成 ${target}，否则 PowerShell 会把 "$target:" 当成作用域变量引用而报错
-$scpArgs = @($sshOpts + @('-r', '-q') + ($items | ForEach-Object { $_.FullName }) + @("${target}:$remote/"))
-$maxRetries = 3
-$uploaded = $false
-for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
-  Write-Host "    正在上传暂存包 (尝试 $attempt/$maxRetries)..."
-  & scp @scpArgs
-  if ($LASTEXITCODE -eq 0) {
-    $uploaded = $true
-    break
+  foreach ($f in 'gameplay.service', 'application-prod.yml', 'nginx-gamemate.conf') {
+    Copy-Item (Join-Path $PSScriptRoot $f) $staging -Force
   }
-  Write-Warning "第 $attempt 次 scp 上传失败，将在 2 秒后重试..."
-  Start-Sleep -Seconds 2
-}
-if (-not $uploaded) { throw 'scp 上传失败（已达到最大重试次数）' }
+  # shell 脚本强制 LF：Windows 检出后若为 CRLF，Linux 上 bash 会报 $'\\r': command not found
+  $shText = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'remote-deploy.sh')) -replace ([string][char]13 + [string][char]10), [string][char]10
+  [System.IO.File]::WriteAllText((Join-Path $staging 'remote-deploy.sh'), $shText, (New-Object System.Text.UTF8Encoding($false)))
+  Copy-Item $envFile (Join-Path $staging 'gameplay.env') -Force
 
-Step '执行远端部署'
-& ssh @sshOpts $target "bash $remote/remote-deploy.sh"
-if ($LASTEXITCODE -ne 0) { throw '远端部署脚本执行失败' }
+  Step '打包前端 dist'
+  $tarExe = if (Test-Path "$env:WINDIR\System32\tar.exe") { "$env:WINDIR\System32\tar.exe" } else { 'tar' }
+  & $tarExe -czf (Join-Path $staging 'frontend.tar.gz') -C $dist .
+  if ($LASTEXITCODE -ne 0) { throw 'tar 打包失败' }
+
+  Step "上传到 $target 的 $remote"
+  & ssh @sshOpts $target "rm -rf $remote && mkdir -p $remote"
+  $items = Get-ChildItem $staging
+  foreach ($item in $items) {
+    if ($item.PSIsContainer) {
+      Write-Host "    $($item.Name)/ (目录)"
+    } else {
+      Write-Host "    $($item.Name) ($([math]::Round($item.Length/1KB)) KB)"
+    }
+  }
+  # 注意：必须写成 ${target}，否则 PowerShell 会把 "$target:" 当成作用域变量引用而报错
+  $scpArgs = @($sshOpts + @('-r', '-q') + ($items | ForEach-Object { $_.FullName }) + @("${target}:$remote/"))
+  $maxRetries = 3
+  $uploaded = $false
+  for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+    Write-Host "    正在上传暂存包 (尝试 $attempt/$maxRetries)..."
+    & scp @scpArgs
+    if ($LASTEXITCODE -eq 0) {
+      $uploaded = $true
+      break
+    }
+    Write-Warning "第 $attempt 次 scp 上传失败，将在 2 秒后重试..."
+    Start-Sleep -Seconds 2
+  }
+  if (-not $uploaded) { throw 'scp 上传失败（已达到最大重试次数）' }
+
+  Step '执行远端部署'
+  & ssh @sshOpts $target "bash $remote/remote-deploy.sh"
+  if ($LASTEXITCODE -ne 0) { throw '远端部署脚本执行失败' }
+} finally {
+  if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+}
 
 Write-Host ''
 Write-Host '部署完成。' -ForegroundColor Green

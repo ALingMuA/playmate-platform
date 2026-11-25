@@ -25,6 +25,8 @@ async function loadData() {
   loading.value = true
   try {
     activities.value = await publicActivities()
+  } catch {
+    activities.value = []
   } finally {
     loading.value = false
   }
@@ -42,6 +44,7 @@ async function handleAction(item: ActivityView, e: Event) {
       ElMessage.warning('活动未绑定优惠券')
       return
     }
+    if (claimingId.value === item.couponTemplateId) return
     claimingId.value = item.couponTemplateId
     try {
       await claimCoupon(item.couponTemplateId)
@@ -54,9 +57,9 @@ async function handleAction(item: ActivityView, e: Event) {
   } else if (item.actionType === 'COMPANION_LIST') {
     router.push('/companions')
   } else if (item.actionRoute) {
-    if (item.actionRoute.startsWith('http')) {
-      window.open(item.actionRoute, '_blank')
-    } else {
+    if (/^https?:\/\//i.test(item.actionRoute)) {
+      window.open(item.actionRoute, '_blank', 'noopener,noreferrer')
+    } else if (/^\/(?!\/|\\)/.test(item.actionRoute)) {
       router.push(item.actionRoute)
     }
   } else {

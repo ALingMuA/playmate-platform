@@ -1,6 +1,7 @@
 package com.gameplay.companion.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -14,6 +15,7 @@ import com.gameplay.auth.mapper.UserRoleMapper;
 import com.gameplay.notification.service.NotificationService;
 import com.gameplay.catalog.domain.Game;
 import com.gameplay.catalog.mapper.GameMapper;
+import com.gameplay.catalog.mapper.TagMapper;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.companion.domain.CompanionApplication;
@@ -28,12 +30,15 @@ import com.gameplay.companion.mapper.CompanionApplicationMapper;
 import com.gameplay.companion.mapper.CompanionProfileMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 陪玩师入驻申请服务（FR-P01~P04）。
@@ -52,12 +57,15 @@ public class ApplicationService {
     private final RoleMapper roleMapper;
     private final UserRoleMapper userRoleMapper;
     private final GameMapper gameMapper;
+    private final TagMapper tagMapper;
+    private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final NotificationService notificationService;
 
     /** 提交入驻申请（FR-P01/P02/P04） */
     @Transactional
     public ApplicationView submit(Long userId, ApplicationSubmitRequest req) {
+        lockUserForSubmit(userId);
         // 已是陪玩师则拒绝
         if (profileMapper.selectCount(new LambdaQueryWrapper<CompanionProfile>()
                 .eq(CompanionProfile::getUserId, userId)) > 0) {
@@ -95,6 +103,7 @@ public class ApplicationService {
      */
     @Transactional
     public ApplicationView submitCapabilityChange(Long userId, CapabilityChangeSubmitRequest req) {
+        lockUserForSubmit(userId);
         // 必须已是陪玩师（主页存在）
         CompanionProfile profile = profileMapper.selectOne(new LambdaQueryWrapper<CompanionProfile>()
                 .eq(CompanionProfile::getUserId, userId));
@@ -164,20 +173,28 @@ public class ApplicationService {
     /** 审核通过/驳回（FR-M06）：通过后创建陪玩师资料并授予 COMPANION 角色 */
     @Transactional
     public void audit(Long applicationId, boolean approved, String reason, Long adminId) {
-        CompanionApplication application = applicationMapper.selectById(applicationId);
+        CompanionApplication application = applicationMapper.selectByIdForUpdate(applicationId);
         if (application == null) {
             throw new BusinessException(ErrorCode.COMPANION_APPLICATION_NOT_FOUND);
         }
         if (!ApplicationAuditStatus.PENDING.name().equals(application.getAuditStatus())) {
             throw new BusinessException(ErrorCode.COMPANION_APPLICATION_NOT_PENDING);
         }
-        application.setAuditStatus(approved
+        String targetStatus = approved
                 ? ApplicationAuditStatus.APPROVED.name()
-                : ApplicationAuditStatus.REJECTED.name());
-        application.setAuditBy(adminId);
-        application.setAuditReason(reason == null ? "" : reason);
-        application.setAuditedAt(LocalDateTime.now());
-        applicationMapper.updateById(application);
+                : ApplicationAuditStatus.REJECTED.name();
+        String safeReason = reason == null ? "" : reason;
+        LocalDateTime now = LocalDateTime.now();
+        int updated = applicationMapper.update(null, new LambdaUpdateWrapper<CompanionApplication>()
+                .eq(CompanionApplication::getId, applicationId)
+                .eq(CompanionApplication::getAuditStatus, ApplicationAuditStatus.PENDING.name())
+                .set(CompanionApplication::getAuditStatus, targetStatus)
+                .set(CompanionApplication::getAuditBy, adminId)
+                .set(CompanionApplication::getAuditReason, safeReason)
+                .set(CompanionApplication::getAuditedAt, now));
+        if (updated != 1) {
+            throw new BusinessException(ErrorCode.COMPANION_APPLICATION_NOT_PENDING);
+        }
         notificationService.record(
                 application.getApplicantUserId(),
                 "AUDIT_RESULT",
@@ -191,13 +208,13 @@ public class ApplicationService {
         // 能力变更申请：通过后仅覆盖陪玩主页的游戏能力，不重复建主页/授角色；
         // 驳回则公开展示的能力保持不变
         if (approved && ApplicationType.CAPABILITY_UPDATE.name().equals(application.getApplicationType())) {
-            CompanionProfile profile = profileMapper.selectOne(new LambdaQueryWrapper<CompanionProfile>()
-                    .eq(CompanionProfile::getUserId, application.getApplicantUserId()));
+            CompanionProfile profile = profileMapper.selectByUserIdForUpdate(application.getApplicantUserId());
             if (profile == null) {
                 throw new BusinessException(ErrorCode.COMPANION_PROFILE_NOT_FOUND);
             }
-            profile.setCapabilityJson(application.getGameCapabilityJson());
-            profileMapper.updateById(profile);
+            profileMapper.update(null, new LambdaUpdateWrapper<CompanionProfile>()
+                    .eq(CompanionProfile::getUserId, application.getApplicantUserId())
+                    .set(CompanionProfile::getCapabilityJson, application.getGameCapabilityJson()));
             return;
         }
 
@@ -237,13 +254,33 @@ public class ApplicationService {
 
     // ==================== 工具 ====================
 
-    /** 校验能力中的游戏存在且启用 */
+    private void lockUserForSubmit(Long userId) {
+        List<Long> ids = jdbcTemplate.queryForList(
+                "SELECT id FROM `user` WHERE id = ? AND deleted = 0 FOR UPDATE", Long.class, userId);
+        if (ids.isEmpty()) {
+            throw new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND);
+        }
+    }
+
+    /** 校验能力中的游戏与位置标签存在且启用 */
     private void validateCapabilities(List<GameCapabilityDto> capabilities) {
+        Set<Long> positionTagIds = new LinkedHashSet<>();
         for (GameCapabilityDto cap : capabilities) {
             Game game = gameMapper.selectById(cap.getGameId());
             if (game == null || !Integer.valueOf(1).equals(game.getEnabled())) {
                 throw new BusinessException(ErrorCode.GAME_NOT_FOUND, "游戏不存在或已停用");
             }
+            if (cap.getPositionTagIds() != null) {
+                for (Long tagId : cap.getPositionTagIds()) {
+                    if (tagId == null) {
+                        throw new BusinessException(ErrorCode.TAG_NOT_FOUND);
+                    }
+                    positionTagIds.add(tagId);
+                }
+            }
+        }
+        if (!positionTagIds.isEmpty() && tagMapper.selectBatchIds(positionTagIds).size() != positionTagIds.size()) {
+            throw new BusinessException(ErrorCode.TAG_NOT_FOUND);
         }
     }
 

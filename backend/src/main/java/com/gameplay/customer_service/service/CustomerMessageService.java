@@ -4,12 +4,14 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.gameplay.ai.strategy.AiRequest;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
+import com.gameplay.customer_service.domain.CustomerConversation;
 import com.gameplay.customer_service.domain.CustomerServiceMessage;
 import com.gameplay.customer_service.domain.InternalNote;
 import com.gameplay.customer_service.dto.InternalNoteRequest;
 import com.gameplay.customer_service.dto.InternalNoteView;
 import com.gameplay.customer_service.dto.MessageView;
 import com.gameplay.customer_service.enums.SenderType;
+import com.gameplay.customer_service.mapper.CustomerConversationMapper;
 import com.gameplay.customer_service.mapper.CustomerServiceMessageMapper;
 import com.gameplay.customer_service.mapper.InternalNoteMapper;
 import lombok.RequiredArgsConstructor;
@@ -18,8 +20,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.util.List;
+import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -37,6 +40,8 @@ public class CustomerMessageService {
 
     private final CustomerServiceMessageMapper messageMapper;
     private final InternalNoteMapper internalNoteMapper;
+    private final CustomerConversationMapper conversationMapper;
+    private final CsAccountService csAccountService;
 
     /**
      * 保存消息（幂等）：clientMsgId 已存在时直接返回既有消息。
@@ -66,6 +71,7 @@ public class CustomerMessageService {
         message.setContent(content);
         message.setAiMark(aiMark ? 1 : 0);
         message.setReadStatus(0);
+        message.setCreatedAt(LocalDateTime.now());
         try {
             messageMapper.insert(message);
         } catch (DuplicateKeyException e) {
@@ -126,25 +132,42 @@ public class CustomerMessageService {
         return last == null ? 0L : last.getId();
     }
 
-    /** 客服/管理员添加内部备注（FR-C27，用户不可见） */
+    /** 客服/管理员添加内部备注（FR-C27，用户不可见；校验会话存在与处理权限） */
     @Transactional
     public InternalNoteView addInternalNote(Long authorUserId, String authorRole,
                                             Long conversationId, InternalNoteRequest req) {
+        CustomerConversation conversation = requireConversation(conversationId);
+        if (!"ADMIN".equals(authorRole)) {
+            csAccountService.assertCurrentHandler(authorUserId, conversation.getCurrentCsAccountId());
+        }
         InternalNote note = new InternalNote();
         note.setConversationId(conversationId);
         note.setAuthorUserId(authorUserId);
         note.setAuthorRole(authorRole);
         note.setContent(req.getContent());
+        note.setCreatedAt(LocalDateTime.now());
         internalNoteMapper.insert(note);
         return toView(note);
     }
 
-    /** 会话内部备注列表（仅客服/管理员调用） */
-    public List<InternalNoteView> listInternalNotes(Long conversationId) {
+    /** 会话内部备注列表（仅当前处理客服或管理员调用） */
+    public List<InternalNoteView> listInternalNotes(Long operatorUserId, boolean isAdmin, Long conversationId) {
+        CustomerConversation conversation = requireConversation(conversationId);
+        if (!isAdmin) {
+            csAccountService.assertCurrentHandler(operatorUserId, conversation.getCurrentCsAccountId());
+        }
         return internalNoteMapper.selectList(new LambdaQueryWrapper<InternalNote>()
                         .eq(InternalNote::getConversationId, conversationId)
                         .orderByAsc(InternalNote::getId))
                 .stream().map(this::toView).toList();
+    }
+
+    private CustomerConversation requireConversation(Long conversationId) {
+        CustomerConversation conversation = conversationMapper.selectById(conversationId);
+        if (conversation == null) {
+            throw new BusinessException(ErrorCode.CS_CONVERSATION_NOT_FOUND);
+        }
+        return conversation;
     }
 
     private MessageView toView(CustomerServiceMessage m) {

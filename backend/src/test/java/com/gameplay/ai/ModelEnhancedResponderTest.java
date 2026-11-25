@@ -29,7 +29,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ModelEnhancedResponderTest {
@@ -223,6 +225,14 @@ class ModelEnhancedResponderTest {
         properties.setBaseUrl("https://credential@example.com/v1");
         assertThatThrownBy(() -> responder.respond(question())).hasMessage("MODEL_CONFIGURATION");
         assertThat(captured.get()).isNull();
+    }
+
+    @Test
+    void searchesKnowledgeUsingCurrentUserTurnOnly() {
+        AiRequest multiTurn = new AiRequest("请问有什么优惠活动", null, 1L, null, 0, false,
+                List.of(new AiRequest.ContextMessage("user", "如何取消订单")));
+        responder.respond(multiTurn);
+        verify(knowledge).findRelevant(eq("请问有什么优惠活动"), eq(3));
     }
 
     private AiRequest question() {

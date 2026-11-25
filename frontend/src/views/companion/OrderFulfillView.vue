@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { onMounted, onUnmounted, ref } from 'vue'
+import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
 import {
   acceptOrder,
   companionOrders,
@@ -52,6 +52,10 @@ function onTabChange() {
 }
 
 onMounted(load)
+onUnmounted(() => {
+  deliveryEvidences.value.forEach((evidence) => URL.revokeObjectURL(evidence.previewUrl))
+  deliveryEvidences.value = []
+})
 
 async function handleAccept(row: Order) {
   if (pendingActionIds.value.has(row.id)) return
@@ -61,6 +65,8 @@ async function handleAccept(row: Order) {
     await acceptOrder(row.id)
     ElMessage.success('接单成功，等待服务开始')
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     const next = new Set(pendingActionIds.value); next.delete(row.id); pendingActionIds.value = next
   }
@@ -80,6 +86,8 @@ async function handleReject(row: Order) {
     await rejectOrder(row.id, value)
     ElMessage.success('已拒绝订单，款项已退还用户')
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     const next = new Set(pendingActionIds.value); next.delete(row.id); pendingActionIds.value = next
   }
@@ -93,6 +101,8 @@ async function handleStart(row: Order) {
     await startOrderService(row.id)
     ElMessage.success('服务已开始')
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     const next = new Set(pendingActionIds.value); next.delete(row.id); pendingActionIds.value = next
   }
@@ -152,32 +162,39 @@ async function submitEndService() {
     deliveryEvidences.value.forEach((evidence) => URL.revokeObjectURL(evidence.previewUrl))
     deliveryEvidences.value = []
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     ending.value = false
   }
 }
 
 async function openDetail(row: Order) {
-  detail.value = await orderDetail(row.id)
-  detailEvidenceImages.value = {}
-  detailEvidenceErrors.value = {}
-  await Promise.all((detail.value.deliveryEvidences ?? []).map(async (evidence) => {
-    try {
-      detailEvidenceImages.value[evidence.fileUrl] = await loadPrivateImage(evidence.fileUrl)
-    } catch {
-      detailEvidenceErrors.value[evidence.fileUrl] = true
-    }
-  }))
-  detailVisible.value = true
+  try {
+    detail.value = await orderDetail(row.id)
+    detailEvidenceImages.value = {}
+    detailEvidenceErrors.value = {}
+    await Promise.all((detail.value.deliveryEvidences ?? []).map(async (evidence) => {
+      try {
+        detailEvidenceImages.value[evidence.fileUrl] = await loadPrivateImage(evidence.fileUrl)
+      } catch {
+        detailEvidenceErrors.value[evidence.fileUrl] = true
+      }
+    }))
+    detailVisible.value = true
+  } catch {
+    // http.ts 已统一提示错误
+  }
 }
 
-const statusMap: Record<string, { label: string; type: string }> = {
+const statusMap: Record<string, { label: string; type: TagProps['type'] }> = {
   PENDING_PAYMENT: { label: '待支付', type: 'info' },
   WAITING_ACCEPTANCE: { label: '待接单', type: 'warning' },
   WAITING_SERVICE: { label: '待服务', type: 'primary' },
   IN_SERVICE: { label: '服务中', type: 'success' },
   WAITING_CONFIRMATION: { label: '待确认', type: 'warning' },
   COMPLETED: { label: '已完成', type: 'success' },
+  AFTER_SALES: { label: '售后中', type: 'danger' },
   CLOSED: { label: '已关闭', type: 'info' },
 }
 
@@ -189,6 +206,9 @@ const actionLabels: Record<string, string> = {
   START: '开始服务',
   END: '结束服务',
   CONFIRM: '确认完成',
+  CANCEL: '取消订单',
+  COMPLAINT: '发起投诉',
+  ARBITRATE: '平台仲裁',
   CLOSE_EXPIRED_PAYMENT: '支付超时关闭',
   CLOSE_EXPIRED_ACCEPTANCE: '接单超时关闭',
   AUTO_CONFIRM: '自动确认完成',
@@ -216,7 +236,7 @@ function fmtTime(t?: string): string {
     <div v-loading="loading">
       <el-card v-for="row in list" :key="row.id" class="order-card" shadow="hover">
         <div class="order-head">
-          <el-tag :type="(statusMap[row.orderStatus]?.type as any) ?? 'info'" size="small">
+          <el-tag :type="statusMap[row.orderStatus]?.type ?? 'info'" size="small">
             {{ statusMap[row.orderStatus]?.label ?? row.orderStatus }}
           </el-tag>
           <span class="order-no">{{ row.orderNo }}</span>
@@ -258,7 +278,7 @@ function fmtTime(t?: string): string {
       @current-change="(p: number) => { page = p; load() }"
     />
 
-    <el-dialog v-model="endDialogVisible" title="结束服务并提交履约凭证（选填）" width="560px">
+    <el-dialog v-model="endDialogVisible" title="结束服务并提交履约凭证（选填）" width="560px" @close="cancelEndDialog">
       <p class="text-muted">可上传 0～5 张图片，单张不超过 5MB。凭证将随订单状态一并保存。</p>
       <div class="delivery-evidence-list">
         <div v-for="(evidence, index) in deliveryEvidences" :key="evidence.fileUrl" class="delivery-evidence-item">

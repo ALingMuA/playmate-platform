@@ -22,12 +22,20 @@ export async function uploadFile(file: File, category = 'general'): Promise<File
 
 /** 通过带登录态的请求读取受保护图片，返回可直接用于 img 的 data URL。 */
 export async function loadPrivateImage(fileUrl: string): Promise<string> {
-  const token = localStorage.getItem('token')
-  const response = await fetch(fileUrl, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  const isAbsolute = /^https?:\/\//i.test(fileUrl)
+  const baseUrl = (http.defaults.baseURL || '').replace(/\/+$/, '')
+  const hasBasePrefix = !isAbsolute && !!baseUrl && fileUrl.startsWith(`${baseUrl}/`)
+  const normalizedUrl = hasBasePrefix ? fileUrl.slice(baseUrl.length) : fileUrl
+  const useEmptyBase = !isAbsolute && !hasBasePrefix && fileUrl.startsWith('/') && !fileUrl.startsWith('/files/')
+
+  const response = await http.get<Blob>(normalizedUrl, {
+    responseType: 'blob',
+    ...(useEmptyBase ? { baseURL: '' } : {}),
   })
-  if (!response.ok) throw new Error('图片读取失败')
-  const blob = await response.blob()
+  const blob = response.data
+  if (typeof Blob === 'undefined' || !(blob instanceof Blob)) {
+    throw new Error('图片读取失败')
+  }
   return await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('图片解析失败'))

@@ -9,6 +9,7 @@ import com.gameplay.companion.dto.EarningsView;
 import com.gameplay.companion.service.EarningsService;
 import com.gameplay.wallet.dto.LedgerView;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/companion/earnings")
+@PreAuthorize("hasRole('COMPANION')")
 @RequiredArgsConstructor
 public class EarningsController {
 

@@ -15,6 +15,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 收藏领域服务（FR-U06：收藏/取消/列表）。
@@ -33,9 +36,12 @@ public class FavoriteService {
                 .eq(Favorite::getCompanionUserId, companionUserId)) > 0;
     }
 
-    /** 收藏陪玩师（FR-U06）：仅审核通过的陪玩师可收藏 */
+    /** 收藏陪玩师（FR-U06）：仅审核通过的陪玩师可收藏，且禁止收藏自己 */
     @Transactional
     public void add(Long userId, Long companionUserId) {
+        if (userId != null && userId.equals(companionUserId)) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "不能收藏自己");
+        }
         CompanionProfile profile = companionProfileMapper.selectOne(
                 new LambdaQueryWrapper<CompanionProfile>()
                         .eq(CompanionProfile::getUserId, companionUserId)
@@ -71,17 +77,30 @@ public class FavoriteService {
         favoriteMapper.deleteById(favorite.getId());
     }
 
-    /** 我的收藏分页（FR-U06） */
+    /** 我的收藏分页（FR-U06，批量加载陪玩资料消除 N+1） */
     public Page<FavoriteView> page(Long userId, long page, long size) {
         Page<Favorite> p = favoriteMapper.selectPage(new Page<>(page, size),
                 new LambdaQueryWrapper<Favorite>()
                         .eq(Favorite::getUserId, userId)
                         .orderByDesc(Favorite::getId));
-        List<FavoriteView> views = p.getRecords().stream().map(f -> {
-            CompanionProfile profile = companionProfileMapper.selectOne(
-                    new LambdaQueryWrapper<CompanionProfile>()
-                            .eq(CompanionProfile::getUserId, f.getCompanionUserId())
-                            .last("LIMIT 1"));
+        Page<FavoriteView> vp = new Page<>(p.getCurrent(), p.getSize(), p.getTotal());
+        List<Favorite> records = p.getRecords();
+        if (records.isEmpty()) {
+            vp.setRecords(List.of());
+            return vp;
+        }
+        List<Long> companionUserIds = records.stream()
+                .map(Favorite::getCompanionUserId)
+                .distinct()
+                .toList();
+        Map<Long, CompanionProfile> profileMap = companionProfileMapper.selectList(
+                        new LambdaQueryWrapper<CompanionProfile>()
+                                .in(CompanionProfile::getUserId, companionUserIds))
+                .stream()
+                .collect(Collectors.toMap(CompanionProfile::getUserId, Function.identity(), (a, b) -> a));
+
+        List<FavoriteView> views = records.stream().map(f -> {
+            CompanionProfile profile = profileMap.get(f.getCompanionUserId());
             return FavoriteView.builder()
                     .companionUserId(f.getCompanionUserId())
                     .displayName(profile == null ? "" : profile.getDisplayName())
@@ -92,7 +111,6 @@ public class FavoriteService {
                     .createdAt(f.getCreatedAt())
                     .build();
         }).toList();
-        Page<FavoriteView> vp = new Page<>(p.getCurrent(), p.getSize(), p.getTotal());
         vp.setRecords(views);
         return vp;
     }

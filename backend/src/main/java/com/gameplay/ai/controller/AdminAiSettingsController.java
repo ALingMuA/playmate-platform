@@ -44,7 +44,7 @@ public class AdminAiSettingsController {
     @PostMapping("/test")
     public ApiResponse<TestResult> test(@RequestBody AiSettingsRequest request) {
         var candidate = settings.candidate(request);
-        AiModelConfigValidator.validate(candidate, true);
+        AiModelConfigValidator.validate(candidate, true, settings.isAllowLoopback());
         if (!probes.tryAcquire()) return ApiResponse.ok(new TestResult(false, "TEST_BUSY", "正在测试其他配置，请稍后再试", 0, null, candidate.getName()));
         long start = System.nanoTime();
         try {

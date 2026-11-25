@@ -29,9 +29,9 @@ async function loadData() {
     const res = await publicAnnouncements(page.value, pageSize.value)
     list.value = res.records || []
     total.value = res.total || 0
-  } catch (err: any) {
+  } catch (err: unknown) {
     failed.value = true
-    errorMessage.value = err?.message || '加载平台公告失败，请稍后重试'
+    errorMessage.value = err instanceof Error ? err.message : '加载平台公告失败，请稍后重试'
   } finally {
     loading.value = false
   }

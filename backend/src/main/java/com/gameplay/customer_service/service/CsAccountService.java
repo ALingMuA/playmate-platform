@@ -10,8 +10,10 @@ import com.gameplay.auth.event.PasswordChangedEvent;
 import com.gameplay.auth.mapper.RoleMapper;
 import com.gameplay.auth.mapper.UserMapper;
 import com.gameplay.auth.mapper.UserRoleMapper;
+import com.gameplay.common.enums.ConversationStatus;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
+import com.gameplay.customer_service.domain.CustomerConversation;
 import com.gameplay.customer_service.domain.CustomerServiceAccount;
 import com.gameplay.customer_service.dto.CsAccountCreateRequest;
 import com.gameplay.customer_service.dto.CsAccountResetPasswordRequest;
@@ -20,20 +22,24 @@ import com.gameplay.customer_service.dto.CsAccountView;
 import com.gameplay.customer_service.dto.CsWorkStatusUpdateRequest;
 import com.gameplay.customer_service.enums.CsAccountStatus;
 import com.gameplay.customer_service.enums.CsWorkStatus;
+import com.gameplay.customer_service.mapper.CustomerConversationMapper;
 import com.gameplay.customer_service.mapper.CustomerServiceAccountMapper;
+import com.gameplay.infrastructure.websocket.WsSessionRegistry;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.event.EventListener;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.socket.CloseStatus;
 
 /**
  * 客服账号应用服务（FR-C01~C06）。
  *
  * <p>客服账号由管理员在后台创建，关联内部用户账号并绑定 CUSTOMER_SERVICE 角色；
- * 登录口令、令牌版本与禁用机制复用用户体系，禁用/重置密码即递增 token_version 使旧令牌失效。</p>
+ * 禁用与重置密码会同步底层用户账号状态、递增 token_version、断开在线 WebSocket 连接，
+ * 并在禁用时将名下人工会话释放回排队池。</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -43,20 +49,21 @@ public class CsAccountService {
     public static final int DEFAULT_MAX_ACTIVE_CONVERSATIONS = 5;
 
     private final CustomerServiceAccountMapper csAccountMapper;
+    private final CustomerConversationMapper conversationMapper;
     private final UserMapper userMapper;
     private final RoleMapper roleMapper;
     private final UserRoleMapper userRoleMapper;
     private final PasswordEncoder passwordEncoder;
+    private final ConversationRequeueService conversationRequeueService;
+    private final WsSessionRegistry wsSessionRegistry;
 
     /** 创建客服账号（FR-C01）：创建内部账号 + 绑定角色 + 客服档案，强制首次改密 */
     @Transactional
     public CsAccountView create(Long adminId, CsAccountCreateRequest req) {
-        // 客服账号名唯一
         if (csAccountMapper.selectCount(new LambdaQueryWrapper<CustomerServiceAccount>()
                 .eq(CustomerServiceAccount::getCsAccount, req.getCsAccount())) > 0) {
             throw new BusinessException(ErrorCode.CS_ACCOUNT_EXISTS);
         }
-        // 关联内部用户账号（复用登录体系）
         User user = new User();
         user.setUsername(req.getCsAccount());
         user.setPasswordHash(passwordEncoder.encode(req.getInitialPassword()));
@@ -65,6 +72,7 @@ public class CsAccountService {
         user.setGender(0);
         user.setIntroduction("客服人员");
         user.setAccountStatus(CsAccountStatus.ENABLED.name());
+        user.setDisabledReason("");
         user.setTokenVersion(1);
         try {
             userMapper.insert(user);
@@ -110,10 +118,10 @@ public class CsAccountService {
         return vp;
     }
 
-    /** 启用/禁用客服账号（FR-C03）：禁用必须填写原因，旧令牌立即失效 */
+    /** 启用/禁用客服账号（FR-C03）：同步底层 User 状态、释放活跃会话并断开 WS */
     @Transactional
     public CsAccountView setStatus(Long adminId, Long accountId, CsAccountStatusUpdateRequest req) {
-        CustomerServiceAccount account = requireAccount(accountId);
+        CustomerServiceAccount account = requireAccountForUpdate(accountId);
         CsAccountStatus target;
         try {
             target = CsAccountStatus.valueOf(req.getAccountStatus());
@@ -126,28 +134,43 @@ public class CsAccountService {
         if (account.getAccountStatus().equals(target.name())) {
             throw new BusinessException(ErrorCode.CS_ACCOUNT_STATUS_INVALID, "账号已是目标状态");
         }
+        String cleanReason = target == CsAccountStatus.DISABLED ? req.getReason().trim() : "";
         account.setAccountStatus(target.name());
-        account.setDisabledReason(target == CsAccountStatus.DISABLED ? req.getReason() : "");
+        account.setDisabledReason(cleanReason);
+        if (target == CsAccountStatus.DISABLED) {
+            account.setWorkStatus(CsWorkStatus.OFFLINE.name());
+        }
         csAccountMapper.updateById(account);
-        // 禁用：递增令牌版本，立即终止所有登录会话
+
         if (target == CsAccountStatus.DISABLED) {
             userMapper.update(null, new LambdaUpdateWrapper<User>()
+                    .set(User::getAccountStatus, CsAccountStatus.DISABLED.name())
+                    .set(User::getDisabledReason, cleanReason)
                     .setSql("token_version = token_version + 1")
+                    .eq(User::getId, account.getUserId()));
+            conversationRequeueService.releaseActiveForCsAccount(
+                    account.getId(), adminId, "客服账号已禁用：" + cleanReason);
+            wsSessionRegistry.disconnectUser(account.getUserId(), CloseStatus.POLICY_VIOLATION);
+        } else {
+            userMapper.update(null, new LambdaUpdateWrapper<User>()
+                    .set(User::getAccountStatus, CsAccountStatus.ENABLED.name())
+                    .set(User::getDisabledReason, "")
                     .eq(User::getId, account.getUserId()));
         }
         return toView(account);
     }
 
-    /** 重置客服密码（FR-C04）：原会话失效，下次登录必须修改密码 */
+    /** 重置客服密码（FR-C04）：原会话失效并断开 WS，下次登录必须修改密码 */
     @Transactional
     public CsAccountView resetPassword(Long adminId, Long accountId, CsAccountResetPasswordRequest req) {
-        CustomerServiceAccount account = requireAccount(accountId);
+        CustomerServiceAccount account = requireAccountForUpdate(accountId);
         userMapper.update(null, new LambdaUpdateWrapper<User>()
                 .set(User::getPasswordHash, passwordEncoder.encode(req.getNewPassword()))
                 .setSql("token_version = token_version + 1")
                 .eq(User::getId, account.getUserId()));
         account.setForceChangePassword(1);
         csAccountMapper.updateById(account);
+        wsSessionRegistry.disconnectUser(account.getUserId(), CloseStatus.POLICY_VIOLATION);
         return toView(account);
     }
 
@@ -165,10 +188,10 @@ public class CsAccountService {
         }
     }
 
-    /** 客服设置工作状态（FR-C06）：仅启用且非强制改密的客服可上线 */
+    /** 客服设置工作状态（FR-C06）：持锁串行校验，持有人工会话时禁止主动切为 OFFLINE */
     @Transactional
     public CsAccountView setWorkStatus(Long csUserId, CsWorkStatusUpdateRequest req) {
-        CustomerServiceAccount account = requireAccountByUserId(csUserId);
+        CustomerServiceAccount account = requireAccountForUpdateByUserId(csUserId);
         CsWorkStatus target;
         try {
             target = CsWorkStatus.valueOf(req.getWorkStatus());
@@ -177,6 +200,15 @@ public class CsAccountService {
         }
         if (target == CsWorkStatus.ONLINE) {
             assertCsEnabled(account, "客服未启用或未完成首次改密，不能上线");
+        }
+        if (target == CsWorkStatus.OFFLINE) {
+            long active = conversationMapper.selectCount(new LambdaQueryWrapper<CustomerConversation>()
+                    .eq(CustomerConversation::getCurrentCsAccountId, account.getId())
+                    .eq(CustomerConversation::getConversationStatus, ConversationStatus.HUMAN_PROCESSING.name()));
+            if (active > 0) {
+                throw new BusinessException(ErrorCode.CS_ACCOUNT_STATUS_INVALID,
+                        "当前仍有处理中的会话，请先关闭或转交后再下线");
+            }
         }
         account.setWorkStatus(target.name());
         csAccountMapper.updateById(account);
@@ -194,7 +226,7 @@ public class CsAccountService {
                 .eq(CustomerServiceAccount::getUserId, csUserId));
     }
 
-    /** 校验客服可接待：账号启用、已改密、在线（FR-C06/CS_AGENT_NOT_ONLINE） */
+    /** 校验客服可接待（只读场景，如队列查询）：账号启用、已改密、在线 */
     public CustomerServiceAccount assertAvailable(Long csUserId) {
         CustomerServiceAccount account = requireAccountByUserId(csUserId);
         assertCsEnabled(account, null);
@@ -204,11 +236,26 @@ public class CsAccountService {
         return account;
     }
 
-    /** 校验账号可用（不含在线状态）：启用且已完成强制改密 */
+    /** 锁定客服账号行并校验可接待（领取会话用，保证与 setWorkStatus/setStatus 锁序一致） */
+    public CustomerServiceAccount lockAndAssertAvailable(Long csUserId) {
+        CustomerServiceAccount account = requireAccountForUpdateByUserId(csUserId);
+        assertCsEnabled(account, null);
+        if (!CsWorkStatus.ONLINE.name().equals(account.getWorkStatus())) {
+            throw new BusinessException(ErrorCode.CS_AGENT_NOT_ONLINE, "客服当前不在线");
+        }
+        return account;
+    }
+
+    /** 校验账号可用（不含在线状态）：客服与用户账号均启用，且已完成强制改密 */
     private void assertCsEnabled(CustomerServiceAccount account, String message) {
         if (!CsAccountStatus.ENABLED.name().equals(account.getAccountStatus())) {
             throw new BusinessException(ErrorCode.CS_AGENT_NOT_ONLINE,
                     message != null ? message : "客服账号已被禁用");
+        }
+        User user = userMapper.selectById(account.getUserId());
+        if (user == null || !CsAccountStatus.ENABLED.name().equals(user.getAccountStatus())) {
+            throw new BusinessException(ErrorCode.CS_AGENT_NOT_ONLINE,
+                    message != null ? message : "客服关联用户账号已被禁用");
         }
         if (account.getForceChangePassword() != null && account.getForceChangePassword() == 1) {
             throw new BusinessException(ErrorCode.AUTH_PASSWORD_CHANGE_REQUIRED,
@@ -216,24 +263,26 @@ public class CsAccountService {
         }
     }
 
-    /** 校验客服是会话当前处理人 */
+    /** 校验客服账号可用且是会话当前处理人 */
     public CustomerServiceAccount assertCurrentHandler(Long csUserId, Long currentCsAccountId) {
         CustomerServiceAccount account = requireAccountByUserId(csUserId);
-        if (currentCsAccountId == null || !currentCsAccountId.equals(account.getId())) {
+        assertCsEnabled(account, null);
+        if (currentCsAccountId == null || currentCsAccountId <= 0 || !currentCsAccountId.equals(account.getId())) {
             throw new BusinessException(ErrorCode.PERMISSION_DATA_SCOPE_DENIED, "会话未分配给当前客服");
         }
         return account;
     }
 
-
-
-    /** 当前处理中会话数（容量校验用） */
-    public long countActiveConversations(Long csAccountId) {
-        return 0L; // 由会话服务统计，此处保留扩展点
+    private CustomerServiceAccount requireAccountForUpdate(Long accountId) {
+        CustomerServiceAccount account = csAccountMapper.selectForUpdateById(accountId);
+        if (account == null) {
+            throw new BusinessException(ErrorCode.CS_ACCOUNT_NOT_FOUND);
+        }
+        return account;
     }
 
-    private CustomerServiceAccount requireAccount(Long accountId) {
-        CustomerServiceAccount account = csAccountMapper.selectById(accountId);
+    private CustomerServiceAccount requireAccountForUpdateByUserId(Long csUserId) {
+        CustomerServiceAccount account = csAccountMapper.selectForUpdateByUserId(csUserId);
         if (account == null) {
             throw new BusinessException(ErrorCode.CS_ACCOUNT_NOT_FOUND);
         }

@@ -1,6 +1,8 @@
 package com.gameplay.auth.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gameplay.auth.entity.Role;
+import com.gameplay.auth.mapper.RoleMapper;
 import com.gameplay.auth.service.AccountAuthService;
 import com.gameplay.common.api.ApiResponse;
 import com.gameplay.common.exception.BusinessException;
@@ -34,6 +36,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtTokenService jwtTokenService;
     private final AccountAuthService accountAuthService;
+    private final RoleMapper roleMapper;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -55,11 +58,20 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             return;
         }
 
-        List<SimpleGrantedAuthority> authorities = principal.roles().stream()
+        // 从数据库实时读取已启用角色，确保后台授权/回收角色后权限立即生效
+        List<String> dbRoles = roleMapper.selectRolesByUserId(principal.userId()).stream()
+                .map(Role::getRoleCode)
+                .toList();
+        JwtPrincipal livePrincipal = new JwtPrincipal(
+                principal.userId(),
+                principal.username(),
+                principal.tokenVersion(),
+                dbRoles);
+        List<SimpleGrantedAuthority> authorities = dbRoles.stream()
                 .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
                 .toList();
         UsernamePasswordAuthenticationToken authentication =
-                new UsernamePasswordAuthenticationToken(principal, null, authorities);
+                new UsernamePasswordAuthenticationToken(livePrincipal, null, authorities);
         SecurityContextHolder.getContext().setAuthentication(authentication);
         filterChain.doFilter(request, response);
     }

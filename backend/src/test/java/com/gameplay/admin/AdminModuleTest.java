@@ -12,7 +12,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.transaction.AfterTransaction;
+import org.springframework.test.context.transaction.BeforeTransaction;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
@@ -59,6 +62,22 @@ class AdminModuleTest {
 
     @Autowired
     private OperationLogService operationLogService;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private long maxOperationLogIdBeforeTx;
+
+    @BeforeTransaction
+    void snapshotOperationLogWatermark() {
+        Long maxId = jdbcTemplate.queryForObject("SELECT COALESCE(MAX(id), 0) FROM operation_log", Long.class);
+        maxOperationLogIdBeforeTx = maxId == null ? 0L : maxId;
+    }
+
+    @AfterTransaction
+    void cleanupOperationLogsCreatedDuringTest() {
+        jdbcTemplate.update("DELETE FROM operation_log WHERE id > ?", maxOperationLogIdBeforeTx);
+    }
 
     private String adminToken() throws Exception {
         return loginAndGetToken(ADMIN_ACCOUNT, ADMIN_PASSWORD);
@@ -276,7 +295,7 @@ class AdminModuleTest {
                 .andExpect(jsonPath("$.data.publishStatus").value("DRAFT"));
         mockMvc.perform(post("/api/admin/announcements/" + id + "/restore-draft")
                         .header("Authorization", "Bearer " + adminToken()))
-                .andExpect(status().isBadRequest())
+                .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("ANNOUNCEMENT_STATUS_INVALID"));
     }
 
@@ -434,5 +453,62 @@ class AdminModuleTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.records[0].reason").value("违规封禁"));
+    }
+
+    // ==================== 安全加固与参数边界 ====================
+
+    @Test
+    @DisplayName("管理员安全护栏：禁止自禁用与禁用其他管理员，且分页超限/非法URL/常见MVC异常返回规范状态码")
+    void admin_safety_and_validation_guards() throws Exception {
+        String adminJwt = adminToken();
+        Long adminId = jdbcTemplate.queryForObject(
+                "SELECT id FROM `user` WHERE username = 'admin'", Long.class);
+        assertThat(adminId).isNotNull();
+
+        // 禁止自禁用
+        mockMvc.perform(put("/api/admin/users/" + adminId + "/status")
+                        .header("Authorization", "Bearer " + adminJwt)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("accountStatus", "DISABLED")
+                                .put("reason", "测试自禁用")
+                                .toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        // 分页 size 超出上限 100
+        mockMvc.perform(get("/api/admin/users")
+                        .header("Authorization", "Bearer " + adminJwt)
+                        .param("page", "1").param("size", "101"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        // 常见 MVC 异常不暴露 500
+        mockMvc.perform(get("/api/announcements/not-a-number"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(delete("/api/announcements").header("Authorization", "Bearer " + adminJwt))
+                .andExpect(status().isMethodNotAllowed());
+        mockMvc.perform(get("/api/no-such-endpoint-xyz").header("Authorization", "Bearer " + adminJwt))
+                .andExpect(status().isNotFound());
+
+        // 禁止收藏自己 + 非法头像 URL 拦截
+        String userJwt = registerAndGetToken();
+        long userId = objectMapper.readTree(
+                mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + userJwt))
+                        .andReturn().getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+        mockMvc.perform(post("/api/favorites/" + userId)
+                        .header("Authorization", "Bearer " + userJwt))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(put("/api/accounts/profile")
+                        .header("Authorization", "Bearer " + userJwt)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("avatarUrl", "javascript:alert(1)")
+                                .toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
     }
 }

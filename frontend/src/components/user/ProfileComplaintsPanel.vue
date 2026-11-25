@@ -57,15 +57,10 @@ async function load() {
   loading.value = true
   failed.value = false
   try {
-    const result = await myComplaints(page.value, pageSize)
-    const allRecords = result.records || []
-    if (activeTab.value === 'ALL') {
-      list.value = allRecords
-      total.value = result.total
-    } else {
-      list.value = allRecords.filter((item) => item.complaintStatus === activeTab.value)
-      total.value = list.value.length
-    }
+    const status = activeTab.value === 'ALL' ? undefined : activeTab.value
+    const result = await myComplaints(page.value, pageSize, status)
+    list.value = result.records || []
+    total.value = result.total
   } catch {
     failed.value = true
   } finally {

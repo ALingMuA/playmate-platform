@@ -7,18 +7,20 @@ import com.gameplay.companion.domain.CompanionAvailabilityTemplate;
 import com.gameplay.companion.dto.AvailabilityTemplateSaveRequest;
 import com.gameplay.companion.dto.AvailabilityTemplateView;
 import com.gameplay.companion.mapper.CompanionAvailabilityTemplateMapper;
+import com.gameplay.companion.mapper.CompanionProfileMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * 陪玩师档期周期模板服务（FR-P10 周期设置）。
@@ -38,13 +40,16 @@ public class AvailabilityTemplateService {
 
     /** 模板生效跨度防呆上限（天）：长期模板 effectiveUntil 为空，有截止日的最长两年 */
     private static final int MAX_TEMPLATE_RANGE_DAYS = 730;
+    private static final int MAX_THROTTLE_ENTRIES = 5000;
 
     private static final String[] WEEK_NAMES = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"};
 
     private final CompanionAvailabilityTemplateMapper templateMapper;
+    private final CompanionProfileMapper profileMapper;
     private final AvailabilityService availabilityService;
+    private final AvailabilityWindowGenerator windowGenerator;
 
-    private final java.util.concurrent.ConcurrentHashMap<Long, java.time.Instant> ensureThrottleMap = new java.util.concurrent.ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, Instant> ensureThrottleMap = new ConcurrentHashMap<>();
 
     /** 我的模板列表（先滚动续期，保证未来窗口内的实例就绪） */
     @Transactional
@@ -64,6 +69,7 @@ public class AvailabilityTemplateService {
         if (req.getEffectiveFrom() == null || req.getEffectiveFrom().isBefore(LocalDate.now())) {
             throw new BusinessException(ErrorCode.AVAILABILITY_TEMPLATE_PARAM_INVALID, "生效开始日期不能早于今天");
         }
+        profileMapper.selectByUserIdForUpdate(userId);
         CompanionAvailabilityTemplate template = new CompanionAvailabilityTemplate();
         template.setCompanionUserId(userId);
         template.setTemplateName(req.getTemplateName().trim());
@@ -83,6 +89,7 @@ public class AvailabilityTemplateService {
     /** 修改模板：清理未来未占用实例后按新规则幂等重生成（不改动启停状态，支持历史生效日与清空截止日） */
     @Transactional
     public AvailabilityTemplateView update(Long userId, Long templateId, AvailabilityTemplateSaveRequest req) {
+        profileMapper.selectByUserIdForUpdate(userId);
         CompanionAvailabilityTemplate existing = requireOwned(userId, templateId);
         validateCommon(req);
         // 编辑场景：effectiveFrom 早于今天/为空保留原值（绝不 422）
@@ -107,6 +114,7 @@ public class AvailabilityTemplateService {
     /** 启停模板：停用清理未来实例；启用从今天起重新生成 */
     @Transactional
     public AvailabilityTemplateView toggleStatus(Long userId, Long templateId, boolean enabled) {
+        profileMapper.selectByUserIdForUpdate(userId);
         CompanionAvailabilityTemplate template = requireOwned(userId, templateId);
         if (enabled) {
             if (template.getEnabled() != 1) {
@@ -125,6 +133,7 @@ public class AvailabilityTemplateService {
     /** 删除模板：清理未来未占用实例后删除规则（历史实例保留，不影响已产生订单） */
     @Transactional
     public void delete(Long userId, Long templateId) {
+        profileMapper.selectByUserIdForUpdate(userId);
         requireOwned(userId, templateId);
         availabilityService.deleteFutureInstancesOfTemplate(userId, templateId);
         templateMapper.deleteById(templateId);
@@ -134,12 +143,13 @@ public class AvailabilityTemplateService {
      * GET 请求节流版滚动续期：每用户 5 分钟内最多执行一次 ensureWindow。
      */
     public void ensureWindowThrottled(Long userId) {
-        java.time.Instant lastRun = ensureThrottleMap.get(userId);
-        if (lastRun != null && java.time.Duration.between(lastRun, java.time.Instant.now()).toMinutes() < 5) {
+        Instant now = Instant.now();
+        Instant lastRun = ensureThrottleMap.get(userId);
+        if (lastRun != null && Duration.between(lastRun, now).toMinutes() < 5) {
             return;
         }
-        ensureWindow(userId);
-        ensureThrottleMap.put(userId, java.time.Instant.now());
+        windowGenerator.ensureWindow(userId);
+        recordThrottle(userId, now);
     }
 
     /** 兼容旧接口调用 */
@@ -148,82 +158,21 @@ public class AvailabilityTemplateService {
     }
 
     /**
-     * 按天幂等生成核心：对该陪玩师所有 enabled=1 模板，按日查漏补缺填充未来 28 天窗口。
+     * 委托独立 Spring Bean 执行带事务和行锁的未来 28 天窗口补齐。
      */
-    @Transactional
     public void ensureWindow(Long userId) {
-        LocalDate today = LocalDate.now();
-        LocalDate windowEnd = today.plusDays(AvailabilityService.GENERATE_WINDOW_DAYS); // 28 天
+        windowGenerator.ensureWindow(userId);
+        recordThrottle(userId, Instant.now());
+    }
 
-        // 锁住该陪玩师的模板行，串行化同一用户的并发生成
-        List<CompanionAvailabilityTemplate> templates = templateMapper.selectList(
-                new LambdaQueryWrapper<CompanionAvailabilityTemplate>()
-                        .eq(CompanionAvailabilityTemplate::getCompanionUserId, userId)
-                        .eq(CompanionAvailabilityTemplate::getEnabled, 1)
-                        .last("FOR UPDATE"));
-
-        if (templates.isEmpty()) {
-            return;
-        }
-
-        for (CompanionAvailabilityTemplate t : templates) {
-            LocalDate from = t.getEffectiveFrom().isAfter(today) ? t.getEffectiveFrom() : today;
-            LocalDate to = (t.getEffectiveUntil() == null || t.getEffectiveUntil().isAfter(windowEnd))
-                    ? windowEnd : t.getEffectiveUntil();
-            if (from.isAfter(to)) {
-                continue;
+    private void recordThrottle(Long userId, Instant now) {
+        if (ensureThrottleMap.size() >= MAX_THROTTLE_ENTRIES) {
+            ensureThrottleMap.entrySet().removeIf(e -> Duration.between(e.getValue(), now).toMinutes() >= 5);
+            if (ensureThrottleMap.size() >= MAX_THROTTLE_ENTRIES) {
+                ensureThrottleMap.clear();
             }
-
-            Set<Integer> targetDays = parseDaysOfWeek(t.getDayOfWeek());
-            for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
-                if (!targetDays.contains(date.getDayOfWeek().getValue())) {
-                    continue;
-                }
-                LocalDateTime start;
-                LocalDateTime end;
-                if (t.getAllDay() != null && t.getAllDay() == 1) {
-                    start = date.atStartOfDay();
-                    end = date.plusDays(1).atStartOfDay();
-                } else {
-                    if (t.getStartTime() == null || t.getEndTime() == null) {
-                        continue;
-                    }
-                    start = date.atTime(t.getStartTime());
-                    end = date.atTime(t.getEndTime());
-                    if (!end.isAfter(start)) {
-                        end = date.plusDays(1).atTime(t.getEndTime());
-                    }
-                }
-
-                // 今天已完全过去的时段不生成
-                if (date.isEqual(today) && !end.isAfter(LocalDateTime.now())) {
-                    continue;
-                }
-
-                // 1. 是否已生成相同 templateId + startAt（幂等）
-                if (availabilityService.existsGenerated(t.getId(), start)) {
-                    continue;
-                }
-                // 2. 是否与用户显式休息重叠（休息优先）
-                if (availabilityService.hasUnavailableOverlap(userId, start, end)) {
-                    continue;
-                }
-                // 3. 是否已有可约档期（手动或其他模板）
-                if (availabilityService.hasAvailableOverlap(userId, start, end)) {
-                    continue;
-                }
-                // 4. 是否已被有效订单占用
-                if (availabilityService.hasOrderConflict(userId, start, end)) {
-                    continue;
-                }
-
-                // 5. 插入（唯一键兜底，DuplicateKey 忽略）
-                availabilityService.insertRecurrenceSafe(userId, t.getId(), start, end, t.getTemplateName());
-            }
-            t.setLastGeneratedUntil(to);
-            templateMapper.updateById(t);
         }
-        ensureThrottleMap.put(userId, java.time.Instant.now());
+        ensureThrottleMap.put(userId, now);
     }
 
     /** 通用校验（名称、星期、时间区间、生效跨度） */

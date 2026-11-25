@@ -118,17 +118,28 @@ export function myConversations(): Promise<ConversationView[]> {
   return request<ConversationView[]>({ url: '/customer-service/conversations/mine', method: 'get' })
 }
 
+/** 申请一次性 WebSocket 握手票据 */
+export function fetchWsTicket(): Promise<{ ticket: string }> {
+  return request<{ ticket: string }>({ url: '/customer-service/ws-ticket', method: 'post', silentError: true })
+}
+
 /** 会话详情 */
-export function conversationDetail(id: number): Promise<ConversationView> {
-  return request<ConversationView>({ url: `/customer-service/conversations/${id}`, method: 'get' })
+export function conversationDetail(id: number, silentError = false): Promise<ConversationView> {
+  return request<ConversationView>({ url: `/customer-service/conversations/${id}`, method: 'get', silentError })
 }
 
 /** 会话消息列表（REST 补拉兜底） */
-export function conversationMessages(id: number, afterId?: number, size = 50): Promise<MessageView[]> {
+export function conversationMessages(
+  id: number,
+  afterId?: number,
+  size = 50,
+  silentError = false,
+): Promise<MessageView[]> {
   return request<MessageView[]>({
     url: `/customer-service/conversations/${id}/messages`,
     method: 'get',
     params: { afterId, size },
+    silentError,
   })
 }
 

@@ -47,6 +47,7 @@ const pageSize = 10
 const loading = ref(false)
 const statusFilter = ref('PENDING')
 const loadedApplication = ref(false)
+const pendingAuditIds = ref(new Set<number>())
 
 async function load() {
   loading.value = true
@@ -55,6 +56,8 @@ async function load() {
     list.value = result.records
     total.value = result.total
     loadedApplication.value = true
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     loading.value = false
   }
@@ -73,6 +76,7 @@ const svcPage = ref(1)
 const svcLoading = ref(false)
 const svcFilter = ref('PENDING')
 const loadedService = ref(false)
+const pendingServiceAuditIds = ref(new Set<number>())
 
 async function loadServices() {
   svcLoading.value = true
@@ -81,6 +85,8 @@ async function loadServices() {
     services.value = result.records
     svcTotal.value = result.total
     loadedService.value = true
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     svcLoading.value = false
   }
@@ -145,25 +151,45 @@ async function askRejectReason(): Promise<string | null> {
 }
 
 async function handleAudit(row: Application, approved: boolean) {
-  const isCapabilityChange = row.applicationType === 'CAPABILITY_UPDATE'
-  const subject = isCapabilityChange
-    ? '确认通过该能力变更申请？通过后将覆盖陪玩师主页的游戏能力认证。'
-    : `确认通过 ${row.realName} 的入驻申请？通过后将自动授予陪玩师资格。`
-  const reason = approved ? await askApproveReason(subject) : await askRejectReason()
-  if (reason == null) return
-  await adminAudit(row.id, approved, reason)
-  ElMessage.success(approved ? '已通过' : '已驳回')
-  await load()
+  if (pendingAuditIds.value.has(row.id)) return
+  pendingAuditIds.value = new Set(pendingAuditIds.value).add(row.id)
+  try {
+    const isCapabilityChange = row.applicationType === 'CAPABILITY_UPDATE'
+    const subject = isCapabilityChange
+      ? '确认通过该能力变更申请？通过后将覆盖陪玩师主页的游戏能力认证。'
+      : `确认通过 ${row.realName} 的入驻申请？通过后将自动授予陪玩师资格。`
+    const reason = approved ? await askApproveReason(subject) : await askRejectReason()
+    if (reason == null) return
+    await adminAudit(row.id, approved, reason)
+    ElMessage.success(approved ? '已通过' : '已驳回')
+    await load()
+  } catch {
+    // http.ts 已统一提示错误
+  } finally {
+    const next = new Set(pendingAuditIds.value)
+    next.delete(row.id)
+    pendingAuditIds.value = next
+  }
 }
 
 async function handleServiceAudit(row: CompanionService, approved: boolean) {
-  const reason = approved
-    ? await askApproveReason(`确认通过服务「${row.title}」？通过后陪玩师可自行上架。`)
-    : await askRejectReason()
-  if (reason == null) return
-  await adminAuditService(row.id, approved, reason)
-  ElMessage.success(approved ? '已通过' : '已驳回')
-  await loadServices()
+  if (pendingServiceAuditIds.value.has(row.id)) return
+  pendingServiceAuditIds.value = new Set(pendingServiceAuditIds.value).add(row.id)
+  try {
+    const reason = approved
+      ? await askApproveReason(`确认通过服务「${row.title}」？通过后陪玩师可自行上架。`)
+      : await askRejectReason()
+    if (reason == null) return
+    await adminAuditService(row.id, approved, reason)
+    ElMessage.success(approved ? '已通过' : '已驳回')
+    await loadServices()
+  } catch {
+    // http.ts 已统一提示错误
+  } finally {
+    const next = new Set(pendingServiceAuditIds.value)
+    next.delete(row.id)
+    pendingServiceAuditIds.value = next
+  }
 }
 
 onMounted(async () => {
@@ -234,8 +260,8 @@ onMounted(async () => {
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
               <template v-if="row.auditStatus === 'PENDING'">
-                <el-button size="small" type="success" @click="handleAudit(row, true)">通过</el-button>
-                <el-button size="small" type="danger" @click="handleAudit(row, false)">驳回</el-button>
+                <el-button size="small" type="success" :loading="pendingAuditIds.has(row.id)" :disabled="pendingAuditIds.has(row.id)" @click="handleAudit(row, true)">通过</el-button>
+                <el-button size="small" type="danger" :loading="pendingAuditIds.has(row.id)" :disabled="pendingAuditIds.has(row.id)" @click="handleAudit(row, false)">驳回</el-button>
               </template>
               <span v-else class="done">已处理</span>
             </template>
@@ -307,8 +333,8 @@ onMounted(async () => {
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
               <template v-if="row.auditStatus === 'PENDING'">
-                <el-button size="small" type="success" @click="handleServiceAudit(row, true)">通过</el-button>
-                <el-button size="small" type="danger" @click="handleServiceAudit(row, false)">驳回</el-button>
+                <el-button size="small" type="success" :loading="pendingServiceAuditIds.has(row.id)" :disabled="pendingServiceAuditIds.has(row.id)" @click="handleServiceAudit(row, true)">通过</el-button>
+                <el-button size="small" type="danger" :loading="pendingServiceAuditIds.has(row.id)" :disabled="pendingServiceAuditIds.has(row.id)" @click="handleServiceAudit(row, false)">驳回</el-button>
               </template>
               <span v-else class="done">已处理</span>
             </template>

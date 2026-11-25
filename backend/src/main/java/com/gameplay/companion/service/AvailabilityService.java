@@ -20,6 +20,7 @@ import com.gameplay.companion.dto.BookedSlotView;
 import com.gameplay.companion.dto.ScheduleOverviewView;
 import com.gameplay.companion.enums.AvailabilityStatus;
 import com.gameplay.companion.mapper.CompanionAvailabilityMapper;
+import com.gameplay.companion.mapper.CompanionProfileMapper;
 import com.gameplay.order.domain.OrderTimeSlot;
 import com.gameplay.order.domain.PlayOrder;
 import com.gameplay.order.mapper.OrderTimeSlotMapper;
@@ -58,9 +59,11 @@ public class AvailabilityService {
 
     private final CompanionAvailabilityMapper availabilityMapper;
     private final CompanionAvailabilityTemplateMapper templateMapper;
+    private final CompanionProfileMapper profileMapper;
     private final OrderTimeSlotMapper orderTimeSlotMapper;
     private final PlayOrderMapper playOrderMapper;
     private final UserMapper userMapper;
+    private final AvailabilityWindowGenerator windowGenerator;
 
     @Autowired
     @Lazy
@@ -92,12 +95,13 @@ public class AvailabilityService {
         if (req.getEndAt().isBefore(now) || req.getStartAt().isBefore(now.minusMinutes(1))) {
             throw new BusinessException(ErrorCode.AVAILABILITY_PAST_TIME, "不能添加过去时间的档期");
         }
+        profileMapper.selectByUserIdForUpdate(userId);
         LocalDateTime startAt = req.getStartAt();
         LocalDateTime endAt = req.getEndAt();
 
         // 1. 检查有效订单占用
         List<OrderTimeSlot> orderConflicts = orderTimeSlotMapper.selectConflictSlotsForUpdate(
-                userId, startAt, endAt);
+                userId, startAt, endAt, now);
         if (!orderConflicts.isEmpty()) {
             throw new BusinessException(ErrorCode.SLOT_CONFLICT, "所选时段已被有效订单占用");
         }
@@ -142,12 +146,13 @@ public class AvailabilityService {
         if (req.getEndAt().isBefore(now) || req.getStartAt().isBefore(now.minusMinutes(1))) {
             throw new BusinessException(ErrorCode.AVAILABILITY_PAST_TIME, "不能添加过去时间的档期");
         }
+        profileMapper.selectByUserIdForUpdate(userId);
         LocalDateTime startAt = req.getStartAt();
         LocalDateTime endAt = req.getEndAt();
 
         // 1. 检查有效订单占用：已被订单锁定的时段不能设为不可约
         List<OrderTimeSlot> orderConflicts = orderTimeSlotMapper.selectConflictSlotsForUpdate(
-                userId, startAt, endAt);
+                userId, startAt, endAt, now);
         if (!orderConflicts.isEmpty()) {
             throw new BusinessException(ErrorCode.SLOT_CONFLICT, "所选时段已被有效订单锁定，无法直接设为休息");
         }
@@ -196,6 +201,9 @@ public class AvailabilityService {
     public AvailabilityBatchCreateView createBatch(Long userId, AvailabilityBatchCreateRequest req) {
         LocalDate from = req.getStartDate();
         LocalDate to = req.getEndDate() == null ? from : req.getEndDate();
+        if (from.isBefore(LocalDate.now())) {
+            throw new BusinessException(ErrorCode.AVAILABILITY_PAST_TIME, "开始日期不能早于今天");
+        }
         validateDailySlot(req.getAllDay(), req.getStartTime(), req.getEndTime(), from, to);
         GenerationResult result = generateRange(userId, from, to, req.getAllDay(),
                 req.getStartTime(), req.getEndTime(), null, "MANUAL", 0L, req.getRemark());
@@ -212,6 +220,7 @@ public class AvailabilityService {
      */
     @Transactional
     public void applyChanges(Long userId, AvailabilityChangeRequest req) {
+        profileMapper.selectByUserIdForUpdate(userId);
         for (AvailabilityChangeRequest.Item item : req.getChanges()) {
             AvailabilityCreateRequest single = new AvailabilityCreateRequest();
             single.setStartAt(item.getStartAt());
@@ -243,6 +252,8 @@ public class AvailabilityService {
             throw new BusinessException(ErrorCode.AVAILABILITY_TIME_INVALID,
                     "日期范围一次最多生成 " + MAX_GENERATE_DAYS + " 天");
         }
+        profileMapper.selectByUserIdForUpdate(userId);
+        LocalDateTime now = LocalDateTime.now();
         GenerationResult result = new GenerationResult();
         for (LocalDate date = fromDate; !date.isAfter(toDate); date = date.plusDays(1)) {
             if (daysOfWeek != null && !daysOfWeek.contains(date.getDayOfWeek().getValue())) {
@@ -262,11 +273,15 @@ public class AvailabilityService {
                     end = date.plusDays(1).atTime(endTime);
                 }
             }
+            if (!end.isAfter(now)) {
+                result.skipped.add(date + "：该时段已过期");
+                continue;
+            }
             if (hasAvailabilityOverlap(userId, start, end)) {
                 result.skipped.add(date + "：与已有档期重叠");
                 continue;
             }
-            if (!orderTimeSlotMapper.selectConflictSlotsForUpdate(userId, start, end).isEmpty()) {
+            if (!orderTimeSlotMapper.selectConflictSlotsForUpdate(userId, start, end, now).isEmpty()) {
                 result.skipped.add(date + "：该时段已被有效订单占用");
                 continue;
             }
@@ -290,15 +305,17 @@ public class AvailabilityService {
      */
     @Transactional
     public int deleteFutureInstancesOfTemplate(Long userId, Long templateId) {
+        profileMapper.selectByUserIdForUpdate(userId);
+        LocalDateTime now = LocalDateTime.now();
         List<CompanionAvailability> future = availabilityMapper.selectList(
                 new LambdaQueryWrapper<CompanionAvailability>()
                         .eq(CompanionAvailability::getCompanionUserId, userId)
                         .eq(CompanionAvailability::getTemplateId, templateId)
-                        .ge(CompanionAvailability::getStartAt, LocalDateTime.now()));
+                        .ge(CompanionAvailability::getStartAt, now));
         int removed = 0;
         for (CompanionAvailability availability : future) {
             if (!orderTimeSlotMapper.selectConflictSlotsForUpdate(
-                    userId, availability.getStartAt(), availability.getEndAt()).isEmpty()) {
+                    userId, availability.getStartAt(), availability.getEndAt(), now).isEmpty()) {
                 continue;
             }
             availabilityMapper.deleteById(availability.getId());
@@ -310,6 +327,7 @@ public class AvailabilityService {
     /** 删除档期（仅当无有效订单占用该时段） */
     @Transactional
     public void delete(Long userId, Long availabilityId) {
+        profileMapper.selectByUserIdForUpdate(userId);
         CompanionAvailability availability = availabilityMapper.selectById(availabilityId);
         if (availability == null) {
             throw new BusinessException(ErrorCode.AVAILABILITY_NOT_FOUND);
@@ -318,7 +336,7 @@ public class AvailabilityService {
             throw new BusinessException(ErrorCode.PERMISSION_DATA_SCOPE_DENIED);
         }
         List<OrderTimeSlot> conflicts = orderTimeSlotMapper.selectConflictSlotsForUpdate(
-                userId, availability.getStartAt(), availability.getEndAt());
+                userId, availability.getStartAt(), availability.getEndAt(), LocalDateTime.now());
         if (!conflicts.isEmpty()) {
             throw new BusinessException(ErrorCode.AVAILABILITY_DELETE_FORBIDDEN);
         }
@@ -416,17 +434,44 @@ public class AvailabilityService {
         if (isOff == null) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "请指定是否休息");
         }
+        profileMapper.selectByUserIdForUpdate(userId);
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime dayStart = date.isEqual(LocalDate.now()) ? now : date.atStartOfDay();
         LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
-        AvailabilityCreateRequest req = new AvailabilityCreateRequest();
-        req.setStartAt(dayStart);
-        req.setEndAt(dayEnd);
-        req.setRemark(remark != null && !remark.isBlank() ? remark : (Boolean.TRUE.equals(isOff) ? "全天休息" : "全天可约"));
+        if (!dayStart.isBefore(dayEnd)) {
+            return;
+        }
+        String note = remark != null && !remark.isBlank() ? remark : (Boolean.TRUE.equals(isOff) ? "全天休息" : "全天可约");
         if (Boolean.TRUE.equals(isOff)) {
+            AvailabilityCreateRequest req = new AvailabilityCreateRequest();
+            req.setStartAt(dayStart);
+            req.setEndAt(dayEnd);
+            req.setRemark(note);
             createUnavailable(userId, req);
         } else {
-            createAvailable(userId, req);
+            // 消除该日休息标记，并对已有 AVAILABLE 区间做空隙补全，避免已有时段导致重叠报错
+            punchOutUnavailableSlots(userId, dayStart, dayEnd);
+            List<CompanionAvailability> existingAvail = availabilityMapper.selectList(
+                    new LambdaQueryWrapper<CompanionAvailability>()
+                            .eq(CompanionAvailability::getCompanionUserId, userId)
+                            .eq(CompanionAvailability::getAvailabilityStatus, AvailabilityStatus.AVAILABLE.name())
+                            .lt(CompanionAvailability::getStartAt, dayEnd)
+                            .gt(CompanionAvailability::getEndAt, dayStart));
+            List<LocalDateTime[]> occupied = existingAvail.stream()
+                    .map(a -> new LocalDateTime[]{a.getStartAt(), a.getEndAt()})
+                    .toList();
+            List<LocalDateTime[]> gaps = AvailabilityWindowGenerator.subtractIntervals(dayStart, dayEnd, occupied);
+            for (LocalDateTime[] gap : gaps) {
+                CompanionAvailability a = new CompanionAvailability();
+                a.setCompanionUserId(userId);
+                a.setStartAt(gap[0]);
+                a.setEndAt(gap[1]);
+                a.setAvailabilityStatus(AvailabilityStatus.AVAILABLE.name());
+                a.setSourceType("MANUAL");
+                a.setTemplateId(0L);
+                a.setRemark(note);
+                availabilityMapper.insert(a);
+            }
         }
     }
 
@@ -439,6 +484,7 @@ public class AvailabilityService {
         if (date == null || date.isBefore(LocalDate.now())) {
             throw new BusinessException(ErrorCode.AVAILABILITY_PAST_TIME, "不能恢复已经过去的日期");
         }
+        profileMapper.selectByUserIdForUpdate(userId);
         LocalDateTime dayStart = date.atStartOfDay();
         LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
 
@@ -466,12 +512,12 @@ public class AvailabilityService {
             }
         }
 
-        // 3. 查找该日所有档期记录：清除手动调整与未被订单锁定的模板实例
+        // 3. 查找与该日重叠的所有档期记录：清除手动调整与当天未被订单锁定的模板实例
         List<CompanionAvailability> dayRecords = availabilityMapper.selectList(
                 new LambdaQueryWrapper<CompanionAvailability>()
                         .eq(CompanionAvailability::getCompanionUserId, userId)
-                        .ge(CompanionAvailability::getStartAt, dayStart)
-                        .lt(CompanionAvailability::getStartAt, dayEnd));
+                        .lt(CompanionAvailability::getStartAt, dayEnd)
+                        .gt(CompanionAvailability::getEndAt, dayStart));
 
         int removedManual = 0;
         int removedGenerated = 0;
@@ -480,8 +526,8 @@ public class AvailabilityService {
             if (isManual) {
                 availabilityMapper.deleteById(r.getId());
                 removedManual++;
-            } else {
-                // 模板实例：已被订单锁定的保留，未被订单锁定的删除重建
+            } else if (!r.getStartAt().isBefore(dayStart) && !r.getEndAt().isAfter(dayEnd)) {
+                // 当日模板实例：已被订单锁定的保留（随后 ensureWindow 自动补齐空隙），未锁定的删除重建
                 if (!hasOrderConflict(userId, r.getStartAt(), r.getEndAt())) {
                     availabilityMapper.deleteById(r.getId());
                     removedGenerated++;
@@ -489,15 +535,15 @@ public class AvailabilityService {
             }
         }
 
-        // 4. 调用 ensureWindow 重新生成该日缺失的常规作息
-        availabilityTemplateService.ensureWindow(userId);
+        // 4. 调用独立事务 Bean 重新生成该日缺失的常规作息（含部分锁定空隙及跨天尾段）
+        windowGenerator.ensureWindow(userId);
 
-        // 5. 统计重新生成的数量
+        // 5. 统计该日覆盖到的有效档期数量
         Long count = availabilityMapper.selectCount(
                 new LambdaQueryWrapper<CompanionAvailability>()
                         .eq(CompanionAvailability::getCompanionUserId, userId)
-                        .ge(CompanionAvailability::getStartAt, dayStart)
-                        .lt(CompanionAvailability::getStartAt, dayEnd));
+                        .lt(CompanionAvailability::getStartAt, dayEnd)
+                        .gt(CompanionAvailability::getEndAt, dayStart));
         int regenerated = count != null ? count.intValue() : 0;
 
         return RestoreDayResult.builder()
@@ -531,7 +577,7 @@ public class AvailabilityService {
     }
 
     public boolean hasOrderConflict(Long userId, LocalDateTime startAt, LocalDateTime endAt) {
-        return !orderTimeSlotMapper.selectConflictSlotsForUpdate(userId, startAt, endAt).isEmpty();
+        return !orderTimeSlotMapper.selectConflictSlotsForUpdate(userId, startAt, endAt, LocalDateTime.now()).isEmpty();
     }
 
     public void insertRecurrenceSafe(Long userId, Long templateId, LocalDateTime startAt, LocalDateTime endAt, String remark) {
@@ -642,7 +688,7 @@ public class AvailabilityService {
             throw new BusinessException(ErrorCode.SLOT_CONFLICT, "与已有档期时间重叠");
         }
         List<OrderTimeSlot> orderConflicts = orderTimeSlotMapper.selectConflictSlotsForUpdate(
-                userId, startAt, endAt);
+                userId, startAt, endAt, LocalDateTime.now());
         if (!orderConflicts.isEmpty()) {
             throw new BusinessException(ErrorCode.SLOT_CONFLICT, "该时段已被有效订单占用");
         }

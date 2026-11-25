@@ -53,11 +53,11 @@ async function handleGameIconUpload(file: File) {
   }
   uploadingGameIcon.value = true
   try {
-    const res = await uploadFile(file, 'game')
+    const res = await uploadFile(file, 'general')
     gameForm.gameIconUrl = res.url
     ElMessage.success('封面图上传成功')
-  } catch (e: any) {
-    ElMessage.error(e?.message || '封面图上传失败')
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     uploadingGameIcon.value = false
   }
@@ -68,6 +68,8 @@ async function loadGames() {
   gameLoading.value = true
   try {
     games.value = await adminGames(gameQuery.keyword || undefined, gameQuery.enabled)
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     gameLoading.value = false
   }
@@ -83,6 +85,8 @@ async function loadTypes() {
   typeLoading.value = true
   try {
     types.value = await adminServiceTypes(typeQuery.keyword || undefined, typeQuery.enabled)
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     typeLoading.value = false
   }
@@ -108,6 +112,8 @@ async function loadTags() {
       gameId: tagQuery.gameId,
       enabled: tagQuery.enabled,
     })
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     tagLoading.value = false
   }
@@ -207,8 +213,8 @@ function validate(): boolean {
       ElMessage.warning('请填写服务类型名称与编码')
       return false
     }
-    if (!/^[A-Za-z_]+$/.test(typeForm.typeCode.trim())) {
-      ElMessage.warning('编码只能包含字母与下划线，如 TEAM_UP')
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(typeForm.typeCode.trim())) {
+      ElMessage.warning('编码须以字母开头，仅含字母、数字与下划线（最长32位），如 RANK_5V5')
       return false
     }
   } else if (!tagForm.tagName.trim()) {
@@ -219,7 +225,7 @@ function validate(): boolean {
 }
 
 async function handleSave() {
-  if (!validate()) return
+  if (saving.value || !validate()) return
   saving.value = true
   try {
     if (dialogKind.value === 'game') {
@@ -259,6 +265,8 @@ async function handleSave() {
     ElMessage.success(editingId.value == null ? '已新增' : '已更新')
     dialogVisible.value = false
     await reloadAll()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     saving.value = false
   }
@@ -272,39 +280,43 @@ async function handleSave() {
  */
 async function toggleEnabled(kind: 'game' | 'type' | 'tag', row: Game | ServiceType | Tag) {
   const next = row.enabled === 1 ? 0 : 1
-  if (kind === 'game') {
-    const g = row as Game
-    await adminUpdateGame(g.id, {
-      gameName: g.gameName,
-      gameIconUrl: g.gameIconUrl,
-      gameIntro: g.gameIntro,
-      sortNo: g.sortNo,
-      enabled: next,
-    })
-    await loadGames()
-  } else if (kind === 'type') {
-    const t = row as ServiceType
-    await adminUpdateServiceType(t.id, {
-      typeName: t.typeName,
-      typeCode: t.typeCode,
-      description: t.description,
-      sortNo: t.sortNo,
-      enabled: next,
-    })
-    await loadTypes()
-  } else {
-    const t = row as Tag
-    await adminUpdateTag(t.id, {
-      tagName: t.tagName,
-      tagCategory: t.tagCategory,
-      gameId: t.gameId,
-      sortNo: t.sortNo,
-      enabled: next,
-    })
-    await loadTags()
+  try {
+    if (kind === 'game') {
+      const g = row as Game
+      await adminUpdateGame(g.id, {
+        gameName: g.gameName,
+        gameIconUrl: g.gameIconUrl,
+        gameIntro: g.gameIntro,
+        sortNo: g.sortNo,
+        enabled: next,
+      })
+      await loadGames()
+    } else if (kind === 'type') {
+      const t = row as ServiceType
+      await adminUpdateServiceType(t.id, {
+        typeName: t.typeName,
+        typeCode: t.typeCode,
+        description: t.description,
+        sortNo: t.sortNo,
+        enabled: next,
+      })
+      await loadTypes()
+    } else {
+      const t = row as Tag
+      await adminUpdateTag(t.id, {
+        tagName: t.tagName,
+        tagCategory: t.tagCategory,
+        gameId: t.gameId,
+        sortNo: t.sortNo,
+        enabled: next,
+      })
+      await loadTags()
+    }
+    ElMessage.success(next === 1 ? '已启用' : '已停用，前台不再展示该目录项')
+    await reloadAll()
+  } catch {
+    // http.ts 已统一提示错误
   }
-  ElMessage.success(next === 1 ? '已启用' : '已停用，前台不再展示该目录项')
-  await reloadAll()
 }
 
 async function handleDelete(kind: 'game' | 'type' | 'tag', row: Game | ServiceType | Tag) {
@@ -318,18 +330,22 @@ async function handleDelete(kind: 'game' | 'type' | 'tag', row: Game | ServiceTy
   } catch {
     return
   }
-  if (kind === 'game') {
-    await adminDeleteGame(row.id)
-    await loadGames()
-  } else if (kind === 'type') {
-    await adminDeleteServiceType(row.id)
-    await loadTypes()
-  } else {
-    await adminDeleteTag(row.id)
-    await loadTags()
+  try {
+    if (kind === 'game') {
+      await adminDeleteGame(row.id)
+      await loadGames()
+    } else if (kind === 'type') {
+      await adminDeleteServiceType(row.id)
+      await loadTypes()
+    } else {
+      await adminDeleteTag(row.id)
+      await loadTags()
+    }
+    ElMessage.success('已删除')
+    await reloadAll()
+  } catch {
+    // http.ts 已统一提示错误
   }
-  ElMessage.success('已删除')
-  await reloadAll()
 }
 </script>
 
@@ -581,7 +597,7 @@ async function handleDelete(kind: 'game' | 'type' | 'tag', row: Game | ServiceTy
           <el-input v-model="typeForm.typeName" maxlength="50" show-word-limit placeholder="如：排位上分" />
         </el-form-item>
         <el-form-item label="类型编码" required>
-          <el-input v-model="typeForm.typeCode" maxlength="32" placeholder="如 RANK_BOOST（字母与下划线，自动转大写）" />
+          <el-input v-model="typeForm.typeCode" maxlength="32" placeholder="如 RANK_5V5（字母开头，含字母/数字/下划线，自动转大写）" />
         </el-form-item>
         <el-form-item label="类型说明">
           <el-input v-model="typeForm.description" type="textarea" :rows="2" maxlength="200" show-word-limit />

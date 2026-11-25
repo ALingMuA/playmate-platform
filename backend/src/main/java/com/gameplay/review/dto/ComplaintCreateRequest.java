@@ -1,7 +1,8 @@
 package com.gameplay.review.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -26,6 +27,7 @@ public class ComplaintCreateRequest {
     private String description;
 
     /** 图片证据（最多5张，FR-U18 有限数量） */
+    @Valid
     @Size(max = 5, message = "图片证据最多5张")
     private List<EvidenceItem> evidences;
 
@@ -35,6 +37,9 @@ public class ComplaintCreateRequest {
 
         /** 文件地址（file 模块上传返回的 url） */
         @NotBlank(message = "证据文件地址不能为空")
+        @Size(max = 500, message = "证据文件地址长度不能超过500")
+        @Pattern(regexp = "^(?!.*\\.\\.)/api/files/[a-zA-Z0-9_-]+/\\d{8}/[a-zA-Z0-9._-]+\\.(jpg|jpeg|png|gif|webp)$",
+                message = "证据文件地址格式无效")
         private String fileUrl;
 
         /** 原始文件名 */

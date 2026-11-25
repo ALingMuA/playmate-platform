@@ -51,4 +51,18 @@ public interface WalletAccountMapper extends BaseMapper<WalletAccount> {
     int settleIncomeWithVersion(@Param("id") Long id,
                                 @Param("version") Integer version,
                                 @Param("amountCents") Long amountCents);
+
+    /** 扣回已结算收益：扣减可用余额，同时按实际扣回额扣减累计收益（最低为 0） */
+    @Update("""
+            UPDATE wallet_account
+            SET balance_cents = balance_cents - #{balanceDeductCents},
+                total_income_cents = GREATEST(total_income_cents - #{incomeDeductCents}, 0),
+                version = version + 1,
+                updated_at = NOW()
+            WHERE id = #{id} AND version = #{version} AND balance_cents >= #{balanceDeductCents}
+            """)
+    int clawbackSettledIncomeWithVersion(@Param("id") Long id,
+                                         @Param("version") Integer version,
+                                         @Param("balanceDeductCents") Long balanceDeductCents,
+                                         @Param("incomeDeductCents") Long incomeDeductCents);
 }

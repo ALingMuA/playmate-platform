@@ -355,8 +355,19 @@ class OrderDeliveryEvidenceFlowTest {
     }
 
     private String uploadEvidence(String companionToken) throws Exception {
+        byte[] validOneByOnePng = new byte[]{
+                (byte) 0x89, (byte) 0x50, (byte) 0x4e, (byte) 0x47, (byte) 0x0d, (byte) 0x0a, (byte) 0x1a, (byte) 0x0a,
+                (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x0d, (byte) 0x49, (byte) 0x48, (byte) 0x44, (byte) 0x52,
+                (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x01, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x01,
+                (byte) 0x08, (byte) 0x02, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x90, (byte) 0x77, (byte) 0x53,
+                (byte) 0xde, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x0c, (byte) 0x49, (byte) 0x44, (byte) 0x41,
+                (byte) 0x54, (byte) 0x78, (byte) 0x9c, (byte) 0x63, (byte) 0xf8, (byte) 0xcf, (byte) 0xc0, (byte) 0x00,
+                (byte) 0x00, (byte) 0x03, (byte) 0x01, (byte) 0x01, (byte) 0x00, (byte) 0xc9, (byte) 0xfe, (byte) 0x92,
+                (byte) 0xef, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x49, (byte) 0x45, (byte) 0x4e,
+                (byte) 0x44, (byte) 0xae, (byte) 0x42, (byte) 0x60, (byte) 0x82
+        };
         MockMultipartFile image = new MockMultipartFile("file", "履约测试.png", "image/png",
-                new byte[]{(byte) 0x89, 'P', 'N', 'G'});
+                validOneByOnePng);
         MvcResult result = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                         .multipart("/api/files/upload")
                         .file(image)

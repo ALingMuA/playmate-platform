@@ -1,5 +1,7 @@
 package com.gameplay.customer_service.dto;
 
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -32,5 +34,7 @@ public class CsAccountCreateRequest {
     private String initialPassword;
 
     /** 最大并行处理会话数 */
+    @Min(value = 1, message = "最大并行会话数至少为1")
+    @Max(value = 50, message = "最大并行会话数不能超过50")
     private Integer maxActiveConversations;
 }

@@ -2,7 +2,7 @@
 /**
  * 用户端 - 公告详情页（/announcements/:id）
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { publicAnnouncementDetail, type AnnouncementView } from '@/api/admin'
 import { ApiError } from '@/api/http'
@@ -21,13 +21,26 @@ function fmtTime(t?: string): string {
   return t.length >= 16 ? t.slice(0, 16) : t
 }
 
+let loadSeq = 0
+
 async function load() {
+  const id = announcementId.value
+  const seq = ++loadSeq
   loading.value = true
   loadError.value = ''
   notFound.value = false
+  announcement.value = null
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    notFound.value = true
+    loading.value = false
+    return
+  }
   try {
-    announcement.value = await publicAnnouncementDetail(announcementId.value)
+    const detail = await publicAnnouncementDetail(id)
+    if (seq !== loadSeq || announcementId.value !== id) return
+    announcement.value = detail
   } catch (err) {
+    if (seq !== loadSeq) return
     announcement.value = null
     if (err instanceof ApiError && (err.status === 404 || err.code === 'ANNOUNCEMENT_NOT_FOUND')) {
       notFound.value = true
@@ -35,7 +48,7 @@ async function load() {
       loadError.value = '公告加载失败，请检查网络后重试。'
     }
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -44,7 +57,10 @@ function goBack() {
 }
 
 onMounted(() => {
-  load()
+  void load()
+})
+watch(announcementId, () => {
+  void load()
 })
 </script>
 

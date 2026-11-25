@@ -1,6 +1,7 @@
 package com.gameplay.review.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -24,8 +25,15 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 评价领域服务（FR-U15/U16、FR-M08）。
@@ -46,7 +54,7 @@ public class ReviewService {
     /** 提交评价（FR-U15） */
     @Transactional
     public ReviewView submitReview(Long userId, Long orderId, ReviewCreateRequest req) {
-        PlayOrder order = orderMapper.selectById(orderId);
+        PlayOrder order = orderMapper.selectByIdForUpdate(orderId);
         if (order == null) {
             throw new BusinessException(ErrorCode.ORDER_NOT_FOUND);
         }
@@ -57,6 +65,8 @@ public class ReviewService {
             throw new BusinessException(ErrorCode.REVIEW_ORDER_NOT_ELIGIBLE,
                     "只有本人已完成的订单可以评价");
         }
+        // 在任何普通 SELECT 建立一致性视图前先锁定陪玩师资料，避免 REPEATABLE READ 漏算并发评价
+        companionProfileMapper.selectByUserIdForUpdate(order.getCompanionUserId());
         // 每个订单只能评价一次（唯一索引兜底）
         long exists = reviewMapper.selectCount(new LambdaQueryWrapper<Review>()
                 .eq(Review::getOrderId, orderId));
@@ -110,6 +120,9 @@ public class ReviewService {
             return null;
         }
         PlayOrder order = orderMapper.selectById(orderId);
+        if (order == null) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_FOUND);
+        }
         boolean isAdmin = roles != null && roles.contains("ADMIN");
         if (!isAdmin && !order.getUserId().equals(operatorId)
                 && !order.getCompanionUserId().equals(operatorId)) {
@@ -145,11 +158,12 @@ public class ReviewService {
                 && !ReviewDisplayStatus.HIDDEN.name().equals(displayStatus))) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "展示状态不合法");
         }
-        Review review = reviewMapper.selectById(reviewId);
+        Review review = reviewMapper.selectByIdForUpdate(reviewId);
         if (review == null) {
             throw new BusinessException(ErrorCode.REVIEW_NOT_FOUND);
         }
         if (!displayStatus.equals(review.getDisplayStatus())) {
+            companionProfileMapper.selectByUserIdForUpdate(review.getCompanionUserId());
             review.setDisplayStatus(displayStatus);
             reviewMapper.updateById(review);
             recalcCompanionRating(review.getCompanionUserId());
@@ -159,28 +173,41 @@ public class ReviewService {
 
     // ==================== 内部 ====================
 
-    /** 重算陪玩师有效评价评分（仅统计 VISIBLE，FR-U16） */
+    /** 重算陪玩师有效评价评分（行锁资料后仅更新评分字段，仅统计 VISIBLE，FR-U16） */
     private void recalcCompanionRating(Long companionUserId) {
-        ReviewMapper.ScoreAggregate agg = reviewMapper.aggregateVisibleByCompanion(companionUserId);
-        CompanionProfile profile = companionProfileMapper.selectOne(
-                new LambdaQueryWrapper<CompanionProfile>()
-                        .eq(CompanionProfile::getUserId, companionUserId));
+        CompanionProfile profile = companionProfileMapper.selectByUserIdForUpdate(companionUserId);
         if (profile == null) {
             return;
         }
-        profile.setRatingAvg(agg == null ? java.math.BigDecimal.ZERO : agg.getAvgScore());
-        profile.setRatingCount(agg == null ? 0 : agg.getCnt().intValue());
-        companionProfileMapper.updateById(profile);
+        ReviewMapper.ScoreAggregate agg = reviewMapper.aggregateVisibleByCompanion(companionUserId);
+        BigDecimal avgScore = agg == null ? BigDecimal.ZERO : agg.getAvgScore();
+        int ratingCount = agg == null ? 0 : agg.getCnt().intValue();
+        companionProfileMapper.update(null, new LambdaUpdateWrapper<CompanionProfile>()
+                .eq(CompanionProfile::getUserId, companionUserId)
+                .set(CompanionProfile::getRatingAvg, avgScore)
+                .set(CompanionProfile::getRatingCount, ratingCount));
     }
 
     private Page<ReviewView> toViewPage(Page<Review> p) {
         Page<ReviewView> result = new Page<>(p.getCurrent(), p.getSize(), p.getTotal());
-        result.setRecords(p.getRecords().stream().map(this::toView).toList());
+        List<Review> records = p.getRecords();
+        if (records.isEmpty()) {
+            result.setRecords(List.of());
+            return result;
+        }
+        Set<Long> userIds = records.stream().map(Review::getUserId).filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, User> userMap = userIds.isEmpty() ? Collections.emptyMap() :
+                userMapper.selectBatchIds(userIds).stream()
+                        .collect(Collectors.toMap(User::getId, Function.identity(), (a, b) -> a));
+        result.setRecords(records.stream().map(r -> toView(r, userMap.get(r.getUserId()))).toList());
         return result;
     }
 
     private ReviewView toView(Review r) {
-        User user = userMapper.selectById(r.getUserId());
+        return toView(r, userMapper.selectById(r.getUserId()));
+    }
+
+    private ReviewView toView(Review r, User user) {
         return ReviewView.builder()
                 .id(r.getId())
                 .orderId(r.getOrderId())

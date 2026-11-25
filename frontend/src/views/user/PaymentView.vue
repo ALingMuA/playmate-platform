@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
- * 订单支付（对齐 frontend-prototype payment.html）。
+ * 订单支付（对齐 docs/06-原型与架构图/frontend-prototype/payment.html）。
  *
  * <p>展示订单摘要与虚拟余额，使用余额完成模拟支付（FR-U09），
  * 支付成功后跳转订单列表；余额不足时引导充值提示。</p>
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { payOrder, userOrderDetail, walletMe, type Order } from '@/api/order'
@@ -37,8 +37,10 @@ function fmtTime(t?: string): string {
   return t.length >= 16 ? t.slice(0, 16) : t
 }
 
+let loadSeq = 0
+
 async function handlePay() {
-  if (!order.value) return
+  if (!order.value || paying.value) return
   if (insufficient.value) {
     ElMessage.warning('虚拟余额不足，请联系客服或重新下单')
     return
@@ -47,27 +49,34 @@ async function handlePay() {
   try {
     await payOrder(order.value.id)
     ElMessage.success('支付成功')
-    router.replace('/orders')
+    await router.replace('/orders')
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     paying.value = false
   }
 }
 
 async function loadPaymentData() {
+  const id = orderId.value
+  const seq = ++loadSeq
   loading.value = true
+  order.value = null
+  wallet.value = null
   orderError.value = ''
   walletError.value = ''
   orderNotFound.value = false
-  if (!Number.isSafeInteger(orderId.value) || orderId.value <= 0) {
+  if (!Number.isSafeInteger(id) || id <= 0) {
     orderError.value = '订单链接无效，请从订单列表重新进入支付。'
     loading.value = false
     return
   }
   try {
     const [orderResult, walletResult] = await Promise.allSettled([
-      userOrderDetail(orderId.value),
+      userOrderDetail(id),
       walletMe(),
     ])
+    if (seq !== loadSeq || orderId.value !== id) return
     if (orderResult.status === 'fulfilled') {
       order.value = orderResult.value
     } else {
@@ -81,11 +90,14 @@ async function loadPaymentData() {
       walletError.value = '余额加载失败，请重试后再支付。'
     }
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
 onMounted(loadPaymentData)
+watch(orderId, () => {
+  void loadPaymentData()
+})
 </script>
 
 <template>

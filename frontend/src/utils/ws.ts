@@ -1,11 +1,12 @@
 /**
- * 客服 WebSocket 客户端（概要设计 4.7：端点 /ws/cs，握手带 JWT）。
+ * 客服 WebSocket 客户端（概要设计 4.7：端点 /ws/cs，基于一次性握手票据建连）。
  *
  * <p>上行帧：MESSAGE_SEND（clientMsgId 幂等）；
  * 下行帧：MESSAGE_NEW / AI_STATUS / AI_RESPONSE / CONVERSATION_CHANGED / ERROR。
- * 断线自动重连，服务端推送通过 onMessage 回调分发。</p>
+ * 断线采用封顶指数退避重连，服务端推送通过 onMessage 回调分发。</p>
  */
-import type { AiResponseView, AiTaskView, ConversationView, MessageView } from '@/api/cs'
+import { fetchWsTicket, type AiResponseView, type AiTaskView, type ConversationView, type MessageView } from '@/api/cs'
+import { ApiError } from '@/api/http'
 
 /** 服务端下行帧 */
 export type WsPush =
@@ -26,10 +27,18 @@ export interface WsSendParams {
   requestHuman?: boolean
 }
 
+const MAX_RETRIES = 8
+const BASE_RETRY_DELAY_MS = 1000
+const MAX_RETRY_DELAY_MS = 30000
+const NO_RETRY_CLOSE_CODES = new Set([1008, 4401])
+
 export class CsSocket {
   private ws: WebSocket | null = null
   private token = ''
   private closedByUser = false
+  private opening = false
+  private connectSeq = 0
+  private retryCount = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private readonly handlers = new Set<(msg: WsPush) => void>()
   private readonly connectionHandlers = new Set<(state: WsConnectionState) => void>()
@@ -38,28 +47,118 @@ export class CsSocket {
     this.connectionHandlers.forEach((handler) => handler(state))
   }
 
-  /** 建立连接（带 token 握手），已有连接则忽略 */
-  connect(token: string) {
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-      return
-    }
-    this.token = token
-    this.closedByUser = false
-    this.open()
+  private notifyError(message: string) {
+    const push: WsPush = { type: 'ERROR', data: { message } }
+    this.handlers.forEach((handler) => handler(push))
   }
 
-  private open() {
-    const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
-    const url = `${protocol}://${location.host}/ws/cs?token=${encodeURIComponent(this.token)}`
-    const ws = new WebSocket(url)
-    this.ws = ws
+  private clearReconnectTimer() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+  }
+
+  private teardownSocket() {
+    this.clearReconnectTimer()
+    const current = this.ws
+    this.ws = null
+    if (current) {
+      current.onopen = null
+      current.onmessage = null
+      current.onclose = null
+      current.onerror = null
+      current.close()
+    }
+  }
+
+  /** 建立连接（以最新 token 交换一次性票据握手）；token 变化时自动重连 */
+  connect(token: string) {
+    if (!token) {
+      this.close()
+      return
+    }
+    const hasLiveOrPending = this.opening
+      || !!this.reconnectTimer
+      || (!!this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING))
+    if (this.token === token && !this.closedByUser && hasLiveOrPending) {
+      return
+    }
+    this.teardownSocket()
+    this.token = token
+    this.closedByUser = false
+    this.retryCount = 0
+    this.connectSeq += 1
+    void this.open(this.connectSeq, token)
+  }
+
+  private scheduleReconnect(seq: number, activeToken: string) {
+    if (this.closedByUser || seq !== this.connectSeq || this.token !== activeToken) {
+      return
+    }
+    if (this.retryCount >= MAX_RETRIES) {
+      this.notifyError('实时客服连接多次重连失败，请检查网络或刷新页面重试')
+      return
+    }
+    const expDelay = Math.min(MAX_RETRY_DELAY_MS, BASE_RETRY_DELAY_MS * (2 ** this.retryCount))
+    const jitter = Math.floor(Math.random() * 500)
+    this.retryCount += 1
+    this.clearReconnectTimer()
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      if (!this.closedByUser && seq === this.connectSeq && this.token === activeToken) {
+        void this.open(seq, activeToken)
+      }
+    }, expDelay + jitter)
+  }
+
+  private async open(seq: number, activeToken: string) {
+    if (this.closedByUser || seq !== this.connectSeq || this.token !== activeToken) {
+      return
+    }
+    this.opening = true
     this.notifyConnection('CONNECTING')
 
+    let ticket = ''
+    try {
+      const res = await fetchWsTicket()
+      ticket = res?.ticket ?? ''
+    } catch (err) {
+      if (seq === this.connectSeq) this.opening = false
+      if (this.closedByUser || seq !== this.connectSeq || this.token !== activeToken) {
+        return
+      }
+      this.notifyConnection('CLOSED')
+      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+        return
+      }
+      this.scheduleReconnect(seq, activeToken)
+      return
+    }
+
+    if (this.closedByUser || seq !== this.connectSeq || this.token !== activeToken || !ticket) {
+      if (seq === this.connectSeq) this.opening = false
+      if (!this.closedByUser && seq === this.connectSeq && !ticket) {
+        this.notifyConnection('CLOSED')
+        this.scheduleReconnect(seq, activeToken)
+      }
+      return
+    }
+
+    const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
+    const url = `${protocol}://${location.host}/ws/cs?ticket=${encodeURIComponent(ticket)}`
+    const ws = new WebSocket(url)
+    this.ws = ws
+    this.opening = false
+
     ws.onopen = () => {
-      if (this.ws === ws) this.notifyConnection('OPEN')
+      if (this.ws !== ws || seq !== this.connectSeq) return
+      this.retryCount = 0
+      this.notifyConnection('OPEN')
     }
 
     ws.onmessage = (event) => {
+      if (this.ws !== ws) return
       try {
         const msg = JSON.parse(event.data as string) as WsPush
         this.handlers.forEach((h) => h(msg))
@@ -68,13 +167,15 @@ export class CsSocket {
       }
     }
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (this.ws !== ws) return
       this.ws = null
       this.notifyConnection('CLOSED')
-      if (!this.closedByUser && this.token) {
-        // 断线自动重连（3 秒后）
-        this.reconnectTimer = setTimeout(() => this.open(), 3000)
+      if (NO_RETRY_CLOSE_CODES.has(event.code)) {
+        return
+      }
+      if (!this.closedByUser && this.token && seq === this.connectSeq) {
+        this.scheduleReconnect(seq, activeToken)
       }
     }
 
@@ -101,7 +202,7 @@ export class CsSocket {
   /** 订阅连接状态；订阅后会立即收到当前状态。 */
   onConnectionState(handler: (state: WsConnectionState) => void): () => void {
     this.connectionHandlers.add(handler)
-    handler(this.connected ? 'OPEN' : this.ws ? 'CONNECTING' : 'CLOSED')
+    handler(this.connected ? 'OPEN' : (this.ws || this.opening) ? 'CONNECTING' : 'CLOSED')
     return () => this.connectionHandlers.delete(handler)
   }
 
@@ -113,12 +214,11 @@ export class CsSocket {
   /** 主动关闭连接（退出登录/离开页面时调用） */
   close() {
     this.closedByUser = true
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
-    this.ws?.close()
-    this.ws = null
+    this.connectSeq += 1
+    this.opening = false
+    this.retryCount = 0
+    this.token = ''
+    this.teardownSocket()
     this.notifyConnection('CLOSED')
   }
 }

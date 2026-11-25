@@ -390,11 +390,21 @@ class CustomerServiceFlowTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"));
 
-        // 旧令牌访问客服接口被拒绝（禁用时递增令牌版本，返回 401 AUTH_TOKEN_VERSION_MISMATCH）
+        // 旧令牌访问客服接口被拒绝（P1-3 同步禁用 User，优先校验账号状态返回 403 AUTH_ACCOUNT_DISABLED）
         mockMvc.perform(get("/api/customer-service/queue")
                         .header("Authorization", "Bearer " + csToken))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("AUTH_TOKEN_VERSION_MISMATCH"));
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_ACCOUNT_DISABLED"));
+
+        // 禁用后尝试重新登录也被拒绝
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("account", csAccount)
+                                .put("password", initialPassword)
+                                .toString()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_ACCOUNT_DISABLED"));
     }
 
     @Test
@@ -408,5 +418,224 @@ class CustomerServiceFlowTest {
         assertThat(data.path("aiTask").path("status").asText()).isEqualTo("FALLBACK");
         assertThat(data.path("conversationStatus").asText()).isEqualTo("WAITING_HUMAN");
         assertThat(data.path("aiMessage").path("content").asText()).contains("人工客服");
+    }
+
+    @Test
+    @DisplayName("已登录用户可申请一次性 WS 票据（P1-9）")
+    void authenticated_user_can_issue_ws_ticket() throws Exception {
+        ObjectNode user = registerAndLogin();
+        mockMvc.perform(post("/api/customer-service/ws-ticket"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/customer-service/ws-ticket")
+                        .header("Authorization", "Bearer " + user.path("token").asText()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.ticket").isNotEmpty());
+    }
+
+    @Test
+    @DisplayName("禁用客服同步 User 状态、释放进行中会话并禁止持会话主动下线（P1-3/P1-22）")
+    void disable_cs_syncs_user_requeues_conversations_and_blocks_offline_with_active_chat() throws Exception {
+        String csAccount = "csdisable" + System.currentTimeMillis() + "_" + SEQ.incrementAndGet();
+        String initialPassword = "Cs@12345678";
+        String newPassword = "CsNew@123456";
+        MvcResult created = mockMvc.perform(post("/api/admin/cs-accounts")
+                        .header("Authorization", "Bearer " + adminToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("csAccount", csAccount)
+                                .put("csName", "客服" + csAccount)
+                                .put("contactMobile", "1" + (7_100_000_000L + SEQ.incrementAndGet()))
+                                .put("initialPassword", initialPassword)
+                                .toString()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long accountId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+        String tempToken = loginAndGetToken(csAccount, initialPassword);
+        MvcResult changed = mockMvc.perform(post("/api/auth/change-password")
+                        .header("Authorization", "Bearer " + tempToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("oldPassword", initialPassword)
+                                .put("newPassword", newPassword)
+                                .toString()))
+                .andExpect(status().isOk())
+                .andReturn();
+        String csToken = objectMapper.readTree(changed.getResponse().getContentAsString())
+                .path("data").path("token").asText();
+
+        mockMvc.perform(put("/api/customer-service/me/work-status")
+                        .header("Authorization", "Bearer " + csToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode().put("workStatus", "ONLINE").toString()))
+                .andExpect(status().isOk());
+
+        ObjectNode user = registerAndLogin();
+        String userToken = user.path("token").asText();
+        long conversationId = createConversation(userToken, "HELP_CENTER", null);
+        aiRespond(userToken, conversationId, "我要投诉");
+
+        MvcResult queueResult = mockMvc.perform(get("/api/customer-service/queue")
+                        .header("Authorization", "Bearer " + csToken))
+                .andExpect(status().isOk()).andReturn();
+        int version = -1;
+        for (JsonNode node : objectMapper.readTree(queueResult.getResponse().getContentAsString()).path("data")) {
+            if (node.path("conversationId").asLong() == conversationId) {
+                version = node.path("version").asInt();
+                break;
+            }
+        }
+        assertThat(version).isGreaterThanOrEqualTo(0);
+
+        mockMvc.perform(post("/api/customer-service/conversations/" + conversationId + "/claim")
+                        .header("Authorization", "Bearer " + csToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode().put("expectedVersion", version).toString()))
+                .andExpect(status().isOk());
+
+        // 持有 HUMAN_PROCESSING 会话时不能主动切换为 OFFLINE
+        mockMvc.perform(put("/api/customer-service/me/work-status")
+                        .header("Authorization", "Bearer " + csToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode().put("workStatus", "OFFLINE").toString()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CS_ACCOUNT_STATUS_INVALID"));
+
+        // 管理员禁用客服：同步 User 为 DISABLED 并释放会话回 WAITING_HUMAN
+        mockMvc.perform(put("/api/admin/cs-accounts/" + accountId + "/status")
+                        .header("Authorization", "Bearer " + adminToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("accountStatus", "DISABLED")
+                                .put("reason", "违规停用")
+                                .toString()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("account", csAccount)
+                                .put("password", newPassword)
+                                .toString()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_ACCOUNT_DISABLED"));
+
+        mockMvc.perform(get("/api/customer-service/conversations/" + conversationId)
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.conversationStatus").value("WAITING_HUMAN"))
+                .andExpect(jsonPath("$.data.currentCsAccountId").value(0));
+
+        // 管理员重新启用后恢复可登录
+        mockMvc.perform(put("/api/admin/cs-accounts/" + accountId + "/status")
+                        .header("Authorization", "Bearer " + adminToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("accountStatus", "ENABLED")
+                                .toString()))
+                .andExpect(status().isOk());
+        assertThat(loginAndGetToken(csAccount, newPassword)).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("内部备注越权访问拦截与升级管理员完整闭环（P1-5/P1-21）")
+    void internal_notes_idor_and_escalated_admin_lifecycle() throws Exception {
+        ObjectNode cs1 = createCsAccount();
+        ObjectNode cs2 = createCsAccount();
+        String cs1Token = cs1.path("token").asText();
+        String cs2Token = cs2.path("token").asText();
+        mockMvc.perform(put("/api/customer-service/me/work-status")
+                        .header("Authorization", "Bearer " + cs1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode().put("workStatus", "ONLINE").toString()))
+                .andExpect(status().isOk());
+
+        ObjectNode user = registerAndLogin();
+        String userToken = user.path("token").asText();
+        long conversationId = createConversation(userToken, "HELP_CENTER", null);
+        aiRespond(userToken, conversationId, "我要退款");
+
+        MvcResult queueResult = mockMvc.perform(get("/api/customer-service/queue")
+                        .header("Authorization", "Bearer " + cs1Token))
+                .andExpect(status().isOk()).andReturn();
+        int version = -1;
+        for (JsonNode node : objectMapper.readTree(queueResult.getResponse().getContentAsString()).path("data")) {
+            if (node.path("conversationId").asLong() == conversationId) {
+                version = node.path("version").asInt();
+                break;
+            }
+        }
+        mockMvc.perform(post("/api/customer-service/conversations/" + conversationId + "/claim")
+                        .header("Authorization", "Bearer " + cs1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode().put("expectedVersion", version).toString()))
+                .andExpect(status().isOk());
+
+        // 未接手该会话的客服 cs2 不能读写内部备注；不存在的会话返回 404
+        mockMvc.perform(get("/api/customer-service/conversations/" + conversationId + "/notes")
+                        .header("Authorization", "Bearer " + cs2Token))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PERMISSION_DATA_SCOPE_DENIED"));
+        mockMvc.perform(post("/api/customer-service/conversations/" + conversationId + "/notes")
+                        .header("Authorization", "Bearer " + cs2Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode().put("content", "越权备注").toString()))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/customer-service/conversations/999999999/notes")
+                        .header("Authorization", "Bearer " + cs1Token))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("CS_CONVERSATION_NOT_FOUND"));
+
+        // cs1 升级管理员后释放 currentCsAccountId，cs1 不可再回复或关闭
+        mockMvc.perform(post("/api/customer-service/conversations/" + conversationId + "/escalate")
+                        .header("Authorization", "Bearer " + cs1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode().put("reason", "超权限退款核实").toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.conversationStatus").value("ESCALATED_ADMIN"))
+                .andExpect(jsonPath("$.data.currentCsAccountId").value(0));
+
+        mockMvc.perform(post("/api/customer-service/conversations/" + conversationId + "/messages")
+                        .header("Authorization", "Bearer " + cs1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("clientMsgId", UUID.randomUUID().toString())
+                                .put("content", "升级后客服不能再回复")
+                                .toString()))
+                .andExpect(status().isForbidden());
+
+        // 管理员查看、回复、加备注并关闭
+        String adminJwt = adminToken();
+        mockMvc.perform(get("/api/admin/customer-service/conversations")
+                        .header("Authorization", "Bearer " + adminJwt))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records[?(@.id==" + conversationId + ")]").isNotEmpty());
+
+        mockMvc.perform(post("/api/admin/customer-service/conversations/" + conversationId + "/messages")
+                        .header("Authorization", "Bearer " + adminJwt)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("clientMsgId", UUID.randomUUID().toString())
+                                .put("content", "管理员已接手处理您的退款核实。")
+                                .toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.senderType").value("ADMIN"));
+
+        mockMvc.perform(post("/api/admin/customer-service/conversations/" + conversationId + "/notes")
+                        .header("Authorization", "Bearer " + adminJwt)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode().put("content", "管理员核实完成").toString()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/customer-service/conversations/" + conversationId + "/close")
+                        .header("Authorization", "Bearer " + adminJwt)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("category", "退款核实")
+                                .put("result", "管理员处理完毕")
+                                .toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.conversationStatus").value("CLOSED"));
     }
 }

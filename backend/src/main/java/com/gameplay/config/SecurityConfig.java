@@ -24,6 +24,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.beans.factory.annotation.Value;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -52,8 +53,8 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/register", "/api/auth/login", "/error").permitAll()
-                        // 目录与公开浏览接口：游戏、服务类型、标签、可预约服务（游客可浏览，概要设计 8.x 分组）
-                        .requestMatchers("/api/games/**", "/api/service-types/**", "/api/tags/**",
+                        // 目录与公开浏览接口：游戏、服务类型、标签、可预约服务（仅限 GET，游客可浏览，概要设计 8.x 分组）
+                        .requestMatchers(HttpMethod.GET, "/api/games/**", "/api/service-types/**", "/api/tags/**",
                                 "/api/companion-services/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/companion-profiles", "/api/companion-profiles/**").permitAll()
                         // 评价展示与文件读取公开（URL 含 UUID 不可枚举；上传仍需登录）
@@ -87,7 +88,11 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of(allowedOrigins.split(",")));
+        List<String> origins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+        config.setAllowedOrigins(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setMaxAge(3600L);

@@ -1,5 +1,6 @@
 package com.gameplay.companion.dto;
 
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -37,10 +38,12 @@ public class ServiceRequest {
     /** 每小时价格，单位分 */
     @NotNull(message = "请填写价格")
     @Min(value = 100, message = "价格不能低于1元/小时")
+    @Max(value = 10_000_000L, message = "价格不能超过100000元/小时")
     private Long priceCents;
 
     /** 最短服务时长，单位分钟 */
     @NotNull(message = "请填写最短服务时长")
     @Min(value = 30, message = "最短服务时长不能低于30分钟")
+    @Max(value = 1440, message = "最短服务时长不能超过1440分钟")
     private Integer minDurationMinutes;
 }

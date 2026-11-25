@@ -12,6 +12,7 @@ import com.gameplay.order.dto.RejectOrderRequest;
 import com.gameplay.order.service.OrderService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -26,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/companion/orders")
+@PreAuthorize("hasRole('COMPANION')")
 @RequiredArgsConstructor
 public class CompanionOrderController {
 
@@ -52,7 +54,7 @@ public class CompanionOrderController {
     public ApiResponse<OrderView> accept(@PathVariable Long id,
                                          @Valid @RequestBody AcceptOrderRequest request,
                                          Authentication authentication) {
-        return ApiResponse.ok(orderService.accept(currentUserId(authentication), id));
+        return ApiResponse.ok(orderService.accept(currentUserId(authentication), id, request.getCompanionRemark()));
     }
 
     /** 拒绝订单（FR-P14） */

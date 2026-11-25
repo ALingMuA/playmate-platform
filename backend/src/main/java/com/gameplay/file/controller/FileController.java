@@ -47,13 +47,14 @@ public class FileController {
     public ApiResponse<FileView> upload(@RequestParam("file") MultipartFile file,
                                         @RequestParam(defaultValue = "general") String category,
                                         Authentication authentication) {
-        if ("delivery".equals(category)
+        String safeCategory = FileStorageService.normalizeCategory(category);
+        if ("delivery".equals(safeCategory)
                 && (authentication == null
                 || !(authentication.getPrincipal() instanceof JwtPrincipal principal)
                 || (!principal.roles().contains("COMPANION") && !principal.roles().contains("ADMIN")))) {
             throw new BusinessException(ErrorCode.PERMISSION_DENIED);
         }
-        String url = fileStorageService.store(file, category);
+        String url = fileStorageService.store(file, safeCategory);
         return ApiResponse.ok(FileView.builder()
                 .url(url)
                 .fileName(file.getOriginalFilename())
@@ -75,6 +76,7 @@ public class FileController {
         String contentType = contentTypeOf(fileName);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
+                .header("X-Content-Type-Options", "nosniff")
                 .contentType(MediaType.parseMediaType(contentType))
                 .body(resource);
     }

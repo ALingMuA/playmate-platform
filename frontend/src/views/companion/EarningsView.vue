@@ -8,12 +8,24 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 10
 const loading = ref(false)
+const loadError = ref('')
 
 async function load() {
-  overview.value = await earningsOverview()
-  const result = await earningsLedgers(page.value, pageSize)
-  ledgers.value = result.records
-  total.value = result.total
+  loading.value = true
+  loadError.value = ''
+  try {
+    const [ov, result] = await Promise.all([
+      earningsOverview(),
+      earningsLedgers(page.value, pageSize),
+    ])
+    overview.value = ov
+    ledgers.value = result.records
+    total.value = result.total
+  } catch (err) {
+    loadError.value = err instanceof Error ? err.message : '收益数据加载失败，请重试。'
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(load)
@@ -28,6 +40,9 @@ const ledgerTypeMap: Record<string, { label: string; type: 'success' | 'danger' 
 
 <template>
   <div class="earnings-view">
+    <el-alert v-if="loadError" type="error" :title="loadError" :closable="false" show-icon style="margin-bottom: 16px">
+      <el-button size="small" @click="load">重试</el-button>
+    </el-alert>
     <el-row :gutter="16" class="stat-row" v-if="overview">
       <el-col :xs="12" :sm="12" :md="6">
         <el-card shadow="hover" class="stat-card">

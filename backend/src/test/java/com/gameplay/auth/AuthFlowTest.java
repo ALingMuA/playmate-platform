@@ -2,18 +2,24 @@ package com.gameplay.auth;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -46,6 +52,12 @@ class AuthFlowTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Value("${jwt.secret}")
+    private String jwtSecret;
 
     /** 生成唯一用户名 */
     private String uniqueUser() {
@@ -321,5 +333,82 @@ class AuthFlowTest {
                 .andReturn();
 
         assertThat(roleList(result)).contains("ADMIN");
+    }
+
+    // ==================== 安全加固验证 ====================
+
+    @Test
+    @DisplayName("鉴权：缺失 uid/tv/username 声明的令牌返回 401 AUTH_TOKEN_INVALID")
+    void token_missing_required_claims_rejected_with_401() throws Exception {
+        String missingTvToken = Jwts.builder()
+                .claim("uid", 1L)
+                .claim("username", "admin")
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + 60_000))
+                .signWith(Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8)))
+                .compact();
+
+        mockMvc.perform(get("/api/auth/me")
+                        .header("Authorization", "Bearer " + missingTvToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_TOKEN_INVALID"));
+    }
+
+    @Test
+    @DisplayName("权限：JwtAuthFilter 实时读取数据库角色，后台赋权与收回立即生效")
+    void live_db_roles_take_effect_immediately_without_relogin() throws Exception {
+        String username = uniqueUser();
+        MvcResult reg = register(username, PASSWORD, "角色测试", nextMobile(), null);
+        long userId = objectMapper.readTree(reg.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+        String token = loginAndGetToken(username, PASSWORD);
+
+        mockMvc.perform(get("/api/admin/stats/overview")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+
+        Long adminRoleId = jdbcTemplate.queryForObject(
+                "SELECT id FROM `role` WHERE role_code = 'ADMIN'", Long.class);
+        jdbcTemplate.update("INSERT INTO user_role (user_id, role_id) VALUES (?, ?)", userId, adminRoleId);
+
+        mockMvc.perform(get("/api/admin/stats/overview")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        jdbcTemplate.update("DELETE FROM user_role WHERE user_id = ? AND role_id = ?", userId, adminRoleId);
+
+        mockMvc.perform(get("/api/admin/stats/overview")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("注册：禁止用户名伪装他人手机号格式及用户名/手机号交叉碰撞")
+    void register_prevents_username_mobile_collision() throws Exception {
+        String existingMobile = nextMobile();
+        register(uniqueUser(), PASSWORD, "原用户", existingMobile, null);
+
+        // 1) 11位手机号格式用户名且与自身手机号不同 -> 400
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("username", "13912345678")
+                                .put("password", PASSWORD)
+                                .put("nickname", "碰撞测试")
+                                .put("mobile", nextMobile())
+                                .toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        // 2) 用户名与自身手机号一致但该手机号已被他人占用 -> 409
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("username", existingMobile)
+                                .put("password", PASSWORD)
+                                .put("nickname", "碰撞测试2")
+                                .put("mobile", existingMobile)
+                                .toString()))
+                .andExpect(status().isConflict());
     }
 }

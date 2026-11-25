@@ -3,7 +3,7 @@
  * 管理后台 - 优惠券管理
  */
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
 import dayjs from 'dayjs'
 import { adminUsers, type UserAdminView } from '@/api/admin'
 import { adminGames, adminServiceTypes } from '@/api/adminCatalog'
@@ -31,7 +31,7 @@ const serviceTypeOptions = ref<ServiceType[]>([])
 const companionOptions = ref<UserAdminView[]>([])
 const companionSearchLoading = ref(false)
 
-const statusMap: Record<string, { label: string; type: string }> = {
+const statusMap: Record<string, { label: string; type: TagProps['type'] }> = {
   DRAFT: { label: '草稿', type: 'info' },
   PUBLISHED: { label: '已发布', type: 'success' },
   OFFLINE: { label: '已下线', type: 'warning' },
@@ -194,6 +194,8 @@ async function handleSave() {
     }
     editVisible.value = false
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     saving.value = false
   }
@@ -203,23 +205,35 @@ async function handleSave() {
 
 async function handlePublish(row: CouponTemplateView) {
   try { await ElMessageBox.confirm(`确定发布优惠券「${row.name}」吗？发布后用户可正常领取并抵扣。`, '发布优惠券', { type: 'info' }) } catch { return }
-  await adminPublishCoupon(row.id)
-  ElMessage.success('优惠券已发布')
-  await load()
+  try {
+    await adminPublishCoupon(row.id)
+    ElMessage.success('优惠券已发布')
+    await load()
+  } catch {
+    // http.ts 已统一提示错误
+  }
 }
 
 async function handleOffline(row: CouponTemplateView) {
   try { await ElMessageBox.confirm(`确定下线优惠券「${row.name}」吗？下线后用户将无法继续领取。`, '下线优惠券', { type: 'warning' }) } catch { return }
-  await adminOfflineCoupon(row.id)
-  ElMessage.success('优惠券已下线')
-  await load()
+  try {
+    await adminOfflineCoupon(row.id)
+    ElMessage.success('优惠券已下线')
+    await load()
+  } catch {
+    // http.ts 已统一提示错误
+  }
 }
 
 async function handleDelete(row: CouponTemplateView) {
   try { await ElMessageBox.confirm(`确定删除优惠券「${row.name}」吗？删除后不可恢复。`, '删除优惠券', { type: 'warning' }) } catch { return }
-  await adminDeleteCoupon(row.id)
-  ElMessage.success('优惠券已删除')
-  await load()
+  try {
+    await adminDeleteCoupon(row.id)
+    ElMessage.success('优惠券已删除')
+    await load()
+  } catch {
+    // http.ts 已统一提示错误
+  }
 }
 
 async function searchCompanions(keyword = '') {
@@ -227,6 +241,8 @@ async function searchCompanions(keyword = '') {
   try {
     const result = await adminUsers(keyword || undefined, undefined, 1, 100)
     companionOptions.value = result.records.filter((user) => user.roles.includes('COMPANION'))
+  } catch {
+    companionOptions.value = []
   } finally {
     companionSearchLoading.value = false
   }
@@ -331,7 +347,7 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="(statusMap[row.publishStatus]?.type as any) ?? 'info'">
+            <el-tag :type="statusMap[row.publishStatus]?.type ?? 'info'">
               {{ statusMap[row.publishStatus]?.label ?? row.publishStatus }}
             </el-tag>
           </template>

@@ -7,8 +7,11 @@ import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.favorite.dto.FavoriteView;
 import com.gameplay.favorite.service.FavoriteService;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 用户端收藏接口（FR-U06）。
  */
+@Validated
 @RestController
 @RequestMapping("/api/favorites")
 @RequiredArgsConstructor
@@ -50,8 +54,8 @@ public class FavoriteController {
 
     /** 我的收藏分页 */
     @GetMapping
-    public ApiResponse<Page<FavoriteView>> list(@RequestParam(defaultValue = "1") long page,
-                                                @RequestParam(defaultValue = "10") long size,
+    public ApiResponse<Page<FavoriteView>> list(@RequestParam(defaultValue = "1") @Min(1) long page,
+                                                @RequestParam(defaultValue = "10") @Min(1) @Max(100) long size,
                                                 Authentication authentication) {
         return ApiResponse.ok(favoriteService.page(currentUserId(authentication), page, size));
     }

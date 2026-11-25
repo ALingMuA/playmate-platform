@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
- * 发起投诉（对齐 frontend-prototype complaint.html）。
+ * 发起投诉（对齐 docs/06-原型与架构图/frontend-prototype/complaint.html）。
  *
  * <p>对符合条件的订单选择投诉类型、填写说明并上传图片证据（FR-U17/U18），
  * 提交后订单进入售后处理（FR-U19）。</p>
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { userOrderDetail, type Order } from '@/api/order'
@@ -54,7 +54,10 @@ function removeEvidence(index: number) {
   form.evidences.splice(index, 1)
 }
 
+let loadSeq = 0
+
 async function handleSubmit() {
+  if (submitting.value) return
   if (!form.description.trim()) {
     ElMessage.warning('请填写投诉说明')
     return
@@ -68,32 +71,46 @@ async function handleSubmit() {
     })
     ElMessage.success('投诉已提交，订单进入售后处理')
     if (created?.id) {
-      router.replace('/complaints/' + created.id)
+      await router.replace('/complaints/' + created.id)
     } else {
-      router.replace('/profile#tab=complaints')
+      await router.replace('/profile#tab=complaints')
     }
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     submitting.value = false
   }
 }
 
 async function loadOrder() {
+  const id = orderId.value
+  const seq = ++loadSeq
+  loading.value = true
+  order.value = null
   loadError.value = ''
-  if (!Number.isSafeInteger(orderId.value) || orderId.value <= 0) {
+  if (!Number.isSafeInteger(id) || id <= 0) {
     loadError.value = '订单链接无效，请从订单列表重新进入投诉。'
     loading.value = false
     return
   }
   try {
-    order.value = await userOrderDetail(orderId.value)
+    const detail = await userOrderDetail(id)
+    if (seq !== loadSeq || orderId.value !== id) return
+    order.value = detail
   } catch {
-    loadError.value = '订单信息加载失败，请重试。'
+    if (seq === loadSeq) loadError.value = '订单信息加载失败，请重试。'
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
 onMounted(loadOrder)
+watch(orderId, () => {
+  form.complaintType = 'NO_FULFILLMENT'
+  form.description = ''
+  form.evidences = []
+  void loadOrder()
+})
 </script>
 
 <template>

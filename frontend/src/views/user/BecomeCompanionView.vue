@@ -176,7 +176,7 @@ function validate(): boolean {
 }
 
 async function handleSubmit() {
-  if (!validate()) return
+  if (submitting.value || !validate()) return
   submitting.value = true
   try {
     await submitApplication({
@@ -192,6 +192,8 @@ async function handleSubmit() {
     ElMessage.success('申请已提交，请等待管理员审核')
     resetForm()
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     submitting.value = false
   }

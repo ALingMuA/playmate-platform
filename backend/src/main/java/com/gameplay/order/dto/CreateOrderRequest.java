@@ -1,6 +1,7 @@
 package com.gameplay.order.dto;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -25,6 +26,7 @@ public class CreateOrderRequest {
     /** 预约时长，单位分钟 */
     @NotNull(message = "请选择服务时长")
     @Min(value = 30, message = "服务时长不能低于30分钟")
+    @Max(value = 1440, message = "单次服务时长不能超过1440分钟")
     private Integer durationMinutes;
 
     /** 游戏区服 */

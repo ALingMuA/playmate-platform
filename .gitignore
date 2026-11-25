@@ -20,6 +20,10 @@ out/
 logs/
 *.tmp
 *.temp
+~$*
+~$*.docx
+~$*.pptx
+~$*.xlsx
 
 # 环境变量与本地密钥
 .env
@@ -29,6 +33,7 @@ logs/
 # 本地数据库配置（含明文密码，不入库）
 application-local.yml
 application-local.*.yml
+!application-local.example.yml
 
 # 本地上传文件
 upload/
@@ -45,5 +50,21 @@ coverage/
 .playwright-cli/
 _pdf_analysis/
 output/
+temp/
+.claude/
 .zcode/
 .agents/
+.slidep/
+.workbuddy/
+docs/.codex-*/
+
+# Python
+__pycache__/
+*.pyc
+
+# 毕业论文、开题报告、答辩材料、项目文档目录与辅助脚本（仅保留在本地，不上传 GitHub）
+docs/
+scripts/
+*.docx
+*.pptx
+*.pdf

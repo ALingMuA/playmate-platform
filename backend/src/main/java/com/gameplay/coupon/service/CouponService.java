@@ -1,6 +1,7 @@
 package com.gameplay.coupon.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
@@ -20,10 +21,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 优惠券应用与领域服务：生命周期、并发领券、核销与释放。
@@ -40,11 +44,11 @@ public class CouponService {
     // ==================== 用户端 ====================
 
     /**
-     * 用户领取优惠券（防超发、防超领）。
+     * 用户领取优惠券（行锁模板防并发超领、防超发、防下线后误领）。
      */
     @Transactional
     public UserCouponView claim(Long userId, Long templateId) {
-        CouponTemplate template = templateMapper.selectById(templateId);
+        CouponTemplate template = templateMapper.selectByIdForUpdate(templateId);
         if (template == null) {
             throw new BusinessException(ErrorCode.COUPON_TEMPLATE_NOT_FOUND);
         }
@@ -59,7 +63,7 @@ public class CouponService {
             throw new BusinessException(ErrorCode.COUPON_EXPIRED, "优惠券已过期");
         }
 
-        // 校验每人限领
+        // 校验每人限领（在 template 行锁保护下串行检查）
         int perLimit = template.getPerUserLimit() == null || template.getPerUserLimit() <= 0 ? 1 : template.getPerUserLimit();
         Long claimedCount = userCouponMapper.selectCount(new LambdaQueryWrapper<UserCoupon>()
                 .eq(UserCoupon::getUserId, userId)
@@ -68,8 +72,8 @@ public class CouponService {
             throw new BusinessException(ErrorCode.COUPON_CLAIM_LIMIT_EXCEEDED);
         }
 
-        // 原子递增库存
-        int updated = templateMapper.increaseClaimedQuantity(templateId, template.getTotalQuantity());
+        // 原子递增库存（同时校验 PUBLISHED 与有效期窗口）
+        int updated = templateMapper.increaseClaimedQuantity(templateId, template.getTotalQuantity(), now);
         if (updated <= 0) {
             throw new BusinessException(ErrorCode.COUPON_OUT_OF_STOCK);
         }
@@ -113,9 +117,10 @@ public class CouponService {
 
         Page<UserCoupon> pageParam = new Page<>(page, size);
         Page<UserCoupon> paged = userCouponMapper.selectPage(pageParam, query);
+        Map<Long, CouponTemplate> templateMap = loadTemplateMap(paged.getRecords());
 
         List<UserCouponView> records = paged.getRecords().stream().map(uc -> {
-            CouponTemplate template = templateMapper.selectById(uc.getTemplateId());
+            CouponTemplate template = templateMap.get(uc.getTemplateId());
             boolean expired = uc.getValidUntil() != null && uc.getValidUntil().isBefore(now);
             String displayStatus = uc.getStatus();
             if (UserCouponStatus.AVAILABLE.name().equals(uc.getStatus()) && expired) {
@@ -136,26 +141,28 @@ public class CouponService {
      */
     public List<UserCouponView> listAvailableForOrder(Long userId, Long companionServiceId, Integer durationMinutes) {
         CompanionService service = companionServiceMapper.selectById(companionServiceId);
-        if (service == null || durationMinutes == null || durationMinutes <= 0) {
+        if (service == null || durationMinutes == null || durationMinutes <= 0 || durationMinutes > 1440) {
             return Collections.emptyList();
         }
         long originalAmount = calculateOriginalAmount(service.getPriceCents(), durationMinutes);
         LocalDateTime now = LocalDateTime.now();
 
-        // 查询该用户所有处于 AVAILABLE 且未过期的优惠券
+        // 查询该用户所有处于 AVAILABLE 且在有效期内的优惠券
         List<UserCoupon> list = userCouponMapper.selectList(new LambdaQueryWrapper<UserCoupon>()
                 .eq(UserCoupon::getUserId, userId)
                 .eq(UserCoupon::getStatus, UserCouponStatus.AVAILABLE.name())
                 .ge(UserCoupon::getValidUntil, now)
                 .le(UserCoupon::getValidFrom, now));
+        Map<Long, CouponTemplate> templateMap = loadTemplateMap(list);
 
         List<UserCouponView> views = new ArrayList<>();
         for (UserCoupon uc : list) {
-            CouponTemplate template = templateMapper.selectById(uc.getTemplateId());
+            CouponTemplate template = templateMap.get(uc.getTemplateId());
             if (template == null) continue;
 
             boolean scopeMatch = isScopeMatched(template, service);
-            boolean thresholdMatch = originalAmount >= (template.getThresholdCents() == null ? 0 : template.getThresholdCents());
+            long threshold = template.getThresholdCents() == null ? 0L : template.getThresholdCents();
+            boolean thresholdMatch = originalAmount >= threshold;
 
             boolean applicable = scopeMatch && thresholdMatch;
             long discount = applicable ? calculateDiscountCents(template, originalAmount) : 0L;
@@ -163,7 +170,7 @@ public class CouponService {
             if (!scopeMatch) {
                 reason = "该券不适用此服务或游戏";
             } else if (!thresholdMatch) {
-                reason = String.format("未达满减门槛(需满%.2f元)", (template.getThresholdCents() / 100.0));
+                reason = String.format("未达满减门槛(需满%.2f元)", (threshold / 100.0));
             }
             views.add(toUserCouponView(uc, template, applicable, discount, reason));
         }
@@ -214,6 +221,9 @@ public class CouponService {
         if (!UserCouponStatus.AVAILABLE.name().equals(userCoupon.getStatus())) {
             throw new BusinessException(ErrorCode.USER_COUPON_NOT_AVAILABLE, "优惠券已被锁定或已使用");
         }
+        if (userCoupon.getValidFrom() != null && now.isBefore(userCoupon.getValidFrom())) {
+            throw new BusinessException(ErrorCode.COUPON_EXPIRED, "优惠券尚未到生效时间");
+        }
         if (userCoupon.getValidUntil() != null && now.isAfter(userCoupon.getValidUntil())) {
             throw new BusinessException(ErrorCode.COUPON_EXPIRED);
         }
@@ -252,6 +262,9 @@ public class CouponService {
             throw new BusinessException(ErrorCode.USER_COUPON_NOT_AVAILABLE);
         }
         LocalDateTime now = LocalDateTime.now();
+        if (uc.getValidFrom() != null && now.isBefore(uc.getValidFrom())) {
+            throw new BusinessException(ErrorCode.COUPON_EXPIRED, "优惠券尚未到生效时间");
+        }
         if (uc.getValidUntil() != null && now.isAfter(uc.getValidUntil())) {
             throw new BusinessException(ErrorCode.COUPON_EXPIRED);
         }
@@ -284,10 +297,13 @@ public class CouponService {
         UserCoupon uc = userCouponMapper.selectByLockedOrderIdForUpdate(orderId);
         if (uc == null) return;
         if (UserCouponStatus.LOCKED.name().equals(uc.getStatus())) {
-            uc.setStatus(UserCouponStatus.USED.name());
-            uc.setUsedOrderId(orderId);
-            uc.setUsedAt(LocalDateTime.now());
-            userCouponMapper.updateById(uc);
+            userCouponMapper.update(null, new LambdaUpdateWrapper<UserCoupon>()
+                    .eq(UserCoupon::getId, uc.getId())
+                    .set(UserCoupon::getStatus, UserCouponStatus.USED.name())
+                    .set(UserCoupon::getUsedOrderId, orderId)
+                    .set(UserCoupon::getUsedAt, LocalDateTime.now())
+                    .set(UserCoupon::getLockedOrderId, null)
+                    .set(UserCoupon::getLockedAt, null));
         }
     }
 
@@ -304,6 +320,22 @@ public class CouponService {
                     ? UserCouponStatus.EXPIRED.name()
                     : UserCouponStatus.AVAILABLE.name();
             userCouponMapper.releaseLock(uc.getId(), nextStatus);
+        }
+    }
+
+    /**
+     * 已支付订单退款关闭时退还已核销优惠券（拒单、接单超时、已支付取消、全额退款仲裁）。
+     */
+    @Transactional
+    public void refundUsedCoupon(Long orderId) {
+        UserCoupon uc = userCouponMapper.selectByUsedOrderIdForUpdate(orderId);
+        if (uc == null) return;
+        if (UserCouponStatus.USED.name().equals(uc.getStatus())) {
+            LocalDateTime now = LocalDateTime.now();
+            String nextStatus = (uc.getValidUntil() != null && now.isAfter(uc.getValidUntil()))
+                    ? UserCouponStatus.EXPIRED.name()
+                    : UserCouponStatus.AVAILABLE.name();
+            userCouponMapper.rollbackUsed(uc.getId(), nextStatus);
         }
     }
 
@@ -397,20 +429,31 @@ public class CouponService {
     // ==================== 辅助方法 ====================
 
     public long calculateOriginalAmount(long priceCents, int durationMinutes) {
-        long amount = priceCents * durationMinutes / 60L;
-        if (priceCents * durationMinutes % 60L != 0) {
-            amount += 1;
+        if (priceCents <= 0 || durationMinutes <= 0) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "价格与时长必须大于0");
+        }
+        BigDecimal numerator = BigDecimal.valueOf(priceCents).multiply(BigDecimal.valueOf(durationMinutes));
+        BigDecimal[] divRem = numerator.divideAndRemainder(BigDecimal.valueOf(60L));
+        long amount = divRem[0].longValueExact();
+        if (divRem[1].signum() > 0) {
+            amount = Math.addExact(amount, 1L);
         }
         return amount;
     }
 
     public long calculateDiscountCents(CouponTemplate template, long originalAmount) {
+        if (originalAmount <= 0) {
+            return 0L;
+        }
         if (CouponType.FIXED.name().equalsIgnoreCase(template.getCouponType())) {
-            long discount = template.getDiscountCents() == null ? 0 : template.getDiscountCents();
+            long discount = template.getDiscountCents() == null ? 0 : Math.max(0L, template.getDiscountCents());
             return Math.min(discount, Math.max(0, originalAmount - 1));
         } else if (CouponType.DISCOUNT.name().equalsIgnoreCase(template.getCouponType())) {
             int rateBp = template.getDiscountRateBp() == null ? 10000 : template.getDiscountRateBp();
-            long discount = originalAmount * (10000 - rateBp) / 10000;
+            long discount = BigDecimal.valueOf(originalAmount)
+                    .multiply(BigDecimal.valueOf(10000 - rateBp))
+                    .divide(BigDecimal.valueOf(10000L), 0, RoundingMode.DOWN)
+                    .longValueExact();
             if (template.getMaxDiscountCents() != null && template.getMaxDiscountCents() > 0) {
                 discount = Math.min(discount, template.getMaxDiscountCents());
             }
@@ -436,21 +479,39 @@ public class CouponService {
 
     private String generateCouponCode() {
         String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
-        int rand = ThreadLocalRandom.current().nextInt(1000, 9999);
+        String rand = UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase(Locale.ROOT);
         return "CPN" + time + rand;
+    }
+
+    private Map<Long, CouponTemplate> loadTemplateMap(Collection<UserCoupon> coupons) {
+        Set<Long> templateIds = coupons.stream()
+                .map(UserCoupon::getTemplateId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (templateIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return templateMapper.selectBatchIds(templateIds).stream()
+                .collect(Collectors.toMap(CouponTemplate::getId, Function.identity(), (a, b) -> a));
     }
 
     private void validateTemplateRequest(CouponTemplateRequest req) {
         if (req.getValidFrom().isAfter(req.getValidUntil())) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "有效开始时间不能晚于结束时间");
         }
+        long threshold = req.getThresholdCents() == null ? 0L : req.getThresholdCents();
+        if (threshold < 0) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "使用门槛不能小于0");
+        }
+        if (req.getTotalQuantity() != null && req.getTotalQuantity() < 0) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "总发行量不能小于0");
+        }
+        if (req.getPerUserLimit() != null && req.getPerUserLimit() <= 0) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "每人限领数量必须大于0");
+        }
         if (CouponType.FIXED.name().equalsIgnoreCase(req.getCouponType())) {
             if (req.getDiscountCents() == null || req.getDiscountCents() <= 0) {
                 throw new BusinessException(ErrorCode.VALIDATION_FAILED, "满减券优惠金额必须大于0");
-            }
-            long threshold = req.getThresholdCents() == null ? 0L : req.getThresholdCents();
-            if (threshold < 0) {
-                throw new BusinessException(ErrorCode.VALIDATION_FAILED, "使用门槛不能小于0");
             }
             if (threshold > 0 && req.getDiscountCents() >= threshold) {
                 throw new BusinessException(ErrorCode.VALIDATION_FAILED, "有门槛满减券的减免金额必须低于使用门槛");

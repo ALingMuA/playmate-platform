@@ -2,7 +2,7 @@
 /**
  * 用户端 - 活动详情页（/activities/:id）
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
@@ -23,19 +23,30 @@ function fmtTime(t?: string): string {
   return t.length >= 10 ? t.slice(0, 10) : t
 }
 
+let loadSeq = 0
+
 async function load() {
+  const id = activityId.value
+  const seq = ++loadSeq
   loading.value = true
-  try {
-    activity.value = await publicActivityDetail(activityId.value)
-  } catch {
-    activity.value = null
-  } finally {
+  activity.value = null
+  if (!Number.isSafeInteger(id) || id <= 0) {
     loading.value = false
+    return
+  }
+  try {
+    const detail = await publicActivityDetail(id)
+    if (seq !== loadSeq || activityId.value !== id) return
+    activity.value = detail
+  } catch {
+    if (seq === loadSeq) activity.value = null
+  } finally {
+    if (seq === loadSeq) loading.value = false
   }
 }
 
 async function handleClaim() {
-  if (!activity.value?.couponTemplateId) return
+  if (!activity.value?.couponTemplateId || claiming.value) return
   if (!userStore.isLoggedIn) {
     ElMessage.warning('请先登录后再领取优惠券')
     router.push(`/login?redirect=${encodeURIComponent(router.currentRoute.value.fullPath)}`)
@@ -61,7 +72,10 @@ function goBack() {
 }
 
 onMounted(() => {
-  load()
+  void load()
+})
+watch(activityId, () => {
+  void load()
 })
 </script>
 

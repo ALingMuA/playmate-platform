@@ -8,6 +8,7 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
@@ -59,15 +60,17 @@ public class JwtTokenService {
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
+            Long uid = claims.get("uid", Long.class);
+            String username = claims.get("username", String.class);
+            Integer tv = claims.get("tv", Integer.class);
+            if (uid == null || tv == null || !StringUtils.hasText(username)) {
+                throw new BusinessException(ErrorCode.AUTH_TOKEN_INVALID);
+            }
             Object rolesObj = claims.get("roles", Object.class);
             List<String> roles = rolesObj instanceof List<?> list
                     ? list.stream().map(String::valueOf).toList()
                     : List.of();
-            return new JwtPrincipal(
-                    claims.get("uid", Long.class),
-                    claims.get("username", String.class),
-                    claims.get("tv", Integer.class),
-                    roles);
+            return new JwtPrincipal(uid, username, tv, roles);
         } catch (JwtException | IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.AUTH_TOKEN_INVALID);
         }

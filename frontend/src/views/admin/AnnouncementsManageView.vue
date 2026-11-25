@@ -6,7 +6,7 @@
  * 新增公告默认为草稿，发布后游客可在用户端查看（FR-A08）。</p>
  */
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
 import {
   adminAnnouncements,
   adminCreateAnnouncement,
@@ -26,7 +26,7 @@ const loading = ref(false)
 const listError = ref('')
 const status = ref<string | undefined>(undefined)
 
-const statusMap: Record<string, { label: string; type: string }> = {
+const statusMap: Record<string, { label: string; type: TagProps['type'] }> = {
   DRAFT: { label: '草稿', type: 'info' },
   PUBLISHED: { label: '已发布', type: 'success' },
   REVOKED: { label: '已撤回', type: 'warning' },
@@ -97,6 +97,8 @@ async function handleSave() {
     }
     editVisible.value = false
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     saving.value = false
   }
@@ -106,23 +108,35 @@ async function handleSave() {
 
 async function handlePublish(row: AnnouncementView) {
   try { await ElMessageBox.confirm(`发布后所有用户可见，确定发布公告「${row.title}」吗？`, '发布公告', { type: 'info' }) } catch { return }
-  await adminPublishAnnouncement(row.id)
-  ElMessage.success('公告已发布')
-  await load()
+  try {
+    await adminPublishAnnouncement(row.id)
+    ElMessage.success('公告已发布')
+    await load()
+  } catch {
+    // http.ts 已统一提示错误
+  }
 }
 
 async function handleRevoke(row: AnnouncementView) {
   try { await ElMessageBox.confirm('撤回后用户端不再展示该公告。', '撤回公告', { type: 'warning' }) } catch { return }
-  await adminRevokeAnnouncement(row.id)
-  ElMessage.success('公告已撤回')
-  await load()
+  try {
+    await adminRevokeAnnouncement(row.id)
+    ElMessage.success('公告已撤回')
+    await load()
+  } catch {
+    // http.ts 已统一提示错误
+  }
 }
 
 async function handleDelete(row: AnnouncementView) {
   try { await ElMessageBox.confirm(`确定删除公告「${row.title}」吗？删除后不可恢复。`, '删除公告', { type: 'warning' }) } catch { return }
-  await adminDeleteAnnouncement(row.id)
-  ElMessage.success('公告已删除')
-  await load()
+  try {
+    await adminDeleteAnnouncement(row.id)
+    ElMessage.success('公告已删除')
+    await load()
+  } catch {
+    // http.ts 已统一提示错误
+  }
 }
 
 async function handleRestoreDraft(row: AnnouncementView) {
@@ -131,9 +145,13 @@ async function handleRestoreDraft(row: AnnouncementView) {
   } catch {
     return
   }
-  await adminRestoreAnnouncementDraft(row.id)
-  ElMessage.success('公告已恢复为草稿')
-  await load()
+  try {
+    await adminRestoreAnnouncementDraft(row.id)
+    ElMessage.success('公告已恢复为草稿')
+    await load()
+  } catch {
+    // http.ts 已统一提示错误
+  }
 }
 
 onMounted(load)
@@ -172,7 +190,7 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="(statusMap[row.publishStatus]?.type as any) ?? 'info'" size="small">
+            <el-tag :type="statusMap[row.publishStatus]?.type ?? 'info'" size="small">
               {{ statusMap[row.publishStatus]?.label ?? row.publishStatus }}
             </el-tag>
           </template>

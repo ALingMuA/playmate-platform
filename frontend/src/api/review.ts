@@ -84,8 +84,8 @@ export function createComplaint(orderId: number, data: {
 }
 
 /** 我的投诉分页（FR-U19 售后进度） */
-export function myComplaints(page = 1, size = 10): Promise<PageResult<Complaint>> {
-  return request<PageResult<Complaint>>({ url: '/complaints/mine', method: 'get', params: { page, size } })
+export function myComplaints(page = 1, size = 10, status?: string): Promise<PageResult<Complaint>> {
+  return request<PageResult<Complaint>>({ url: '/complaints/mine', method: 'get', params: { page, size, status } })
 }
 
 /** 投诉详情 */

@@ -179,4 +179,24 @@ class AiSettingsFlowTest {
                 .content(mapper.writeValueAsBytes(r))).andExpect(status().isBadRequest());
         assertThat(captured.get()).isNull();
     }
+
+    @Test void originSwapClearsInheritedCredentialsToPreventExfiltration() {
+        var r = draft();
+        settings.save(r, 1L);
+        var swapped = draft();
+        swapped.setVersion(1);
+        int otherPort = server.getAddress().getPort() == 65535 ? server.getAddress().getPort() - 1 : server.getAddress().getPort() + 1;
+        swapped.setEndpointUrl("http://127.0.0.1:" + otherPort + "/custom/chat");
+        swapped.setApiKey("");
+        swapped.setCustomHeaders(new java.util.LinkedHashMap<>());
+        assertThatThrownBy(() -> settings.candidate(swapped)).hasMessageContaining("API Key");
+
+        var headerSwapped = draft();
+        headerSwapped.setVersion(1);
+        headerSwapped.setEndpointUrl("http://127.0.0.1:" + otherPort + "/custom/chat");
+        headerSwapped.setApiKey("new-key");
+        headerSwapped.setCustomHeaders(new java.util.LinkedHashMap<>());
+        headerSwapped.getCustomHeaders().put("x-project", "");
+        assertThatThrownBy(() -> settings.candidate(headerSwapped)).hasMessageContaining("修改接口地址");
+    }
 }

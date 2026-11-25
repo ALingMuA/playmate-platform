@@ -102,7 +102,8 @@ public class CsWorkbenchController {
     @GetMapping("/conversations/{conversationId}/notes")
     public ApiResponse<List<InternalNoteView>> notes(@PathVariable Long conversationId,
                                                      Authentication authentication) {
-        return ApiResponse.ok(messageService.listInternalNotes(conversationId));
+        return ApiResponse.ok(messageService.listInternalNotes(
+                currentUserId(authentication), false, conversationId));
     }
 
     /** 转交管理员（FR-C28） */

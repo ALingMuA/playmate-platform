@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
- * 评价订单（对齐 frontend-prototype review.html）。
+ * 评价订单（对齐 docs/06-原型与架构图/frontend-prototype/review.html）。
  *
  * <p>对已完成订单提交 1~5 星评分、标签与文字评价（FR-U15），
  * 每个订单只能评价一次。</p>
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { userOrderDetail, type Order } from '@/api/order'
@@ -33,7 +33,10 @@ function fmtTime(t?: string): string {
   return t.length >= 16 ? t.slice(0, 16) : t
 }
 
+let loadSeq = 0
+
 async function handleSubmit() {
+  if (submitting.value) return
   if (!form.content.trim()) {
     ElMessage.warning('请填写评价内容')
     return
@@ -46,37 +49,50 @@ async function handleSubmit() {
       content: form.content.trim(),
     })
     ElMessage.success('评价成功，感谢反馈')
-    router.replace('/orders')
+    await router.replace('/orders')
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     submitting.value = false
   }
 }
 
 async function loadOrder() {
+  const id = orderId.value
+  const seq = ++loadSeq
+  loading.value = true
+  order.value = null
   loadError.value = ''
-  if (!Number.isSafeInteger(orderId.value) || orderId.value <= 0) {
+  if (!Number.isSafeInteger(id) || id <= 0) {
     loadError.value = '订单链接无效，请从订单列表重新进入评价。'
     loading.value = false
     return
   }
   try {
     const [orderData, existed] = await Promise.all([
-      userOrderDetail(orderId.value),
-      reviewByOrder(orderId.value).catch(() => null),
+      userOrderDetail(id),
+      reviewByOrder(id).catch(() => null),
     ])
+    if (seq !== loadSeq || orderId.value !== id) return
     order.value = orderData
     if (existed) {
       ElMessage.warning('该订单已评价')
-      router.replace('/orders')
+      await router.replace('/orders')
     }
   } catch {
-    loadError.value = '订单信息加载失败，请重试。'
+    if (seq === loadSeq) loadError.value = '订单信息加载失败，请重试。'
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
 onMounted(loadOrder)
+watch(orderId, () => {
+  form.score = 5
+  form.tags = []
+  form.content = ''
+  void loadOrder()
+})
 </script>
 
 <template>

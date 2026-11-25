@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 登录 / 注册（对齐 frontend-prototype login.html：左右分栏）。
+ * 登录 / 注册（对齐 docs/06-原型与架构图/frontend-prototype/login.html：左右分栏）。
  *
  * <p>左侧品牌视觉区，右侧登录/注册表单（auth-tabs 切换）；
  * 登录成功后跳转 redirect 回跳地址或各角色专属工作台首页。
@@ -43,73 +43,87 @@ interface QuickAccount {
   defaultPath: string
 }
 
-const quickAccounts: QuickAccount[] = [
-  {
-    roleName: '管理员',
-    roleCode: 'ADMIN',
-    account: 'admin',
-    password: 'Admin@123456',
-    tag: '运营后台',
-    description: '数据概览与审核管理',
-    defaultPath: '/admin/dashboard',
-  },
-  {
-    roleName: '陪玩师',
-    roleCode: 'COMPANION',
-    account: 'companion_test',
-    password: 'Test123456',
-    tag: '陪玩工作台',
-    description: '接单履约与档期收益',
-    defaultPath: '/companion/orders',
-  },
-  {
-    roleName: '客服人员',
-    roleCode: 'CUSTOMER_SERVICE',
-    account: 'cs_test',
-    password: 'Test123456',
-    tag: '客服中心',
-    description: '咨询接待与会话管理',
-    defaultPath: '/cs/queue',
-  },
-  {
-    roleName: '普通用户',
-    roleCode: 'USER',
-    account: 'user_test',
-    password: 'Test123456',
-    tag: '玩家前台',
-    description: '浏览游戏与预约下单',
-    defaultPath: '/',
-  },
-]
+const isDev = import.meta.env.DEV
+
+const quickAccounts: QuickAccount[] = import.meta.env.DEV
+  ? [
+      {
+        roleName: '管理员',
+        roleCode: 'ADMIN',
+        account: 'admin',
+        password: 'Admin@123456',
+        tag: '运营后台',
+        description: '数据概览与审核管理',
+        defaultPath: '/admin/dashboard',
+      },
+      {
+        roleName: '陪玩师',
+        roleCode: 'COMPANION',
+        account: 'companion_test',
+        password: 'Test123456',
+        tag: '陪玩工作台',
+        description: '接单履约与档期收益',
+        defaultPath: '/companion/orders',
+      },
+      {
+        roleName: '客服人员',
+        roleCode: 'CUSTOMER_SERVICE',
+        account: 'cs_test',
+        password: 'Test123456',
+        tag: '客服中心',
+        description: '咨询接待与会话管理',
+        defaultPath: '/cs/queue',
+      },
+      {
+        roleName: '普通用户',
+        roleCode: 'USER',
+        account: 'user_test',
+        password: 'Test123456',
+        tag: '玩家前台',
+        description: '浏览游戏与预约下单',
+        defaultPath: '/',
+      },
+    ]
+  : []
 
 function resolveRedirectPath(qa?: QuickAccount): string {
-  const redirect = (route.query.redirect as string) || ''
+  const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
   const defaultPath = qa ? qa.defaultPath : (
     userStore.hasRole('ADMIN') ? '/admin/dashboard' :
     userStore.hasRole('CUSTOMER_SERVICE') ? '/cs/queue' :
     userStore.hasRole('COMPANION') ? '/companion/orders' : '/'
   )
 
-  if (!redirect || redirect === '/' || redirect === '/login') {
+  if (!redirect || redirect === '/' || redirect === '/login' || !/^\/(?!\/|\\)/.test(redirect)) {
     return defaultPath
   }
 
-  // 校验目标路由与当前角色权限匹配度，避免被路由守卫直接拦截
-  if (qa) {
-    if (redirect.startsWith('/admin') && qa.roleCode !== 'ADMIN') {
-      return defaultPath
-    }
-    if (redirect.startsWith('/companion') && qa.roleCode !== 'COMPANION' && qa.roleCode !== 'ADMIN') {
-      return defaultPath
-    }
-    if (redirect.startsWith('/cs') && qa.roleCode !== 'CUSTOMER_SERVICE' && qa.roleCode !== 'ADMIN') {
-      return defaultPath
-    }
+  const resolved = router.resolve(redirect)
+  if (resolved.name === 'not-found' || resolved.name === 'login' || resolved.matched.length === 0) {
+    return defaultPath
   }
-  return redirect
+
+  const requiredRoles = resolved.matched.flatMap((r) => (r.meta.roles as string[] | undefined) ?? [])
+  const hasRole = (role: string) => (qa ? qa.roleCode === role || userStore.hasRole(role) : userStore.hasRole(role))
+
+  // 校验目标路由与当前角色权限匹配度，避免被路由守卫直接拦截
+  if (requiredRoles.length > 0 && !requiredRoles.some((role) => hasRole(role))) {
+    return defaultPath
+  }
+  if (resolved.path.startsWith('/admin') && !hasRole('ADMIN')) {
+    return defaultPath
+  }
+  if (resolved.path.startsWith('/companion') && !hasRole('COMPANION')) {
+    return defaultPath
+  }
+  if (resolved.path.startsWith('/cs') && !hasRole('CUSTOMER_SERVICE')) {
+    return defaultPath
+  }
+  return resolved.fullPath
 }
 
 async function handleLogin() {
+  if (loading.value) return
   if (!form.account || !form.password) {
     ElMessage.warning('请输入账号和密码')
     return
@@ -119,14 +133,16 @@ async function handleLogin() {
     await userStore.login(form.account, form.password)
     ElMessage.success('登录成功')
     const targetPath = resolveRedirectPath()
-    router.push(targetPath)
+    await router.push(targetPath)
+  } catch {
+    // http.ts 响应拦截器已统一提示错误
   } finally {
     loading.value = false
   }
 }
 
 async function handleQuickLogin(qa: QuickAccount) {
-  if (loading.value) return
+  if (!import.meta.env.DEV || loading.value) return
   mode.value = 'login'
   form.account = qa.account
   form.password = qa.password
@@ -135,15 +151,16 @@ async function handleQuickLogin(qa: QuickAccount) {
     await userStore.login(qa.account, qa.password)
     ElMessage.success(`以【${qa.roleName}】身份一键登录成功`)
     const targetPath = resolveRedirectPath(qa)
-    router.push(targetPath)
-  } catch (err: any) {
-    ElMessage.error(err?.message || `【${qa.roleName}】一键登录失败，请确认测试账号已在数据库初始化`)
+    await router.push(targetPath)
+  } catch {
+    // http.ts 响应拦截器已统一提示错误
   } finally {
     loading.value = false
   }
 }
 
 async function handleRegister() {
+  if (loading.value) return
   registerErrors.username = /^[A-Za-z0-9_]{4,32}$/.test(form.username)
     ? '' : '用户名须为 4～32 位字母、数字或下划线'
   registerErrors.nickname = form.nickname.trim() ? '' : '请输入昵称'
@@ -167,6 +184,8 @@ async function handleRegister() {
     ElMessage.success('注册成功，请登录')
     form.account = form.username
     mode.value = 'login'
+  } catch {
+    // http.ts 响应拦截器已统一提示错误
   } finally {
     loading.value = false
   }
@@ -197,7 +216,7 @@ async function handleRegister() {
         <div class="form-group">
           <label class="form-label">密码</label>
           <input v-model="form.password" type="password" class="form-control" placeholder="请输入密码"
-            autocomplete="current-password" @keyup.enter="handleLogin" />
+            autocomplete="current-password" />
         </div>
         <button type="submit" class="btn btn-primary btn-block btn-lg" :disabled="loading">
           {{ loading ? '登录中…' : '登 录' }}
@@ -236,8 +255,8 @@ async function handleRegister() {
         </button>
       </form>
 
-      <!-- 测试快捷登录通道 -->
-      <div v-if="mode === 'login'" class="quick-login-section">
+      <!-- 测试快捷登录通道（仅开发环境显示） -->
+      <div v-if="isDev && mode === 'login'" class="quick-login-section">
         <div class="quick-divider">
           <span>测试快捷登录通道</span>
         </div>

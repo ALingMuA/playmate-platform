@@ -9,9 +9,12 @@ import com.gameplay.common.api.ApiResponse;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,6 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/admin/ai-knowledge")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('ADMIN')")
+@Validated
 public class AdminAiKnowledgeController {
 
     private final AiKnowledgeBaseService knowledgeBaseService;
@@ -38,8 +42,8 @@ public class AdminAiKnowledgeController {
     public ApiResponse<Page<KnowledgeBaseView>> list(
             @RequestParam(required = false) String category,
             @RequestParam(required = false) Integer enabled,
-            @RequestParam(defaultValue = "1") long page,
-            @RequestParam(defaultValue = "10") long size,
+            @RequestParam(defaultValue = "1") @Min(1) long page,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(100) long size,
             Authentication authentication) {
         return ApiResponse.ok(knowledgeBaseService.list(currentUserId(authentication), category, enabled, page, size));
     }

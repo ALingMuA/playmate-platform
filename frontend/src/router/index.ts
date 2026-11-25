@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { ApiError } from '@/api/http'
 import { startRouteProgress, stopRouteProgress } from '@/utils/progress'
 
 /**
@@ -132,7 +133,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'notifications',
         name: 'user-notifications',
-        component: () => import('@/views/user/NotificationsRedirectView.vue'),
+        component: () => import('@/views/user/MessagesCenterView.vue'),
         meta: { title: '通知中心', requiresAuth: true },
         beforeEnter: () => ({ path: '/messages', query: { tab: 'notifications' }, replace: true }),
       },
@@ -262,14 +263,20 @@ router.beforeEach(async (to) => {
   if (requiresAuth && !userStore.token) {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
-  if (requiresAuth && (!userStore.user || !roleSatisfied())) {
-    // 刷新后恢复登录态；角色不足时也刷新一次：
+  if (userStore.token && (!userStore.user || (requiresAuth && !roleSatisfied()))) {
+    // 刷新后恢复登录态（含公开路由，保证顶栏与身份判断准确）；角色不足时也刷新一次：
     // 角色集合写在 JWT 里，入驻审核通过（授予 COMPANION）后旧令牌中的角色是滞后的，
     // 因此以 `/auth/me` 返回的实时角色为准，避免"审核已通过但仍进不去工作台"
     try {
-      await userStore.refreshUser()
-    } catch {
-      if (!userStore.user) {
+      await userStore.refreshUser({
+        silentError: !requiresAuth,
+        skipAuthRedirect: true,
+      })
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        userStore.logout()
+      }
+      if (requiresAuth && !userStore.user) {
         return { path: '/login', query: { redirect: to.fullPath } }
       }
     }

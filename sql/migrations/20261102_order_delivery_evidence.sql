@@ -1,9 +1,19 @@
--- 已有数据库升级：备份后在 game_companion_app 中执行一次。
+-- 已有数据库升级（幂等可重入）：备份后在 game_companion_app 中执行。
 -- 新数据库直接使用 sql/schema.sql，无需重复执行本脚本。
-ALTER TABLE `user`
-  ADD COLUMN disabled_reason VARCHAR(500) NOT NULL DEFAULT '' COMMENT '管理员禁用原因' AFTER account_status;
+SET @dbname = DATABASE();
+SET @tablename = 'user';
+SET @columnname = 'disabled_reason';
+SET @preparedStatement = (SELECT IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+  'SELECT 1',
+  'ALTER TABLE `user` ADD COLUMN disabled_reason VARCHAR(500) NOT NULL DEFAULT '''' COMMENT ''管理员禁用原因'' AFTER account_status'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;
 
-CREATE TABLE order_delivery_evidence (
+CREATE TABLE IF NOT EXISTS order_delivery_evidence (
   id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   order_id BIGINT NOT NULL COMMENT '订单ID',
   companion_user_id BIGINT NOT NULL COMMENT '上传凭证的陪玩师用户ID',

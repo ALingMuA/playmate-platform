@@ -1,7 +1,6 @@
 package com.gameplay.order.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.gameplay.common.enums.OrderStatus;
 import com.gameplay.order.domain.PlayOrder;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -33,15 +32,24 @@ public interface PlayOrderMapper extends BaseMapper<PlayOrder> {
                               @Param("fromStatus") String fromStatus,
                               @Param("toStatus") String toStatus);
 
-    /** 支付超时待关闭订单（详细设计 7.2） */
-    @Select("SELECT * FROM play_order WHERE order_status = 'PENDING_PAYMENT' AND pay_expire_at <= #{now} LIMIT #{limit}")
+    /** 支付超时待关闭订单（详细设计 7.2，按 id 升序配合游标分批防毒丸阻塞） */
+    @Select("SELECT * FROM play_order WHERE order_status = 'PENDING_PAYMENT' AND pay_expire_at <= #{now} ORDER BY id ASC LIMIT #{limit}")
     List<PlayOrder> findExpiredPendingPayments(@Param("now") LocalDateTime now, @Param("limit") int limit);
 
+    @Select("SELECT * FROM play_order WHERE order_status = 'PENDING_PAYMENT' AND pay_expire_at <= #{now} AND id > #{afterId} ORDER BY id ASC LIMIT #{limit}")
+    List<PlayOrder> findExpiredPendingPaymentsAfter(@Param("now") LocalDateTime now, @Param("afterId") long afterId, @Param("limit") int limit);
+
     /** 接单超时待关闭订单（详细设计 7.2） */
-    @Select("SELECT * FROM play_order WHERE order_status = 'WAITING_ACCEPTANCE' AND accept_expire_at <= #{now} LIMIT #{limit}")
+    @Select("SELECT * FROM play_order WHERE order_status = 'WAITING_ACCEPTANCE' AND accept_expire_at <= #{now} ORDER BY id ASC LIMIT #{limit}")
     List<PlayOrder> findExpiredWaitingAcceptances(@Param("now") LocalDateTime now, @Param("limit") int limit);
 
+    @Select("SELECT * FROM play_order WHERE order_status = 'WAITING_ACCEPTANCE' AND accept_expire_at <= #{now} AND id > #{afterId} ORDER BY id ASC LIMIT #{limit}")
+    List<PlayOrder> findExpiredWaitingAcceptancesAfter(@Param("now") LocalDateTime now, @Param("afterId") long afterId, @Param("limit") int limit);
+
     /** 待自动确认完成的订单：结束后满24小时（详细设计 7.2） */
-    @Select("SELECT * FROM play_order WHERE order_status = 'WAITING_CONFIRMATION' AND ended_at <= #{deadline} LIMIT #{limit}")
+    @Select("SELECT * FROM play_order WHERE order_status = 'WAITING_CONFIRMATION' AND ended_at <= #{deadline} ORDER BY id ASC LIMIT #{limit}")
     List<PlayOrder> findNeedAutoConfirm(@Param("deadline") LocalDateTime deadline, @Param("limit") int limit);
+
+    @Select("SELECT * FROM play_order WHERE order_status = 'WAITING_CONFIRMATION' AND ended_at <= #{deadline} AND id > #{afterId} ORDER BY id ASC LIMIT #{limit}")
+    List<PlayOrder> findNeedAutoConfirmAfter(@Param("deadline") LocalDateTime deadline, @Param("afterId") long afterId, @Param("limit") int limit);
 }

@@ -11,9 +11,12 @@ import com.gameplay.customer_service.dto.CsAccountStatusUpdateRequest;
 import com.gameplay.customer_service.dto.CsAccountView;
 import com.gameplay.customer_service.service.CsAccountService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -30,6 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/admin/cs-accounts")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('ADMIN')")
+@Validated
 public class AdminCsAccountController {
 
     private final CsAccountService csAccountService;
@@ -40,8 +44,8 @@ public class AdminCsAccountController {
             @RequestParam(required = false) String csAccount,
             @RequestParam(required = false) String csName,
             @RequestParam(required = false) String accountStatus,
-            @RequestParam(defaultValue = "1") long page,
-            @RequestParam(defaultValue = "10") long size) {
+            @RequestParam(defaultValue = "1") @Min(1) long page,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(100) long size) {
         return ApiResponse.ok(csAccountService.list(csAccount, csName, accountStatus, page, size));
     }
 

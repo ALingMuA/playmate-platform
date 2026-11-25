@@ -10,9 +10,12 @@ import com.gameplay.common.api.ApiResponse;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -24,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 管理端用户管理接口（FR-M03/M04）。
  */
+@Validated
 @RestController
 @RequestMapping("/api/admin/users")
 @RequiredArgsConstructor
@@ -36,8 +40,8 @@ public class AdminUserController {
     @GetMapping
     public ApiResponse<Page<UserAdminView>> list(@RequestParam(required = false) String keyword,
                                                  @RequestParam(required = false) String accountStatus,
-                                                 @RequestParam(defaultValue = "1") long page,
-                                                 @RequestParam(defaultValue = "10") long size) {
+                                                 @RequestParam(defaultValue = "1") @Min(1) long page,
+                                                 @RequestParam(defaultValue = "10") @Min(1) @Max(100) long size) {
         return ApiResponse.ok(adminUserService.page(keyword, accountStatus, page, size));
     }
 
@@ -46,7 +50,7 @@ public class AdminUserController {
     public ApiResponse<UserAdminView> setStatus(@PathVariable Long id,
                                                 @Valid @RequestBody UserStatusUpdateRequest request,
                                                 Authentication authentication) {
-        return ApiResponse.ok(adminUserService.setStatus(id, request));
+        return ApiResponse.ok(adminUserService.setStatus(currentAdminId(authentication), id, request));
     }
 
     /** 重置用户密码 */

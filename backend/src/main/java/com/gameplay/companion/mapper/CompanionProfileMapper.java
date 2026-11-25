@@ -6,11 +6,24 @@ import com.gameplay.companion.domain.CompanionProfile;
 import com.gameplay.companion.dto.PublicCompanionCardRow;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 /**
  * 陪玩师资料 Mapper（FR-P05/P06）。
  */
 public interface CompanionProfileMapper extends BaseMapper<CompanionProfile> {
+
+    /** 行锁读取陪玩师资料（用于并发预约、档期变更、评分与能力更新串行化） */
+    @Select("SELECT * FROM companion_profile WHERE user_id = #{userId} FOR UPDATE")
+    CompanionProfile selectByUserIdForUpdate(@Param("userId") Long userId);
+
+    /** 原子递增已完成订单数 */
+    @Update("UPDATE companion_profile SET completed_order_count = completed_order_count + 1 WHERE user_id = #{userId}")
+    int incrementCompletedOrderCount(@Param("userId") Long userId);
+
+    /** 原子递减已完成订单数（最低为 0） */
+    @Update("UPDATE companion_profile SET completed_order_count = GREATEST(completed_order_count - 1, 0) WHERE user_id = #{userId}")
+    int decrementCompletedOrderCount(@Param("userId") Long userId);
 
     /**
      * 公开陪玩师列表分页（FR-U02：用户端按陪玩师维度浏览）。

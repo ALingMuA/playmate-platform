@@ -3,6 +3,7 @@ package com.gameplay.catalog.dto;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -21,6 +22,8 @@ public class GameRequest {
 
     /** 游戏图标地址（可传空串表示无图标） */
     @Size(max = 500, message = "游戏图标地址不能超过500个字符")
+    @Pattern(regexp = "^(|(/api/files/|/uploads/|/images/|https?://)[^\\r\\n]*)$",
+            message = "游戏图标地址格式不合法")
     private String gameIconUrl;
 
     /** 游戏简介（可传空串） */

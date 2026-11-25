@@ -4,13 +4,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.gameplay.ai.config.AiModelProperties;
 import com.gameplay.ai.config.AiModelConfigService;
 import com.gameplay.ai.config.AiModelConfigValidator;
+import com.gameplay.ai.config.AiModelProperties;
 import com.gameplay.ai.enums.AiProvider;
 import com.gameplay.ai.service.AiKnowledgeBaseService;
 import com.gameplay.ai.service.AiTextSanitizer;
+import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -21,11 +23,14 @@ import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -36,6 +41,8 @@ import java.util.stream.Collectors;
  */
 @Component
 public class ModelEnhancedResponder implements AiResponder {
+
+    private static final int MAX_CACHED_CLIENTS = 8;
 
     private static final String SYSTEM_PROMPT = """
             你是游戏陪玩平台的 AI 客服，请用简洁中文回答平台咨询。
@@ -56,16 +63,37 @@ public class ModelEnhancedResponder implements AiResponder {
     private final AiKnowledgeBaseService knowledgeBaseService;
     private final AiTextSanitizer sanitizer;
     private final ObjectMapper objectMapper;
-    private final java.util.concurrent.ConcurrentMap<Integer, HttpClient> clients = new java.util.concurrent.ConcurrentHashMap<>();
+    private final boolean allowLoopback;
+    private final Map<Integer, HttpClient> clients = Collections.synchronizedMap(
+            new LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<Integer, HttpClient> eldest) {
+                    return size() > MAX_CACHED_CLIENTS;
+                }
+            });
     @Autowired(required = false)
     private AiModelConfigService configService;
 
+    /** 纯单元测试构造函数，默认允许本机测试桩 */
     public ModelEnhancedResponder(AiModelProperties properties, AiKnowledgeBaseService knowledgeBaseService,
                                   AiTextSanitizer sanitizer, ObjectMapper objectMapper) {
+        this(properties, knowledgeBaseService, sanitizer, objectMapper, true);
+    }
+
+    @Autowired
+    public ModelEnhancedResponder(AiModelProperties properties, AiKnowledgeBaseService knowledgeBaseService,
+                                  AiTextSanitizer sanitizer, ObjectMapper objectMapper,
+                                  @Value("${ai.config.allow-loopback:false}") boolean allowLoopback) {
         this.properties = properties;
         this.knowledgeBaseService = knowledgeBaseService;
         this.sanitizer = sanitizer;
         this.objectMapper = objectMapper;
+        this.allowLoopback = allowLoopback;
+    }
+
+    @PreDestroy
+    public void destroyClients() {
+        clients.clear();
     }
 
     @Override
@@ -74,7 +102,9 @@ public class ModelEnhancedResponder implements AiResponder {
     }
 
     public AiResponse respond(AiRequest request, AiModelProperties settings) {
-        List<AiKnowledgeBaseService.MatchResult> knowledge = knowledgeBaseService.findRelevant(searchText(request), 3);
+        // 仅以当前用户轮次检索知识库依据，避免跨轮历史话题被后续注入请求借用为 knowledge 依据
+        String currentQuery = sanitizer.sanitize(request.content(), AiRequest.MAX_CONTENT_LENGTH);
+        List<AiKnowledgeBaseService.MatchResult> knowledge = knowledgeBaseService.findRelevant(currentQuery, 3);
         return execute(request, settings, knowledge);
     }
 
@@ -87,9 +117,11 @@ public class ModelEnhancedResponder implements AiResponder {
                                List<AiKnowledgeBaseService.MatchResult> knowledge) {
         URI endpoint;
         try {
-            AiModelConfigValidator.validate(properties, true);
-            endpoint = AiModelConfigValidator.endpoint(properties);
-        } catch (Exception ignored) { throw new ModelCallException("MODEL_CONFIGURATION"); }
+            AiModelConfigValidator.validate(properties, true, allowLoopback);
+            endpoint = AiModelConfigValidator.endpoint(properties, allowLoopback);
+        } catch (Exception ignored) {
+            throw new ModelCallException("MODEL_CONFIGURATION");
+        }
         int timeoutSeconds = properties.getTimeoutSeconds();
         String body;
         try {
@@ -105,12 +137,10 @@ public class ModelEnhancedResponder implements AiResponder {
         if ("API_KEY".equals(properties.getAuthMode())) builder.header(properties.getAuthHeaderName(), properties.getApiKey());
         properties.getCustomHeaders().forEach(builder::header);
         HttpRequest httpRequest = builder.build();
-        HttpClient httpClient = clients.computeIfAbsent(properties.getConnectTimeoutSeconds(), seconds -> HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(seconds)).followRedirects(HttpClient.Redirect.NEVER).build());
+        HttpClient httpClient = clientFor(properties.getConnectTimeoutSeconds());
         CompletableFuture<HttpResponse<String>> pending = httpClient.sendAsync(httpRequest,
                 ignored -> new LimitedBodySubscriber());
         try {
-            // get 的期限覆盖响应体接收，避免只收到响应头后无限等待。
             HttpResponse<String> result = pending.get(timeoutSeconds, TimeUnit.SECONDS);
             if (result.statusCode() == 401 || result.statusCode() == 403) {
                 throw new ModelCallException("MODEL_AUTH", result.statusCode());
@@ -123,8 +153,11 @@ public class ModelEnhancedResponder implements AiResponder {
             if (result.statusCode() < 200 || result.statusCode() >= 300) {
                 throw new ModelCallException("MODEL_UNAVAILABLE", result.statusCode());
             }
-            try { return parseResponse(result.body(), request, knowledge, properties); }
-            catch (ModelCallException invalid) { throw new ModelCallException(invalid.errorCode(), result.statusCode()); }
+            try {
+                return parseResponse(result.body(), request, knowledge, properties);
+            } catch (ModelCallException invalid) {
+                throw new ModelCallException(invalid.errorCode(), result.statusCode());
+            }
         } catch (TimeoutException ignored) {
             pending.cancel(true);
             throw new ModelCallException("MODEL_TIMEOUT");
@@ -141,13 +174,19 @@ public class ModelEnhancedResponder implements AiResponder {
         }
     }
 
-    private String searchText(AiRequest request) {
-        StringBuilder text = new StringBuilder(sanitizer.sanitize(request.content(), AiRequest.MAX_CONTENT_LENGTH));
-        List<AiRequest.ContextMessage> history = request.history();
-        history.stream().skip(Math.max(0, history.size() - 4))
-                .filter(message -> "user".equals(message.role()))
-                .forEach(message -> text.append('\n').append(sanitizer.sanitize(message.content(), 500)));
-        return text.toString();
+    private HttpClient clientFor(int connectTimeoutSeconds) {
+        synchronized (clients) {
+            HttpClient existing = clients.get(connectTimeoutSeconds);
+            if (existing != null) {
+                return existing;
+            }
+            HttpClient created = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(connectTimeoutSeconds))
+                    .followRedirects(HttpClient.Redirect.NEVER)
+                    .build();
+            clients.put(connectTimeoutSeconds, created);
+            return created;
+        }
     }
 
     private ObjectNode buildBody(AiRequest request, List<AiKnowledgeBaseService.MatchResult> knowledge, AiModelProperties properties) {
@@ -218,14 +257,15 @@ public class ModelEnhancedResponder implements AiResponder {
                 throw new ModelCallException("MODEL_INVALID_RESPONSE");
             }
             String json = content.asText().trim();
-            // 兼容各类 Markdown 代码围栏（```json\n、```json\r\n、```\n、```\r\n）
             if (json.startsWith("```")) {
                 int firstNewline = json.indexOf('\n');
                 if (firstNewline > 0 && json.endsWith("```")) {
                     json = json.substring(firstNewline + 1, json.length() - 3).trim();
                 }
             }
-            JsonNode answer = objectMapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(json);
+            JsonNode answer = objectMapper.reader()
+                    .with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                    .readTree(json);
             if (!answer.isObject() || !answer.path("answer").isTextual()
                     || !answer.path("needsHuman").isBoolean() || !answer.path("knowledgeIds").isArray()) {
                 throw new ModelCallException("MODEL_INVALID_RESPONSE");
@@ -261,7 +301,6 @@ public class ModelEnhancedResponder implements AiResponder {
             if (needsHuman) {
                 text = "该问题需要人工客服进一步核实，正在为您转接。";
             }
-            // 可靠性来自本地依据和结构校验，不读取模型自报的置信度。
             return new AiResponse(text.startsWith("【AI客服】") ? text : "【AI客服】" + text,
                     needsHuman ? 0.0 : 0.85, provider(), firstId, false, needsHuman,
                     sanitizer.sanitize(properties.getName(), 100),

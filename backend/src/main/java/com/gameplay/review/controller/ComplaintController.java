@@ -40,12 +40,13 @@ public class ComplaintController {
                 withOrderId(request, orderId)));
     }
 
-    /** 我的投诉分页（FR-U19 售后进度） */
+    /** 我的投诉分页（FR-U19 售后进度，可选按状态过滤） */
     @GetMapping("/mine")
-    public ApiResponse<Page<ComplaintView>> mine(@RequestParam(defaultValue = "1") long page,
+    public ApiResponse<Page<ComplaintView>> mine(@RequestParam(required = false) String status,
+                                                 @RequestParam(defaultValue = "1") long page,
                                                  @RequestParam(defaultValue = "10") long size,
                                                  Authentication authentication) {
-        return ApiResponse.ok(complaintService.listMine(currentUserId(authentication), page, size));
+        return ApiResponse.ok(complaintService.listMine(currentUserId(authentication), status, page, size));
     }
 
     /** 投诉详情（FR-U19） */

@@ -119,6 +119,11 @@ public class AnnouncementService {
         return toViewPage(p);
     }
 
+    /** 管理端按 ID 查询公告（用于审计日志记录前态等内部读取） */
+    public AnnouncementView adminDetail(Long id) {
+        return toView(requireAnnouncement(id));
+    }
+
     /** 公开单条（FR-A08：仅已发布） */
     public AnnouncementView publicDetail(Long id) {
         Announcement announcement = requireAnnouncement(id);

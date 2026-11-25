@@ -6,7 +6,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
+User=gameplay
+Group=gameplay
+NoNewPrivileges=true
 WorkingDirectory=/opt/gamemate
 EnvironmentFile=/opt/gamemate/gameplay.env
 # 1.6G 小内存实例：限制堆与元空间，避免与 MySQL/Redis 争抢导致 OOM

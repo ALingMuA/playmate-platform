@@ -114,22 +114,36 @@ public class AiKnowledgeBaseService {
         return findRelevant(content, 1).stream().findFirst().orElse(null);
     }
 
-    /** 仅返回启用且命中关键词的有限条目，供模型引用平台依据。 */
+    /** 仅返回启用且命中关键词的有限条目，SQL LIMIT + 优先级加权排序。 */
     public List<MatchResult> findRelevant(String content, int limit) {
         if (!StringUtils.hasText(content)) {
+            return List.of();
+        }
+        int cappedLimit = Math.max(0, Math.min(limit, 5));
+        if (cappedLimit == 0) {
             return List.of();
         }
         List<AiKnowledgeBase> entries = knowledgeBaseMapper.selectList(
                 new LambdaQueryWrapper<AiKnowledgeBase>()
                         .eq(AiKnowledgeBase::getEnabled, 1)
                         .orderByDesc(AiKnowledgeBase::getPriority)
-                        .orderByDesc(AiKnowledgeBase::getId));
+                        .orderByDesc(AiKnowledgeBase::getId)
+                        .last("LIMIT 200"));
         return entries.stream()
                 .map(entry -> new MatchResult(entry, matchConfidence(entry, content)))
                 .filter(match -> match.confidence() > 0)
-                .sorted(Comparator.comparingDouble(MatchResult::confidence).reversed())
-                .limit(Math.max(0, Math.min(limit, 5)))
+                .sorted(Comparator
+                        .comparingDouble((MatchResult m) -> weightedScore(m.entry(), m.confidence())).reversed()
+                        .thenComparing((MatchResult m) -> m.entry().getPriority() == null ? 0 : m.entry().getPriority(),
+                                Comparator.reverseOrder())
+                        .thenComparing((MatchResult m) -> m.entry().getId(), Comparator.reverseOrder()))
+                .limit(cappedLimit)
                 .toList();
+    }
+
+    private double weightedScore(AiKnowledgeBase entry, double confidence) {
+        int priority = entry.getPriority() == null ? 0 : Math.max(0, entry.getPriority());
+        return confidence + Math.min(0.10D, priority * 0.002D);
     }
 
     /** 命中关键词比例折算置信度：0.55 + 0.40 × 命中比例，封顶 0.95 */

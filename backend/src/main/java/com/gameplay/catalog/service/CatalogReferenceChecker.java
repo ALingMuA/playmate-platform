@@ -3,6 +3,8 @@ package com.gameplay.catalog.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gameplay.catalog.domain.Tag;
+import com.gameplay.catalog.mapper.TagMapper;
 import com.gameplay.common.exception.BusinessException;
 import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.companion.domain.CompanionProfile;
@@ -35,7 +37,14 @@ public class CatalogReferenceChecker {
 
     private final CompanionServiceMapper companionServiceMapper;
     private final CompanionProfileMapper companionProfileMapper;
+    private final TagMapper tagMapper;
     private final ObjectMapper objectMapper;
+
+    /** 归属该游戏的服务标签数量 */
+    public long countTagsByGame(Long gameId) {
+        return nullToZero(tagMapper.selectCount(new LambdaQueryWrapper<Tag>()
+                .eq(Tag::getGameId, gameId)));
+    }
 
     /** 引用该游戏的陪玩服务数量 */
     public long countServicesByGame(Long gameId) {

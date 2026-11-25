@@ -1,6 +1,7 @@
 package com.gameplay.companion.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -130,32 +131,46 @@ public class CompanionProfileService {
      */
     @Transactional
     public ProfileView updateProfile(Long userId, ProfileUpdateRequest req) {
-        CompanionProfile profile = requireProfile(userId);
-        profile.setDisplayName(req.getDisplayName());
-        profile.setProfileIntro(req.getProfileIntro() == null ? "" : req.getProfileIntro());
-        profileMapper.updateById(profile);
-        return toView(profile);
+        CompanionProfile profile = profileMapper.selectByUserIdForUpdate(userId);
+        if (profile == null) {
+            throw new BusinessException(ErrorCode.COMPANION_NOT_APPROVED);
+        }
+        String intro = req.getProfileIntro() == null ? "" : req.getProfileIntro();
+        profileMapper.update(null, new LambdaUpdateWrapper<CompanionProfile>()
+                .eq(CompanionProfile::getUserId, userId)
+                .set(CompanionProfile::getDisplayName, req.getDisplayName())
+                .set(CompanionProfile::getProfileIntro, intro));
+        return toView(requireProfile(userId));
     }
 
     /** 设置接单状态（FR-P06）：AVAILABLE/BUSY/RESTING；SUSPENDED 仅管理员可设置 */
     @Transactional
     public ProfileView updateServiceStatus(Long userId, String status) {
-        CompanionProfile profile = requireProfile(userId);
+        CompanionProfile profile = profileMapper.selectByUserIdForUpdate(userId);
+        if (profile == null) {
+            throw new BusinessException(ErrorCode.COMPANION_NOT_APPROVED);
+        }
+        if (CompanionServiceStatus.SUSPENDED.name().equals(profile.getServiceStatus())
+                || CompanionServiceStatus.SUSPENDED.name().equals(profile.getCertificationStatus())) {
+            throw new BusinessException(ErrorCode.COMPANION_PROFILE_SUSPENDED);
+        }
         if (CompanionServiceStatus.SUSPENDED.name().equals(status)) {
             throw new BusinessException(ErrorCode.PERMISSION_DENIED, "暂停接单资格仅管理员可操作");
         }
         if (status == null || List.of("AVAILABLE", "BUSY", "RESTING").stream().noneMatch(status::equals)) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "接单状态不合法");
         }
-        profile.setServiceStatus(status);
-        profileMapper.updateById(profile);
-        return toView(profile);
+        profileMapper.update(null, new LambdaUpdateWrapper<CompanionProfile>()
+                .eq(CompanionProfile::getUserId, userId)
+                .set(CompanionProfile::getServiceStatus, status));
+        return toView(requireProfile(userId));
     }
 
     /** 校验陪玩师资料存在且未被暂停（供服务/订单模块调用） */
     public CompanionProfile requireActiveProfile(Long userId) {
         CompanionProfile profile = requireProfile(userId);
-        if (CompanionServiceStatus.SUSPENDED.name().equals(profile.getCertificationStatus())) {
+        if (!"APPROVED".equals(profile.getCertificationStatus())
+                || CompanionServiceStatus.SUSPENDED.name().equals(profile.getServiceStatus())) {
             throw new BusinessException(ErrorCode.COMPANION_PROFILE_SUSPENDED);
         }
         return profile;

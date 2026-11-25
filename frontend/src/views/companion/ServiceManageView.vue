@@ -59,8 +59,13 @@ async function load() {
 }
 
 async function loadCatalog() {
-  games.value = await listGames()
-  types.value = await listServiceTypes()
+  try {
+    const [g, t] = await Promise.all([listGames(), listServiceTypes()])
+    games.value = g
+    types.value = t
+  } catch {
+    // http.ts 已统一提示错误
+  }
 }
 
 /** 切换游戏：清空已选标签并拉取"该游戏 + 通用"的启用标签 */
@@ -121,6 +126,7 @@ function openEdit(row: CompanionService) {
 }
 
 async function handleSave() {
+  if (saving.value) return
   if (!form.gameId || !form.serviceTypeId || !form.title) {
     ElMessage.warning('请填写游戏、服务类型与标题')
     return
@@ -149,6 +155,8 @@ async function handleSave() {
     }
     dialogVisible.value = false
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     saving.value = false
   }
@@ -170,6 +178,8 @@ async function handleShelf(row: CompanionService) {
     await setServiceShelf(row.id, onShelf)
     ElMessage.success(onShelf ? '已上架' : '已下架')
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     const next = new Set(pendingShelfIds.value)
     next.delete(row.id)

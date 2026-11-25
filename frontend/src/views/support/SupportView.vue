@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ApiError } from '@/api/http'
 import { csSocket, type WsConnectionState, type WsPush } from '@/utils/ws'
 import {
   conversationDetail,
@@ -32,11 +33,14 @@ const drafts = ref<Record<number, MessageDraft>>({})
 /** 只记录 REST 按游标完整补拉后的进度，不能由实时消息推进。 */
 const messageCursors = new Map<number, number>()
 const messageSyncChains = new Map<number, Promise<boolean>>()
-const taskPollers = new Map<number, ReturnType<typeof setInterval>>()
+const taskPollers = new Map<number, ReturnType<typeof setTimeout>>()
+const pollFailures = new Map<number, number>()
 const confirmTimers = new Map<number, ReturnType<typeof setTimeout>>()
 const shownErrors = new Set<string>()
 let selectionVersion = 0
 let connectedOnce = false
+let needRecoverOnOpen = false
+let unmounted = false
 
 const statusMap: Record<string, { label: string; type: string }> = {
   AI_PROCESSING: { label: 'AI 处理中', type: 'warning' },
@@ -69,7 +73,7 @@ function isTaskTerminal(task?: AiTaskView): boolean {
 }
 
 function showErrorOnce(message: string, key = message) {
-  if (shownErrors.has(key)) return
+  if (unmounted || shownErrors.has(key)) return
   shownErrors.add(key)
   ElMessage.error(message)
   setTimeout(() => shownErrors.delete(key), 3000)
@@ -165,12 +169,13 @@ async function loadConversations() {
   }
 }
 
-async function syncMessagesNow(conversationId: number, reset = false): Promise<boolean> {
+async function syncMessagesNow(conversationId: number, reset = false, silentError = false): Promise<boolean> {
   if (reset) messageCursors.set(conversationId, 0)
   let afterId = messageCursors.get(conversationId) ?? 0
   try {
     while (true) {
-      const list = await conversationMessages(conversationId, afterId)
+      const list = await conversationMessages(conversationId, afterId, 50, silentError)
+      if (unmounted) return false
       if (!list.length) break
       updateRestCursor(conversationId, list)
       list.forEach((message) => {
@@ -191,9 +196,9 @@ async function syncMessagesNow(conversationId: number, reset = false): Promise<b
 }
 
 /** 同一会话的补拉串行执行，避免轮询与重连并发跨过消息页。 */
-function syncMessages(conversationId: number, reset = false): Promise<boolean> {
+function syncMessages(conversationId: number, reset = false, silentError = false): Promise<boolean> {
   const previous = messageSyncChains.get(conversationId) ?? Promise.resolve(true)
-  const next = previous.catch(() => false).then(() => syncMessagesNow(conversationId, reset))
+  const next = previous.catch(() => false).then(() => syncMessagesNow(conversationId, reset, silentError))
   messageSyncChains.set(conversationId, next)
   void next.finally(() => {
     if (messageSyncChains.get(conversationId) === next) messageSyncChains.delete(conversationId)
@@ -201,13 +206,16 @@ function syncMessages(conversationId: number, reset = false): Promise<boolean> {
   return next
 }
 
-async function refreshConversation(conversationId: number) {
+async function refreshConversation(conversationId: number, silentError = false): Promise<{ ok: boolean; fatal: boolean; detail?: ConversationView }> {
   try {
-    const detail = await conversationDetail(conversationId)
-    mergeConversation(detail)
-    await syncMessages(conversationId)
-  } catch {
-    // HTTP 拦截器统一提示。
+    const detail = await conversationDetail(conversationId, silentError)
+    if (unmounted) return { ok: false, fatal: true }
+    const merged = mergeConversation(detail)
+    await syncMessages(conversationId, false, silentError)
+    return { ok: true, fatal: false, detail: merged }
+  } catch (err) {
+    const fatal = err instanceof ApiError && (err.status === 401 || err.status === 403 || err.status === 404)
+    return { ok: false, fatal }
   }
 }
 
@@ -219,10 +227,12 @@ async function openConversation(conversation: ConversationView) {
   loading.value = true
   try {
     const [detail] = await Promise.all([conversationDetail(conversation.id), syncMessages(conversation.id, true)])
-    if (version !== selectionVersion || current.value?.id !== conversation.id) return
+    if (unmounted || version !== selectionVersion || current.value?.id !== conversation.id) return
     const merged = mergeConversation(detail)
     if (current.value?.id === conversation.id && merged.aiTask) watchTask(merged.aiTask)
     nextTick(scrollBottom)
+  } catch {
+    // HTTP 拦截器统一提示。
   } finally {
     if (version === selectionVersion) loading.value = false
   }
@@ -230,20 +240,52 @@ async function openConversation(conversation: ConversationView) {
 
 function clearTaskPoller(conversationId: number) {
   const poller = taskPollers.get(conversationId)
-  if (poller) clearInterval(poller)
+  if (poller) clearTimeout(poller)
   taskPollers.delete(conversationId)
+  pollFailures.delete(conversationId)
 }
 
-/** 仅在任务仍未结束时补查，避免长时间无意义轮询。 */
+function scheduleTaskPoll(conversationId: number, delayMs: number) {
+  if (unmounted) return
+  const existing = taskPollers.get(conversationId)
+  if (existing) clearTimeout(existing)
+  const timer = setTimeout(async () => {
+    taskPollers.delete(conversationId)
+    if (unmounted) return
+    const res = await refreshConversation(conversationId, true)
+    if (unmounted) return
+    if (res.fatal) {
+      clearTaskPoller(conversationId)
+      return
+    }
+    if (!res.ok) {
+      const failures = (pollFailures.get(conversationId) ?? 0) + 1
+      pollFailures.set(conversationId, failures)
+      if (failures >= 5) {
+        clearTaskPoller(conversationId)
+        showErrorOnce('AI 回复状态同步异常，请手动刷新会话', `poll-fail-${conversationId}`)
+        return
+      }
+      const backoff = Math.min(32000, 2000 * (2 ** failures))
+      scheduleTaskPoll(conversationId, backoff)
+      return
+    }
+    pollFailures.delete(conversationId)
+    if (res.detail && isTaskPending(res.detail.aiTask) && res.detail.conversationStatus !== 'CLOSED') {
+      scheduleTaskPoll(conversationId, 2000)
+    }
+  }, delayMs)
+  taskPollers.set(conversationId, timer)
+}
+
+/** 仅在任务仍未结束时串行补查，避免请求重叠与错误弹窗风暴。 */
 function watchTask(task: AiTaskView) {
   if (!isTaskPending(task)) {
     clearTaskPoller(task.conversationId)
     return
   }
   if (taskPollers.has(task.conversationId)) return
-  taskPollers.set(task.conversationId, setInterval(() => {
-    void refreshConversation(task.conversationId)
-  }, 2000))
+  scheduleTaskPoll(task.conversationId, 2000)
 }
 
 // ==================== 发起会话（FR-C07） ====================
@@ -253,6 +295,7 @@ const creating = ref(false)
 const createForm = reactive({ firstContent: '' })
 
 async function handleCreate() {
+  if (creating.value) return
   if (!createForm.firstContent.trim()) {
     ElMessage.warning('请先描述您的问题')
     return
@@ -266,6 +309,8 @@ async function handleCreate() {
     await openConversation(conversation)
     if (conversation.aiTask) watchTask(conversation.aiTask)
     ElMessage.success('会话已创建，AI 客服为您服务')
+  } catch {
+    // HTTP 拦截器统一提示。
   } finally {
     creating.value = false
   }
@@ -277,7 +322,10 @@ function confirmSentDraft(conversationId: number, clientMsgId: string) {
   const oldTimer = confirmTimers.get(conversationId)
   if (oldTimer) clearTimeout(oldTimer)
   confirmTimers.set(conversationId, setTimeout(async () => {
-    const synced = await syncMessages(conversationId)
+    confirmTimers.delete(conversationId)
+    if (unmounted) return
+    const synced = await syncMessages(conversationId, false, true)
+    if (unmounted) return
     const draft = drafts.value[conversationId]
     if (draft?.clientMsgId === clientMsgId) {
       setDraft(conversationId, { ...draft, state: 'retry' })
@@ -341,22 +389,27 @@ function handleSend() {
 
 // ==================== 转人工（FR-C10） ====================
 
+const requestingHuman = ref(false)
+
 async function handleRequestHuman() {
-  if (!current.value) return
+  if (!current.value || requestingHuman.value) return
   const conversationId = current.value.id
+  requestingHuman.value = true
   try {
     await ElMessageBox.confirm('转人工后，您的完整会话上下文将转入人工队列，请耐心等待客服接入。', '申请人工客服', {
       type: 'info',
       confirmButtonText: '转人工',
       cancelButtonText: '取消',
     })
+    const conversation = await requestHuman(conversationId)
+    mergeConversation(conversation)
+    clearTaskPoller(conversation.id)
+    ElMessage.success('已转入人工队列，请稍候')
   } catch {
-    return
+    // 用户取消或 HTTP 拦截器已提示错误
+  } finally {
+    requestingHuman.value = false
   }
-  const conversation = await requestHuman(conversationId)
-  mergeConversation(conversation)
-  clearTaskPoller(conversation.id)
-  ElMessage.success('已转入人工队列，请稍候')
 }
 
 // ==================== 满意度评价（FR-C15） ====================
@@ -367,12 +420,15 @@ const evalContent = ref('')
 const submittingEval = ref(false)
 
 async function handleEvaluate() {
-  if (!current.value) return
+  if (!current.value || submittingEval.value) return
   submittingEval.value = true
   try {
     await evaluateConversation(current.value.id, { score: evalScore.value, content: evalContent.value.trim() || undefined })
     ElMessage.success('感谢您的评价')
     evalVisible.value = false
+    evalContent.value = ''
+  } catch {
+    // HTTP 拦截器统一提示。
   } finally {
     submittingEval.value = false
   }
@@ -420,7 +476,16 @@ function onWsMessage(msg: Parameters<Parameters<typeof csSocket.onMessage>[0]>[0
 
 async function recoverAfterReconnect() {
   await loadConversations()
-  await Promise.all(conversations.value.map((conversation) => refreshConversation(conversation.id)))
+  if (unmounted) return
+  const targets = new Set<number>()
+  if (current.value) targets.add(current.value.id)
+  conversations.value.forEach((c) => {
+    if (c.conversationStatus !== 'CLOSED' && (isTaskPending(c.aiTask) || drafts.value[c.id])) {
+      targets.add(c.id)
+    }
+  })
+  await Promise.all([...targets].map((id) => refreshConversation(id, true)))
+  if (unmounted) return
   Object.entries(drafts.value).forEach(([id, draft]) => {
     if (draft.state === 'retry') void submitDraft(Number(id), draft)
   })
@@ -428,11 +493,18 @@ async function recoverAfterReconnect() {
 
 function onConnectionState(state: WsConnectionState) {
   if (state === 'OPEN') {
-    connectedOnce = true
-    void recoverAfterReconnect()
+    if (!connectedOnce) {
+      connectedOnce = true
+      return
+    }
+    if (needRecoverOnOpen) {
+      needRecoverOnOpen = false
+      void recoverAfterReconnect()
+    }
     return
   }
   if (state === 'CLOSED' && connectedOnce) {
+    needRecoverOnOpen = true
     Object.entries(drafts.value).forEach(([id, draft]) => {
       if (draft.state === 'sending') setDraft(Number(id), { ...draft, state: 'retry' })
     })
@@ -452,10 +524,14 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  unmounted = true
   unsubscribeMessage?.()
   unsubscribeConnection?.()
-  taskPollers.forEach((poller) => clearInterval(poller))
+  taskPollers.forEach((poller) => clearTimeout(poller))
+  taskPollers.clear()
+  pollFailures.clear()
   confirmTimers.forEach((timer) => clearTimeout(timer))
+  confirmTimers.clear()
   csSocket.close()
 })
 </script>
@@ -512,7 +588,9 @@ onUnmounted(() => {
               </div>
             </div>
             <button v-if="canRequestHuman" class="btn btn-warning btn-sm"
-              @click="handleRequestHuman">转人工</button>
+              :disabled="requestingHuman" @click="handleRequestHuman">
+              {{ requestingHuman ? '转接中…' : '转人工' }}
+            </button>
             <button v-else-if="current && isClosed" class="btn btn-secondary btn-sm" @click="evalVisible = true">评价</button>
           </div>
 
@@ -523,7 +601,7 @@ onUnmounted(() => {
                 <div class="chat-avatar">{{ m.senderType === 'USER' ? '我' : '🤖' }}</div>
                 <div>
                   <div class="chat-name">
-                    {{ m.senderType === 'USER' ? '我' : m.senderType === 'AI' ? 'AI 客服' : m.senderType === 'CS' ? '人工客服' : '系统' }}
+                    {{ m.senderType === 'USER' ? '我' : m.senderType === 'AI' ? 'AI 客服' : m.senderType === 'CS' ? '人工客服' : m.senderType === 'ADMIN' ? '管理员' : '系统' }}
                   </div>
                   <div class="chat-bubble">{{ m.content }}</div>
                   <div class="chat-name" style="margin-top: 2px">{{ fmtTime(m.createdAt) }}</div>

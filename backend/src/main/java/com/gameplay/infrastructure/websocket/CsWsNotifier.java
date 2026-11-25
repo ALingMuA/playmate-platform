@@ -1,10 +1,10 @@
 package com.gameplay.infrastructure.websocket;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gameplay.ai.task.dto.AiTaskView;
 import com.gameplay.customer_service.dto.ConversationView;
 import com.gameplay.customer_service.dto.MessageView;
 import com.gameplay.customer_service.service.CsMessageNotifier;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -13,11 +13,12 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * WebSocket 消息推送实现（CsMessageNotifier）。
  *
- * <p>向会话发起用户与当前客服账号所属用户推送 MESSAGE_NEW / CONVERSATION_CHANGED；
+ * <p>向会话发起用户与当前客服/管理员所属用户推送 MESSAGE_NEW / CONVERSATION_CHANGED；
  * 接收方离线时由 REST 消息补拉接口兜底。</p>
  */
 @Slf4j
@@ -55,7 +56,9 @@ public class CsWsNotifier implements CsMessageNotifier {
 
     private void send(String payload, Long initiatorUserId, Long currentCsAccountUserId) {
         sessionRegistry.sendToUser(initiatorUserId, payload);
-        sessionRegistry.sendToUser(currentCsAccountUserId, payload);
+        if (!Objects.equals(initiatorUserId, currentCsAccountUserId)) {
+            sessionRegistry.sendToUser(currentCsAccountUserId, payload);
+        }
     }
 
     private void afterCommit(Runnable action) {

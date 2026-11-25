@@ -106,6 +106,9 @@ public class GameService {
         long profileRefs = referenceChecker.countProfilesByGame(id);
         referenceChecker.assertDeletable(profileRefs,
                 "该游戏已被 " + profileRefs + " 位陪玩师的认证能力引用，无法删除，请改为停用");
+        long tagRefs = referenceChecker.countTagsByGame(id);
+        referenceChecker.assertDeletable(tagRefs,
+                "该游戏下存在 " + tagRefs + " 个服务标签，无法删除，请改为停用");
         gameMapper.deleteById(id);
     }
 

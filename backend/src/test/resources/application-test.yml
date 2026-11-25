@@ -12,5 +12,7 @@ app:
       scheduling-enabled: false
 
 ai:
+  config:
+    allow-loopback: true
   model:
     enabled: false

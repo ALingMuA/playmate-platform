@@ -61,9 +61,9 @@ function resetAutoPlay() {
 
 function handleSlideAction(item: ActivityView) {
   if (item.actionRoute) {
-    if (item.actionRoute.startsWith('http')) {
-      window.open(item.actionRoute, '_blank')
-    } else {
+    if (/^https?:\/\//i.test(item.actionRoute)) {
+      window.open(item.actionRoute, '_blank', 'noopener,noreferrer')
+    } else if (/^\/(?!\/|\\)/.test(item.actionRoute)) {
       router.push(item.actionRoute)
     }
     return

@@ -23,9 +23,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 /**
  * 虚拟钱包应用服务：支付扣款、退款、收益结算与流水分页查询（详细设计 3.2）。
@@ -42,6 +42,7 @@ public class WalletService {
     private final UserMapper userMapper;
     private final OperationLogService operationLogService;
     private final DemoWalletProperties demoWalletProperties;
+    private final TransactionTemplate transactionTemplate;
 
     /** 行锁读取钱包；不存在时创建（资金操作事务入口） */
     private WalletAccount ensureWalletForUpdate(Long userId) {
@@ -93,73 +94,30 @@ public class WalletService {
      */
     @Transactional
     public void pay(PlayOrder order, Long operatorId) {
+        long amountCents = requirePositiveAmount(order == null ? null : order.getTotalAmountCents());
         String businessNo = "PAY:" + order.getOrderNo();
         if (walletLedgerMapper.selectByBusinessNo(businessNo) != null) {
             return; // 已支付过，幂等返回
         }
         WalletAccount wallet = ensureWalletForUpdate(order.getUserId());
-        if (wallet.getBalanceCents() < order.getTotalAmountCents()) {
+        if (wallet.getBalanceCents() < amountCents) {
             throw new BusinessException(ErrorCode.WALLET_BALANCE_INSUFFICIENT);
         }
         int rows = walletAccountMapper.decreaseBalanceWithVersion(
-                wallet.getId(), wallet.getVersion(), order.getTotalAmountCents());
+                wallet.getId(), wallet.getVersion(), amountCents);
         if (rows != 1) {
             throw new BusinessException(ErrorCode.WALLET_CONCURRENT_MODIFICATION);
         }
         insertLedger(businessNo, order.getUserId(), order.getId(), LedgerType.PAYMENT, LedgerDirection.OUT,
-                order.getTotalAmountCents(), wallet, "订单支付：" + order.getServiceTitleSnapshot(),
+                amountCents, wallet, "订单支付：" + safeStr(order.getServiceTitleSnapshot()),
                 operatorId);
     }
 
     /** 退款入账（FR-U12/P14）：退还用户余额，写入 REFUND 流水 */
     @Transactional
     public void refund(PlayOrder order, String reason, Long operatorId) {
+        long amountCents = requirePositiveAmount(order == null ? null : order.getTotalAmountCents());
         String businessNo = "REFUND:" + order.getOrderNo();
-        if (walletLedgerMapper.selectByBusinessNo(businessNo) != null) {
-            return; // 幂等
-        }
-        WalletAccount wallet = ensureWalletForUpdate(order.getUserId());
-        int rows = walletAccountMapper.increaseBalanceWithVersion(
-                wallet.getId(), wallet.getVersion(), order.getTotalAmountCents());
-        if (rows != 1) {
-            throw new BusinessException(ErrorCode.WALLET_CONCURRENT_MODIFICATION);
-        }
-        insertLedger(businessNo, order.getUserId(), order.getId(), LedgerType.REFUND, LedgerDirection.IN,
-                order.getTotalAmountCents(), wallet, "订单退款：" + reason, operatorId);
-    }
-
-    /**
-     * 订单完成结算（FR-U13/P19）：陪玩师收益入账（可用余额 + 累计收益）。
-     * <p>演示环境不提供真实提现，收益直接计入可用余额。</p>
-     */
-    @Transactional
-    public void settle(PlayOrder order, Long operatorId) {
-        String businessNo = "SETTLE:" + order.getOrderNo();
-        if (walletLedgerMapper.selectByBusinessNo(businessNo) != null) {
-            return; // 幂等
-        }
-        WalletAccount wallet = ensureWalletForUpdate(order.getCompanionUserId());
-        long settleAmount = (order.getSettlementAmountCents() != null && order.getSettlementAmountCents() > 0)
-                ? order.getSettlementAmountCents() : order.getTotalAmountCents();
-        int rows = walletAccountMapper.settleIncomeWithVersion(
-                wallet.getId(), wallet.getVersion(), settleAmount);
-        if (rows != 1) {
-            throw new BusinessException(ErrorCode.WALLET_CONCURRENT_MODIFICATION);
-        }
-        insertLedger(businessNo, order.getCompanionUserId(), order.getId(), LedgerType.SETTLEMENT, LedgerDirection.IN,
-                settleAmount, wallet, "订单完成收益结算：" + order.getServiceTitleSnapshot(),
-                operatorId);
-    }
-
-    /**
-     * 部分退款（FR-M18 PARTIAL_REFUND）：退还指定金额给用户，业务号 REFUND:订单号:PARTIAL 幂等。
-     */
-    @Transactional
-    public void refundAmount(PlayOrder order, long amountCents, String reason, Long operatorId) {
-        if (amountCents <= 0 || amountCents > order.getTotalAmountCents()) {
-            throw new BusinessException(ErrorCode.COMPLAINT_REFUND_AMOUNT_INVALID);
-        }
-        String businessNo = "REFUND:" + order.getOrderNo() + ":PARTIAL";
         if (walletLedgerMapper.selectByBusinessNo(businessNo) != null) {
             return; // 幂等
         }
@@ -170,33 +128,111 @@ public class WalletService {
             throw new BusinessException(ErrorCode.WALLET_CONCURRENT_MODIFICATION);
         }
         insertLedger(businessNo, order.getUserId(), order.getId(), LedgerType.REFUND, LedgerDirection.IN,
-                amountCents, wallet, "投诉部分退款：" + reason, operatorId);
+                amountCents, wallet, "订单退款：" + safeStr(reason), operatorId);
     }
 
     /**
-     * 扣回已结算收益（FR-M18 FULL_REFUND，订单已结算时）：从陪玩师钱包扣回订单金额。
-     * <p>业务号 SETTLE_BACK:订单号 幂等；余额不足时按可用余额扣回并如实记录流水备注。</p>
+     * 订单完成结算（FR-U13/P19）：陪玩师收益入账（可用余额 + 累计收益）。
+     * <p>演示环境不提供真实提现，收益直接计入可用余额。</p>
      */
     @Transactional
-    public void deductSettledIncome(PlayOrder order, String reason, Long operatorId) {
-        String businessNo = "SETTLE_BACK:" + order.getOrderNo();
+    public void settle(PlayOrder order, Long operatorId) {
+        long settleAmount = (order != null && order.getSettlementAmountCents() != null && order.getSettlementAmountCents() > 0)
+                ? order.getSettlementAmountCents()
+                : (order == null ? 0L : safeLong(order.getTotalAmountCents()));
+        settleAmount(order, settleAmount, operatorId);
+    }
+
+    /**
+     * 按指定金额结算陪玩师收益（用于正常完成结算与部分退款后的净额结算）。
+     * <p>businessNo = SETTLE:订单号 保证同订单仅结算一次。</p>
+     */
+    @Transactional
+    public void settleAmount(PlayOrder order, long amountCents, Long operatorId) {
+        requirePositiveAmount(amountCents);
+        String businessNo = "SETTLE:" + order.getOrderNo();
         if (walletLedgerMapper.selectByBusinessNo(businessNo) != null) {
             return; // 幂等
         }
         WalletAccount wallet = ensureWalletForUpdate(order.getCompanionUserId());
-        long settleAmount = (order.getSettlementAmountCents() != null && order.getSettlementAmountCents() > 0)
-                ? order.getSettlementAmountCents() : order.getTotalAmountCents();
-        long actual = Math.min(settleAmount, wallet.getBalanceCents());
-        if (actual <= 0) {
-            return; // 陪玩师无可扣余额，演示环境允许
-        }
-        int rows = walletAccountMapper.decreaseBalanceWithVersion(
-                wallet.getId(), wallet.getVersion(), actual);
+        int rows = walletAccountMapper.settleIncomeWithVersion(
+                wallet.getId(), wallet.getVersion(), amountCents);
         if (rows != 1) {
             throw new BusinessException(ErrorCode.WALLET_CONCURRENT_MODIFICATION);
         }
+        insertLedger(businessNo, order.getCompanionUserId(), order.getId(), LedgerType.SETTLEMENT, LedgerDirection.IN,
+                amountCents, wallet, "订单完成收益结算：" + safeStr(order.getServiceTitleSnapshot()),
+                operatorId);
+    }
+
+    /**
+     * 部分退款（FR-M18 PARTIAL_REFUND）：退还指定金额给用户，业务号按投诉ID幂等。
+     */
+    @Transactional
+    public void refundAmount(PlayOrder order, long amountCents, Long complaintId, String reason, Long operatorId) {
+        requirePositiveAmount(amountCents);
+        if (order.getTotalAmountCents() == null || amountCents > order.getTotalAmountCents()) {
+            throw new BusinessException(ErrorCode.COMPLAINT_REFUND_AMOUNT_INVALID);
+        }
+        String suffix = complaintId == null ? "" : (":" + complaintId);
+        String businessNo = "REFUND:" + order.getOrderNo() + ":PARTIAL" + suffix;
+        if (walletLedgerMapper.selectByBusinessNo(businessNo) != null) {
+            return; // 幂等
+        }
+        WalletAccount wallet = ensureWalletForUpdate(order.getUserId());
+        int rows = walletAccountMapper.increaseBalanceWithVersion(
+                wallet.getId(), wallet.getVersion(), amountCents);
+        if (rows != 1) {
+            throw new BusinessException(ErrorCode.WALLET_CONCURRENT_MODIFICATION);
+        }
+        insertLedger(businessNo, order.getUserId(), order.getId(), LedgerType.REFUND, LedgerDirection.IN,
+                amountCents, wallet, "投诉部分退款：" + safeStr(reason), operatorId);
+    }
+
+    /**
+     * 扣回已结算收益（FR-M18 FULL_REFUND，订单已结算时）：从陪玩师钱包扣回订单结算金额。
+     * <p>业务号 SETTLE_BACK:订单号 幂等；同时按实际扣回额扣减累计收益并始终记录流水（含缺口说明）。</p>
+     */
+    @Transactional
+    public void deductSettledIncome(PlayOrder order, String reason, Long operatorId) {
+        long settleAmount = (order != null && order.getSettlementAmountCents() != null && order.getSettlementAmountCents() > 0)
+                ? order.getSettlementAmountCents()
+                : (order == null ? 0L : safeLong(order.getTotalAmountCents()));
+        deductSettledIncomeInternal(order, settleAmount, "SETTLE_BACK:" + order.getOrderNo(),
+                "投诉全额退款扣回收益", reason, operatorId);
+    }
+
+    /**
+     * 扣回部分已结算收益（FR-M18 PARTIAL_REFUND，订单已结算时）。
+     */
+    @Transactional
+    public void deductSettledIncomeAmount(PlayOrder order, long amountCents, Long complaintId, String reason, Long operatorId) {
+        String suffix = complaintId == null ? "" : (":" + complaintId);
+        deductSettledIncomeInternal(order, amountCents,
+                "SETTLE_BACK:" + order.getOrderNo() + ":PARTIAL" + suffix,
+                "投诉部分退款扣回收益", reason, operatorId);
+    }
+
+    private void deductSettledIncomeInternal(PlayOrder order, long clawbackAmount, String businessNo,
+                                             String prefix, String reason, Long operatorId) {
+        requirePositiveAmount(clawbackAmount);
+        if (walletLedgerMapper.selectByBusinessNo(businessNo) != null) {
+            return; // 幂等
+        }
+        WalletAccount wallet = ensureWalletForUpdate(order.getCompanionUserId());
+        long actual = Math.min(clawbackAmount, Math.max(0L, wallet.getBalanceCents()));
+        long shortfall = clawbackAmount - actual;
+        int rows = walletAccountMapper.clawbackSettledIncomeWithVersion(
+                wallet.getId(), wallet.getVersion(), actual, actual);
+        if (rows != 1) {
+            throw new BusinessException(ErrorCode.WALLET_CONCURRENT_MODIFICATION);
+        }
+        String safeReason = safeStr(reason);
+        String remark = shortfall > 0
+                ? String.format("%s（应扣%d分，实扣%d分，缺口%d分）：%s", prefix, clawbackAmount, actual, shortfall, safeReason)
+                : prefix + "：" + safeReason;
         insertLedger(businessNo, order.getCompanionUserId(), order.getId(), LedgerType.SETTLEMENT, LedgerDirection.OUT,
-                actual, wallet, "投诉全额退款扣回收益：" + reason, operatorId);
+                actual, wallet, remark, operatorId);
     }
 
     /** 订单是否已完成收益结算（存在 SETTLE 流水） */
@@ -205,6 +241,7 @@ public class WalletService {
     }
 
     /** 我的钱包概览 */
+    @Transactional
     public WalletView view(Long userId) {
         WalletAccount wallet = getOrCreate(userId);
         return WalletView.builder()
@@ -215,6 +252,7 @@ public class WalletService {
     }
 
     /** 我的资金流水分页（FR-P19 收益明细） */
+    @Transactional
     public Page<LedgerView> ledgers(Long userId, long page, long size) {
         getOrCreate(userId);
         Page<WalletLedger> p = walletLedgerMapper.selectPage(
@@ -248,16 +286,19 @@ public class WalletService {
 
     /**
      * 发放演示余额（仅演示环境开启时由管理员调用）。
-     * <p>businessNo = DEMO_CREDIT:{requestId} 保证幂等，同 requestId 返回既有记录。</p>
+     * <p>businessNo = DEMO_CREDIT:{requestId} 保证幂等，同 requestId 返回既有记录；
+     * 并发重复提交触发流水唯一键回滚后重试读取既有记录。</p>
      */
-    @Transactional
     public DemoWalletGrantView grantDemoCredit(Long targetUserId, Long amountCents, String reason,
-                                              String requestId, Long operatorAdminId) {
+                                               String requestId, Long operatorAdminId) {
         if (!demoWalletProperties.isEnabled()) {
             throw new BusinessException(ErrorCode.DEMO_WALLET_DISABLED);
         }
         if (amountCents == null || !demoWalletProperties.getAllowedAmountsCents().contains(amountCents)) {
             throw new BusinessException(ErrorCode.DEMO_WALLET_AMOUNT_INVALID);
+        }
+        if (requestId == null || requestId.isBlank()) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "requestId不能为空");
         }
         User targetUser = userMapper.selectById(targetUserId);
         if (targetUser == null || (targetUser.getDeleted() != null && targetUser.getDeleted() == 1)) {
@@ -270,44 +311,83 @@ public class WalletService {
         String businessNo = "DEMO_CREDIT:" + requestId.trim();
         WalletLedger existing = walletLedgerMapper.selectByBusinessNo(businessNo);
         if (existing != null) {
-            return DemoWalletGrantView.builder()
-                    .userId(existing.getUserId())
-                    .amountCents(existing.getAmountCents())
-                    .balanceAfterCents(existing.getBalanceAfterCents())
-                    .businessNo(existing.getBusinessNo())
-                    .createdAt(existing.getCreatedAt())
-                    .build();
+            return verifyAndToGrantView(existing, targetUserId, amountCents);
         }
 
-        WalletAccount wallet = ensureWalletForUpdate(targetUserId);
-        int rows = walletAccountMapper.increaseBalanceWithVersion(
-                wallet.getId(), wallet.getVersion(), amountCents);
-        if (rows != 1) {
-            throw new BusinessException(ErrorCode.WALLET_CONCURRENT_MODIFICATION);
+        try {
+            return transactionTemplate.execute(status -> {
+                WalletLedger insideExisting = walletLedgerMapper.selectByBusinessNo(businessNo);
+                if (insideExisting != null) {
+                    return verifyAndToGrantView(insideExisting, targetUserId, amountCents);
+                }
+
+                WalletAccount wallet = ensureWalletForUpdate(targetUserId);
+                int rows = walletAccountMapper.increaseBalanceWithVersion(
+                        wallet.getId(), wallet.getVersion(), amountCents);
+                if (rows != 1) {
+                    throw new BusinessException(ErrorCode.WALLET_CONCURRENT_MODIFICATION);
+                }
+
+                String cleanReason = (reason == null ? "" : reason.trim());
+                insertLedger(businessNo, targetUserId, 0L, LedgerType.DEMO_CREDIT, LedgerDirection.IN,
+                        amountCents, wallet, "演示余额发放：" + cleanReason, operatorAdminId);
+
+                operationLogService.record(
+                        operatorAdminId,
+                        "ADMIN",
+                        "DEMO_WALLET_GRANT",
+                        "USER",
+                        targetUserId,
+                        "balance=" + wallet.getBalanceCents(),
+                        "balance=" + (wallet.getBalanceCents() + amountCents),
+                        "发放演示余额 " + (amountCents / 100) + " 元，原因：" + cleanReason
+                );
+
+                return DemoWalletGrantView.builder()
+                        .userId(targetUserId)
+                        .amountCents(amountCents)
+                        .balanceAfterCents(wallet.getBalanceCents() + amountCents)
+                        .businessNo(businessNo)
+                        .createdAt(LocalDateTime.now())
+                        .build();
+            });
+        } catch (BusinessException ex) {
+            if (ex.getErrorCode() == ErrorCode.WALLET_LEDGER_DUPLICATE) {
+                WalletLedger winner = walletLedgerMapper.selectByBusinessNo(businessNo);
+                if (winner != null) {
+                    return verifyAndToGrantView(winner, targetUserId, amountCents);
+                }
+            }
+            throw ex;
         }
+    }
 
-        String cleanReason = (reason == null ? "" : reason.trim());
-        insertLedger(businessNo, targetUserId, 0L, LedgerType.DEMO_CREDIT, LedgerDirection.IN,
-                amountCents, wallet, "演示余额发放：" + cleanReason, operatorAdminId);
-
-        operationLogService.record(
-                operatorAdminId,
-                "ADMIN",
-                "DEMO_WALLET_GRANT",
-                "USER",
-                targetUserId,
-                "balance=" + wallet.getBalanceCents(),
-                "balance=" + (wallet.getBalanceCents() + amountCents),
-                "发放演示余额 " + (amountCents / 100) + " 元，原因：" + cleanReason
-        );
-
+    private DemoWalletGrantView verifyAndToGrantView(WalletLedger existing, Long targetUserId, Long amountCents) {
+        if (!existing.getUserId().equals(targetUserId) || !existing.getAmountCents().equals(amountCents)) {
+            throw new BusinessException(ErrorCode.IDEMPOTENCY_KEY_CONFLICT);
+        }
         return DemoWalletGrantView.builder()
-                .userId(targetUserId)
-                .amountCents(amountCents)
-                .balanceAfterCents(wallet.getBalanceCents() + amountCents)
-                .businessNo(businessNo)
-                .createdAt(LocalDateTime.now())
+                .userId(existing.getUserId())
+                .amountCents(existing.getAmountCents())
+                .balanceAfterCents(existing.getBalanceAfterCents())
+                .businessNo(existing.getBusinessNo())
+                .createdAt(existing.getCreatedAt())
                 .build();
+    }
+
+    private long requirePositiveAmount(Long amountCents) {
+        if (amountCents == null || amountCents <= 0) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "资金变动金额必须大于0");
+        }
+        return amountCents;
+    }
+
+    private long safeLong(Long value) {
+        return value == null ? 0L : value;
+    }
+
+    private String safeStr(String value) {
+        return value == null ? "" : value;
     }
 
     private void insertLedger(String businessNo, Long userId, Long orderId, LedgerType type,
@@ -326,13 +406,15 @@ public class WalletService {
                 : wallet.getBalanceCents() - amountCents);
         ledger.setFrozenBeforeCents(wallet.getFrozenCents());
         ledger.setFrozenAfterCents(wallet.getFrozenCents());
-        ledger.setRemark(remark);
+        String safeRemark = remark == null ? "" : (remark.length() > 500 ? remark.substring(0, 500) : remark);
+        ledger.setRemark(safeRemark);
         ledger.setCreatedBy(operatorId == null ? 0L : operatorId);
         ledger.setCreatedAt(LocalDateTime.now());
         try {
             walletLedgerMapper.insert(ledger);
         } catch (DuplicateKeyException e) {
-            // uk_wl_business_no 最终幂等防线：重复流水直接忽略
+            // 禁止吞掉唯一键异常：抛出业务异常触发 @Transactional 整体回滚，防止余额重复变动
+            throw new BusinessException(ErrorCode.WALLET_LEDGER_DUPLICATE);
         }
     }
 

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.gameplay.auth.dto.UserProfileView;
 import com.gameplay.auth.entity.Role;
 import com.gameplay.auth.entity.User;
+import com.gameplay.auth.event.SessionInvalidatedEvent;
 import com.gameplay.auth.mapper.RoleMapper;
 import com.gameplay.auth.mapper.UserMapper;
 import com.gameplay.common.exception.BusinessException;
@@ -11,6 +12,7 @@ import com.gameplay.common.exception.ErrorCode;
 import com.gameplay.user.domain.Gender;
 import com.gameplay.user.dto.UpdateProfileRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -29,6 +31,7 @@ public class AccountService {
 
     private final UserMapper userMapper;
     private final RoleMapper roleMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     /** 查询当前用户个人资料（FR-A05、FR-A06 最近登录时间） */
     public UserProfileView getProfile(Long userId) {
@@ -87,10 +90,11 @@ public class AccountService {
      */
     @Transactional
     public void logoutAll(Long userId) {
-        User user = requireUser(userId);
+        requireUser(userId);
         userMapper.update(null, new LambdaUpdateWrapper<User>()
-                .set(User::getTokenVersion, user.getTokenVersion() + 1)
+                .setSql("token_version = token_version + 1")
                 .eq(User::getId, userId));
+        eventPublisher.publishEvent(new SessionInvalidatedEvent(userId));
     }
 
     private User requireUser(Long userId) {

@@ -73,33 +73,55 @@ function onReset() {
 
 // ==================== 启用/禁用（FR-M04） ====================
 
+const pendingStatusIds = ref(new Set<number>())
+
 async function handleDisable(row: UserAdminView) {
-  let reason = ''
+  if (pendingStatusIds.value.has(row.id)) return
+  pendingStatusIds.value = new Set(pendingStatusIds.value).add(row.id)
   try {
-    const result = await ElMessageBox.prompt('禁用后该用户将无法登录，请填写禁用原因（必填）。', `禁用用户 ${row.username}`, {
-      confirmButtonText: '确认禁用',
-      cancelButtonText: '取消',
-      inputPlaceholder: '禁用原因（不超过500字）',
-      inputValidator: (v: string) => (v ?? '').trim().length > 0 || '禁用原因必填',
-    })
-    reason = result.value.trim()
+    let reason = ''
+    try {
+      const result = await ElMessageBox.prompt('禁用后该用户将无法登录，请填写禁用原因（必填）。', `禁用用户 ${row.username}`, {
+        confirmButtonText: '确认禁用',
+        cancelButtonText: '取消',
+        inputPlaceholder: '禁用原因（不超过500字）',
+        inputValidator: (v: string) => (v ?? '').trim().length > 0 || '禁用原因必填',
+      })
+      reason = result.value.trim()
+    } catch {
+      return // 用户取消
+    }
+    await adminSetUserStatus(row.id, 'DISABLED', reason)
+    ElMessage.success('用户已禁用')
+    await load()
   } catch {
-    return // 用户取消
+    // http.ts 已统一提示错误
+  } finally {
+    const next = new Set(pendingStatusIds.value)
+    next.delete(row.id)
+    pendingStatusIds.value = next
   }
-  await adminSetUserStatus(row.id, 'DISABLED', reason)
-  ElMessage.success('用户已禁用')
-  await load()
 }
 
 async function handleEnable(row: UserAdminView) {
+  if (pendingStatusIds.value.has(row.id)) return
+  pendingStatusIds.value = new Set(pendingStatusIds.value).add(row.id)
   try {
-    await ElMessageBox.confirm(`确定恢复用户 ${row.username} 的登录权限吗？`, '启用用户', { type: 'info' })
+    try {
+      await ElMessageBox.confirm(`确定恢复用户 ${row.username} 的登录权限吗？`, '启用用户', { type: 'info' })
+    } catch {
+      return
+    }
+    await adminSetUserStatus(row.id, 'ENABLED')
+    ElMessage.success('用户已启用')
+    await load()
   } catch {
-    return
+    // http.ts 已统一提示错误
+  } finally {
+    const next = new Set(pendingStatusIds.value)
+    next.delete(row.id)
+    pendingStatusIds.value = next
   }
-  await adminSetUserStatus(row.id, 'ENABLED')
-  ElMessage.success('用户已启用')
-  await load()
 }
 
 // ==================== 重置密码（FR-M04+） ====================
@@ -137,7 +159,7 @@ function openResetPassword(row: UserAdminView) {
 }
 
 async function handleResetPassword() {
-  if (!resetTarget.value) return
+  if (!resetTarget.value || resetting.value) return
   const pwd = resetForm.newPassword.trim()
   const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)\S{8,32}$/
   if (!passwordRegex.test(pwd)) {
@@ -167,6 +189,8 @@ async function handleResetPassword() {
       },
     )
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     resetting.value = false
   }
@@ -222,7 +246,7 @@ async function openGrantDemoWallet(row: UserAdminView) {
 }
 
 async function handleGrantDemoWallet() {
-  if (!grantTarget.value) return
+  if (!grantTarget.value || granting.value) return
   if (!grantForm.reason.trim()) {
     ElMessage.warning('请填写发放原因')
     return
@@ -241,6 +265,8 @@ async function handleGrantDemoWallet() {
     grantVisible.value = false
     ElMessage.success(`成功为用户 ${grantTarget.value.username} 发放 ${(res.amountCents / 100).toFixed(2)} 元演示余额`)
     await load()
+  } catch {
+    // http.ts 已统一提示错误
   } finally {
     granting.value = false
   }
@@ -271,11 +297,6 @@ onMounted(() => {
             <el-option label="正常" value="ENABLED" />
             <el-option label="已禁用" value="DISABLED" />
           </el-select>
-        </el-form-item>
-        <el-form-item label="当前可用余额">
-          <span v-if="grantBalanceLoading">加载中…</span>
-          <span v-else-if="grantBalanceCents != null">¥{{ (grantBalanceCents / 100).toFixed(2) }}</span>
-          <span v-else>暂时无法读取</span>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="onSearch">查询</el-button>
@@ -340,11 +361,26 @@ onMounted(() => {
             <el-button size="small" type="warning" plain @click="openResetPassword(row)">
               重置密码
             </el-button>
-            <el-button v-if="row.accountStatus === 'ENABLED'" size="small" type="danger" plain
-              @click="handleDisable(row)">
+            <el-button
+              v-if="row.accountStatus === 'ENABLED'"
+              size="small"
+              type="danger"
+              plain
+              :loading="pendingStatusIds.has(row.id)"
+              :disabled="pendingStatusIds.has(row.id)"
+              @click="handleDisable(row)"
+            >
               禁用
             </el-button>
-            <el-button v-else size="small" type="success" plain @click="handleEnable(row)">
+            <el-button
+              v-else
+              size="small"
+              type="success"
+              plain
+              :loading="pendingStatusIds.has(row.id)"
+              :disabled="pendingStatusIds.has(row.id)"
+              @click="handleEnable(row)"
+            >
               启用
             </el-button>
           </template>
@@ -378,6 +414,11 @@ onMounted(() => {
           <el-tag :type="grantTarget?.accountStatus === 'ENABLED' ? 'success' : 'danger'">
             {{ grantTarget?.accountStatus === 'ENABLED' ? '正常' : '已禁用' }}
           </el-tag>
+        </el-form-item>
+        <el-form-item label="当前可用余额">
+          <span v-if="grantBalanceLoading">加载中…</span>
+          <span v-else-if="grantBalanceCents != null">¥{{ (grantBalanceCents / 100).toFixed(2) }}</span>
+          <span v-else>暂时无法读取</span>
         </el-form-item>
         <el-form-item label="发放金额" required>
           <el-radio-group v-model="grantForm.amountCents">

@@ -56,8 +56,8 @@ export function adminUsers(
 }
 
 /** 启用/禁用用户（FR-M04：禁用必须记录原因） */
-export function adminSetUserStatus(id: number, accountStatus: string, reason?: string): Promise<void> {
-  return request<void>({
+export function adminSetUserStatus(id: number, accountStatus: string, reason?: string): Promise<UserAdminView> {
+  return request<UserAdminView>({
     url: `/admin/users/${id}/status`,
     method: 'put',
     data: { accountStatus, reason },
@@ -241,7 +241,6 @@ export function publicAnnouncementDetail(id: number): Promise<AnnouncementView> 
     method: 'get',
   })
 }
-
 
 // ==================== 演示钱包管理 ====================
 

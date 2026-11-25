@@ -2,6 +2,7 @@ package com.gameplay.user.dto;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -20,6 +21,8 @@ public class UpdateProfileRequest {
 
     /** 头像文件地址（可传空串移除头像） */
     @Size(max = 500)
+    @Pattern(regexp = "^(|(/api/files/|/uploads/|/images/|https?://)[^\\r\\n]*)$",
+            message = "头像地址格式不合法")
     private String avatarUrl;
 
     /** 性别：0未知，1男，2女 */
