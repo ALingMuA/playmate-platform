@@ -1,22 +1,26 @@
-<#
+﻿<#
 .SYNOPSIS
   直接调用阿里云 ECS OpenAPI（V1 签名），用于在不消耗 Workbench 会话的情况下
   通过云助手 RunCommand 在实例上执行命令。凭据从 ~/.workbench/config.json 读取。
 
 .EXAMPLE
+  $env:ECS_INSTANCE_ID = '<YOUR_ECS_INSTANCE_ID>'
   pwsh -File deploy\ecs-runcommand.ps1 -Action DescribeCloudAssistantStatus
-  pwsh -File deploy\ecs-runcommand.ps1 -Action RunCommand -Script "echo hi"
+  pwsh -File deploy\ecs-runcommand.ps1 -InstanceId <YOUR_ECS_INSTANCE_ID> -Action RunCommand -Script "echo hi"
 #>
 param(
   [Parameter(Mandatory = $true)][string]$Action,
-  [string]$InstanceId = '<YOUR_ECS_INSTANCE_ID>',
-  [string]$RegionId = 'cn-hangzhou',
+  [string]$InstanceId = $env:ECS_INSTANCE_ID,
+  [string]$RegionId = $(if ($env:ECS_REGION_ID) { $env:ECS_REGION_ID } else { 'cn-hangzhou' }),
   [string]$Script,
   [string]$InvokeId,
   [int]$Timeout = 60
 )
 
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($InstanceId)) {
+  throw '缺少 ECS 实例 ID：请通过 -InstanceId <实例ID> 参数或 $env:ECS_INSTANCE_ID 环境变量指定'
+}
 
 function Get-PercentEncoded([string]$s) {
   $sb = New-Object System.Text.StringBuilder

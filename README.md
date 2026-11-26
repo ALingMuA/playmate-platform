@@ -41,7 +41,7 @@
   <a href="#-陪玩师入驻与管理链路">🔄 业务链路</a> •
   <a href="#-目录结构">📁 目录结构</a> •
   <a href="#-初始账号演示环境">🔑 演示账号</a> •
-  <a href="#-后端接口已实现">🔌 接口说明</a>
+  <a href="#-后端接口">🔌 接口说明</a>
 </p>
 
 </div>
@@ -54,8 +54,8 @@
 
 - 🎮 **全流程业务闭环**：普通用户 → 资质申请 → 后台审核授权 → 陪玩主页维护 → 服务上架审核 → 档期预约接单 → 履约评价投诉全闭环。
 - 🤖 **智能客服与实时协作**：接入大模型智能客服知识库，支持自动答复、关键词兜底、意图识别转人工，结合 WebSocket（`/ws/cs`）实现低延迟客服会话分流。
-- 🛡 **严密安全与状态机防护**：Spring Security + JWT 鉴权，支持令牌版本机制（修改密码/封禁即时失效）；订单状态机单向跃迁保障资金安全；金额以分计数值精确存储。
-- 📐 **工程化与规范化落地**：模块化单体分包，统一响应格式与错误码体系；前端 Vue 3 + TypeScript 严格类型约束，按路由分区独立解耦。
+- 🛡 **严密安全与状态机防护**：Spring Security + JWT 鉴权，支持令牌版本机制（修改密码/封禁即时失效）；8 态订单有限状态机（覆盖正向履约与售后仲裁流转）保障资金安全；金额以分计数值精确存储。
+- 📐 **工程化与规范化落地**：17 个业务模块 + 3 个基础/基础设施包清晰分层，统一响应格式与错误码体系；前端 Vue 3 + TypeScript 严格类型约束，按路由分区独立解耦。
 
 ---
 
@@ -66,11 +66,11 @@
 | **前端应用** | Vue 3、TypeScript、Vite 6 | 响应式组件化架构、严格类型约束与极致构建速度 |
 | **状态与路由** | Pinia、Vue Router | 全局用户态与权限守卫、分区路由管理 |
 | **UI 组件库** | Element Plus、Tailwind-friendly CSS | 统一现代化设计令牌（Design Tokens）与响应式布局 |
-| **后端架构** | Java 17、Spring Boot 3.5 | 模块化单体分包、RESTful API 规范设计 |
-| **安全认证** | Spring Security、JWT (JSON Web Token) | 无状态身份认证、多角色 RBAC 鉴权与令牌版本控制 |
-| **实时通信** | Spring WebSocket | 客服长连接队列、在线状态心跳与双向即时通讯 |
-| **持久层 & 数据** | MyBatis-Plus、MySQL 8.0 | 高效 ORM、逻辑删除、自增流水、30 张核心业务表 |
-| **项目构建** | Maven、npm、JUnit 5 | 自动化依赖管理与单元/集成测试保障 |
+| **后端架构** | Java 17、Spring Boot 3.5 | 模块化单体分包（17 个业务模块、42 个 Controller、169 个 HTTP 接口） |
+| **安全认证** | Spring Security、JWT (JSON Web Token) | 无状态签名鉴权 + 数据库令牌版本校验、多角色 RBAC 权限控制 |
+| **实时通信** | Spring WebSocket | 客服长连接队列（`/ws/cs`）、一次性握手票据、并发发送保护与双向即时通讯 |
+| **持久层 & 数据** | MyBatis-Plus、MySQL 8.0 | 高效 ORM、逻辑删除、自增流水、37 张核心业务表 |
+| **项目构建** | Maven、npm、JUnit 5、tsx | 自动化依赖管理，24 类 167 个 JUnit 5 用例与前端 5 层 84 条契约测试（含 25 条对抗校验） |
 
 ---
 
@@ -80,36 +80,48 @@
 ├── 需求分析说明书.md            需求分析（FR 编号与业务用例）
 ├── 概要设计说明书.md            总体设计（架构、模块、路由分区、接口分组）
 ├── 详细设计说明书.md            物理 DDL、接口契约、时序图、错误码定义
-├── tests/                       根目录 E2E 快捷测试入口（转发至 frontend/tests/e2e/）
+├── deploy/                      ECS 一键部署脚本、systemd 与 Nginx 配置模板
+├── tests/e2e/                   根目录快捷测试入口（转发至 frontend/tests/e2e/）
 ├── sql/
-│   ├── schema.sql              30 张表完整 DDL（含建库语句）
-│   └── data.sql                系统种子数据：角色定义、初始管理员、基础游戏与标签（幂等）
-├── backend/                    Spring Boot 后端（模块化单体工程）
-│   └── src/main/java/com/gameplay/
-│       ├── common              统一响应封装、错误码、状态机模型、全局异常处理
-│       ├── auth                用户注册、登录、JWT 签发与校验、令牌版本、密码管理   ✅
-│       ├── user                个人资料维护、头像上传、账号安全                    ✅
-│       ├── catalog             游戏类目、服务分类、技能标签（三级目录）             ✅
-│       ├── companion           陪玩师入驻申请、主页维护、服务项管理、档期与收益结算   ✅
-│       ├── order               订单创建、模拟支付、履约交付、自动确认与超时取消      ✅
-│       ├── wallet              用户虚拟钱包、收支流水记录                          ✅
-│       ├── review              双向订单评价、服务投诉与平台仲裁                    ✅
-│       ├── file                本地安全文件存储与访问                             ✅
-│       ├── customer_service    客服排班账号、会话分配、消息流转、会话队列           ✅
-│       ├── ai                  智能知识库检索、大模型应答、意图分析转人工           ✅
-│       ├── announcement        平台全员公告广播                                   ✅
-│       ├── notification        站内系统通知与消息提醒                             ✅
-│       ├── favorite            陪玩师关注与收藏夹                                 ✅
-│       ├── audit               操作审计追踪日志                                   ✅
-│       ├── admin               综合管理后台（资质审核、用户管控、平台数据看板）      ✅
-│       └── infrastructure/websocket 客服实时通讯端点（/ws/cs）                     ✅
-└── frontend/                   Vue 3 现代化前端工程
-    └── src/
-        ├── router              用户端 / 陪玩师端(/companion) / 客服(/cs) / 管理后台(/admin)
-        ├── stores              Pinia 状态仓库（登录凭证、角色权限、全局配置）
-        ├── api                 Axios 统一拦截封装与业务接口定义
-        ├── components          工作台公共布局（WorkbenchLayout）与公用组件
-        └── views               各分区业务页面（用户端全站 + 陪玩师五页 + 客服 + 后台）
+│   ├── schema.sql               37 张表完整 DDL（含建库语句）
+│   ├── data.sql                 系统种子数据：角色定义、初始管理员、基础游戏与标签（幂等）
+│   ├── data-demo.sql            本地演示扩展数据（严禁在生产环境导入）
+│   └── migrations/              增量 SQL 迁移脚本
+├── backend/                     Spring Boot 后端（模块化单体工程）
+│   └── src/
+│       ├── main/java/com/gameplay/
+│       │   ├── common           统一响应封装、错误码、8 态订单状态机、全局异常处理
+│       │   ├── config           Spring Security、MyBatis-Plus 等全局配置
+│       │   ├── auth             用户注册、登录、JWT 签发与校验、令牌版本、密码管理   ✅
+│       │   ├── user             个人资料维护、头像上传、账号安全                    ✅
+│       │   ├── catalog          游戏类目、服务分类、技能标签（三级目录）             ✅
+│       │   ├── companion        陪玩师入驻申请、主页维护、服务项管理、28 天档期与收益 ✅
+│       │   ├── order            订单创建、模拟支付、履约交付、自动确认与超时取消      ✅
+│       │   ├── wallet           用户虚拟钱包、收支流水记录                          ✅
+│       │   ├── coupon           优惠券模板配置、领券与下单核销/退款退还             ✅
+│       │   ├── activity         平台运营活动配置与领券联动                          ✅
+│       │   ├── review           双向订单评价、服务投诉与平台仲裁                    ✅
+│       │   ├── file             本地安全文件存储与受控访问                          ✅
+│       │   ├── customer_service 客服排班账号、会话分配、消息流转、WS 票据与队列     ✅
+│       │   ├── ai               智能知识库检索、大模型应答、意图分析转人工、异步任务 ✅
+│       │   ├── announcement     平台全员公告广播                                    ✅
+│       │   ├── notification     站内系统通知与消息提醒                              ✅
+│       │   ├── favorite         陪玩师关注与收藏夹                                  ✅
+│       │   ├── audit            操作审计追踪日志                                    ✅
+│       │   ├── admin            综合管理后台（资质审核、用户管控、平台数据看板）      ✅
+│       │   └── infrastructure/  基础设施组件（含 websocket /ws/cs 与 schedule 定时扫单）✅
+│       └── test/java/com/gameplay/
+│                                24 类 167 个 JUnit 5 用例（真实 MySQL 事务回滚 + 非回滚异步 + Mockito 单测）
+└── frontend/                    Vue 3 现代化前端工程
+    ├── src/
+    │   ├── router               用户端 / 陪玩师端(/companion) / 客服(/cs) / 管理后台(/admin)
+    │   ├── stores               Pinia 状态仓库（登录凭证、角色权限、通知状态）
+    │   ├── api                  Axios 统一拦截封装与业务接口定义
+    │   ├── components           工作台公共布局（WorkbenchLayout）与公用组件
+    │   ├── composables          组合式逻辑复用（收藏、档期等）
+    │   ├── utils                工具函数（进度、档期计算、WebSocket 断线重连封装）
+    │   └── views                各分区业务页面（用户端 + 陪玩师 + 客服 + 后台）
+    └── tests/e2e/               消息中心 5 层 84 条（tsx + node:assert）契约自动化测试及 25 条对抗校验
 ```
 
 ---
@@ -175,13 +187,18 @@ npm run dev
 ### 4. 运行质量与集成测试
 
 ```bash
+# 后端单元测试与集成测试（24 类 167 个 JUnit 5 用例）
 cd backend
 mvn test
+
+# 前端消息中心五层自动化契约测试（84 条）及对抗校验（25 条）
+node tests/e2e/run-all.mjs
+node tests/e2e/run-challenger.mjs
 ```
 
 > [!TIP]
-> - 后端集成测试（如 `AuthFlowTest`）依托本地真实 MySQL 数据库运行，测试数据在事务完成后全部自动回滚，不污染生产/演示数据。
-> - 前端已配置完整 TypeScript 类型检查，部署前可执行 `npm run build` 进行生产静态校验与代码分包打包。
+> - **后端测试体系（24 类 167 个 JUnit 5 用例）**：包含 **14 类 124 个** `@SpringBootTest + @Transactional` 真实 MySQL 事务回滚集成测试（测试数据在事务完成后自动回滚，不污染本地数据）、**2 类 7 个**非回滚集成测试（含 `AiReplyTaskFlowTest` 跨线程异步外调流程验证），以及 **8 类 36 个** Mockito 单元测试。
+> - **前端契约自动化与类型构建**：`frontend/tests/e2e/`（可通过根目录 `tests/e2e/` 或 `frontend` 下 `npm run test:e2e` 运行）基于 `tsx + node:assert`、内存路由与 HTTP Mock 对统一消息中心（`/messages`）执行 5 层 84 条契约自动化测试及 25 条独立对抗校验；部署前可执行 `npm run build`（含 `vue-tsc -b` 严格类型校验与 Vite 分包打包）。
 
 ---
 
@@ -189,7 +206,10 @@ mvn test
 
 | 账号 | 初始密码 | 角色身份 | 场景权限与说明 |
 |---|---|---|---|
-| `admin` | `Admin@123456` | **系统管理员** | 平台全功能权限，类目维护、资质入驻审核、服务审核、用户管控与仲裁 |
+| `admin` | `Admin@123456`（仅本地/演示种子数据，见 `sql/data.sql`） | **系统管理员** | 平台全功能权限，类目维护、资质入驻审核、服务审核、用户管控与仲裁 |
+
+> [!WARNING]
+> **生产安全提示**：上述 `admin / Admin@123456` 严格仅为本地开发与演示环境的预置种子数据（定义于 `sql/data.sql`）。**生产环境部署上线后务必立即登录并修改管理员密码。**
 
 > [!TIP]
 > **演示全流程体验推荐**：
@@ -202,9 +222,9 @@ mvn test
 
 ## 🔌 后端接口
 
-系统完整涵盖客服会话与实时消息（`/api/customer-service`）、大模型知识库（`/api/admin/ai`）、评价管理（`/api/reviews`）、投诉仲裁（`/api/complaints`）、文件存储（`/api/files`）、公告中心（`/api/announcements`）、系统通知（`/api/notifications`）及后台运营管理端。
+系统共实现 **42 个 Controller、169 个 HTTP 接口**与 **1 个 WebSocket 实时端点（`/ws/cs`）**，涵盖前台核心业务（认证、目录、陪玩师、档期、订单、钱包、优惠券、运营活动、评价投诉、文件、公告通知、收藏）、管理后台审核与运维管控、客服工作台（`/api/customer-service`）、WS 一次性握手票据接口（`POST /api/customer-service/ws-ticket`）及大模型知识库管理（`/api/admin/ai`）。
 
-所有接口权限均由 Spring Security 注解 `@PreAuthorize` 严格鉴权。
+所有受保护接口权限均由 Spring Security 注解 `@PreAuthorize` 严格鉴权。
 
 ### 认证与账号模块 `/api/auth`
 

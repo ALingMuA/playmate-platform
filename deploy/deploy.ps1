@@ -12,24 +12,31 @@
   Forbidden.SessionLimit，且 35MB 的 jar 走 OSS 中转明显更慢。
 
 .EXAMPLE
+  $env:DEPLOY_SERVER = '<YOUR_ECS_IP>'
+  $env:DEPLOY_SSH_KEY = '<YOUR_SSH_KEY_PATH>'
   pwsh -File deploy\deploy.ps1                 # 全量构建并部署
   pwsh -File deploy\deploy.ps1 -SkipBuild      # 用现有产物直接部署
+  pwsh -File deploy\deploy.ps1 -Server <YOUR_ECS_IP> -SshKey <YOUR_SSH_KEY_PATH>
 #>
 param(
-  [string]$Server = '<YOUR_ECS_IP>',
-  [string]$SshKey = (Join-Path $env:USERPROFILE '.ssh\<YOUR_SSH_KEY>'),
+  [string]$Server = $env:DEPLOY_SERVER,
+  [string]$SshKey = $(if ($env:DEPLOY_SSH_KEY) { $env:DEPLOY_SSH_KEY } else { Join-Path $env:USERPROFILE '.ssh\id_ed25519' }),
   [string]$Maven = $(
     $candidates = @(
-      (Join-Path $env:USERPROFILE 'tools\apache-maven-3.9.16\bin\mvn.cmd'),
-      '<LOCAL_MAVEN_CMD>'
-    )
-    $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+      $env:MAVEN_CMD,
+      (Join-Path $env:USERPROFILE 'tools\apache-maven-3.9.16\bin\mvn.cmd')
+    ) | Where-Object { $_ -and (Test-Path $_) }
+    $found = $candidates | Select-Object -First 1
     if ($found) { $found } else { 'mvn.cmd' }
   ),
   [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($Server)) {
+  throw '缺少目标服务器地址：请通过 -Server <IP/域名> 参数或 $env:DEPLOY_SERVER 环境变量指定'
+}
+
 $repo = Split-Path -Parent $PSScriptRoot
 $staging = Join-Path $PSScriptRoot '.staging'
 $envFile = Join-Path $PSScriptRoot 'gameplay.env'
@@ -43,7 +50,7 @@ $target = "root@$Server"
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
 if (-not (Test-Path $envFile)) { throw "缺少 $envFile（可由 gameplay.env.example 复制并填写）" }
-if (-not (Test-Path $SshKey)) { throw "找不到 SSH 私钥: $SshKey" }
+if (-not (Test-Path $SshKey)) { throw "找不到 SSH 私钥: $SshKey（可通过 -SshKey 参数或 `$env:DEPLOY_SSH_KEY 指定）" }
 
 if (-not $SkipBuild) {
   Step '构建后端 jar'
